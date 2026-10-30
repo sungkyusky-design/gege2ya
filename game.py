@@ -14,10 +14,13 @@
     python game.py
 """
 
+import asyncio
 import math
 import random
 
 import pygame
+
+from browser import fit_canvas
 
 # ---------------------------------------------------------------
 # 게임 설정값 (숫자를 바꾸면 난이도가 바뀌어요)
@@ -274,35 +277,40 @@ class Game:
         screen.blit(image, image.get_rect(center=(WIDTH / 2, y)))
 
 
-def main():
-    pygame.init()
+async def run():
+    """게임 한 판 실행. ESC를 누르면 끝나요.
+
+    창을 닫으면 False, ESC로 끝내면 True를 돌려줘요 (메뉴로 돌아갈지 판단용).
+    """
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Don't Look - SCP-096")
+    fit_canvas()
     clock = pygame.time.Clock()
     font = pygame.font.Font(None, 30)
     big_font = pygame.font.Font(None, 64)
     game = Game()
 
-    running = True
-    while running:
+    while True:
         # dt = 지난 프레임부터 흐른 시간(초). 컴퓨터 속도와 상관없이 똑같이 움직이게 해줘요.
-        dt = clock.tick(FPS) / 1000
+        dt = min(0.05, clock.tick(FPS) / 1000)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
+                return False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    running = False
+                    return True
                 elif event.key == pygame.K_r and game.game_over:
                     game.reset()
 
         game.update(dt, pygame.key.get_pressed())
         game.draw(screen, font, big_font)
         pygame.display.flip()
-
-    pygame.quit()
+        # 웹 브라우저에서 화면이 멈추지 않도록 잠깐 차례를 넘겨줘요
+        await asyncio.sleep(0)
 
 
 if __name__ == "__main__":
-    main()
+    pygame.init()
+    asyncio.run(run())
+    pygame.quit()

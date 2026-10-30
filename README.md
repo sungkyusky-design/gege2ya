@@ -2,14 +2,28 @@
 
 Python + pygame으로 만든 게임들입니다.
 
+## 🎮 브라우저에서 바로 하기
+
+**https://sungkyusky-design.github.io/gege2ya/**
+
+설치 없이 링크만 열면 돼요. 처음 열 때 로딩이 조금 걸리고, 화면을 한 번 클릭하면 시작해요.
+`main` 브랜치에 코드가 올라오면 웹 버전이 자동으로 다시 만들어져요 (`.github/workflows/deploy-web.yml`).
+
+## 💻 내 컴퓨터에서 하기
+
 ```bash
 pip install -r requirements.txt
+python main.py
 ```
+
+`main.py`를 실행하면 게임 선택 메뉴가 나와요. 게임 하나만 바로 하고 싶으면:
 
 | 게임 | 실행 |
 | --- | --- |
 | 쉿, 쳐다보지 마! (SCP-096 추격) | `python game.py` |
 | 스트라이크 존 (1인칭 총게임) | `python shooter.py` |
+
+게임 중에 ESC를 누르면 메뉴로 돌아가요.
 
 ---
 
