@@ -43,18 +43,22 @@ def check_for_update():
     """최신 버전 번호를 받아 와요. 인터넷이 안 되면 조용히 넘어가요.
     (메뉴가 멈추지 않도록 따로 돌아가는 작업(스레드)에서 실행해요)"""
     global latest_build
+    import ssl
+    import urllib.request
+    contexts = []
     try:
-        import ssl
-        import urllib.request
-        try:
-            import certifi                      # 앱 안에 들어 있는 인증서 목록
-            context = ssl.create_default_context(cafile=certifi.where())
-        except ImportError:
-            context = ssl.create_default_context()
-        with urllib.request.urlopen(VERSION_URL, timeout=5, context=context) as response:
-            latest_build = response.read().decode().strip()
-    except Exception:
+        import certifi                          # 앱 안에 들어 있는 인증서 목록
+        contexts.append(ssl.create_default_context(cafile=certifi.where()))
+    except ImportError:
         pass
+    contexts.append(ssl.create_default_context())   # 컴퓨터에 깔린 인증서 목록 (회사/학교 네트워크용)
+    for context in contexts:
+        try:
+            with urllib.request.urlopen(VERSION_URL, timeout=5, context=context) as response:
+                latest_build = response.read().decode().strip()
+            return
+        except Exception:
+            continue
 
 
 def update_available():
