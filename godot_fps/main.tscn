@@ -1,6 +1,7 @@
 [gd_scene format=3]
 
 [ext_resource type="PackedScene" path="res://player.tscn" id="1"]
+[ext_resource type="PackedScene" path="res://enemy.tscn" id="2"]
 
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat"]
 sky_top_color = Color(0.32, 0.48, 0.75, 1)
@@ -607,7 +608,40 @@ shape = SubResource("BarrelShape")
 [node name="Player" parent="." instance=ExtResource("1")]
 position = Vector3(0, 0, 0)
 
+[node name="Enemies" type="Node3D" parent="."]
+
+[node name="Enemy1" parent="Enemies" instance=ExtResource("2")]
+position = Vector3(-6, 0, -14)
+rotation = Vector3(0, 0, 0)
+
+[node name="Enemy2" parent="Enemies" instance=ExtResource("2")]
+position = Vector3(8, 0, -9)
+rotation = Vector3(0, 1, 0)
+
+[node name="Enemy3" parent="Enemies" instance=ExtResource("2")]
+position = Vector3(20, 0, 0)
+rotation = Vector3(0, 2, 0)
+
+[node name="Enemy4" parent="Enemies" instance=ExtResource("2")]
+position = Vector3(-20, 0, 2)
+rotation = Vector3(0, 3, 0)
+
+[node name="Enemy5" parent="Enemies" instance=ExtResource("2")]
+position = Vector3(6, 0, 22)
+rotation = Vector3(0, 4, 0)
+
+[node name="Enemy6" parent="Enemies" instance=ExtResource("2")]
+position = Vector3(20, 0, 20)
+rotation = Vector3(0, 5, 0)
+
 [node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Hurt" type="ColorRect" parent="HUD"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+color = Color(0.6, 0, 0, 0)
 
 [node name="Crosshair" type="Label" parent="HUD"]
 anchors_preset = 8
@@ -624,6 +658,69 @@ text = "+"
 horizontal_alignment = 1
 vertical_alignment = 1
 
+[node name="Hitmarker" type="Label" parent="HUD"]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -20.0
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+pivot_offset = Vector2(20, 20)
+theme_override_font_sizes/font_size = 30
+text = "X"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Health" type="Label" parent="HUD"]
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 24.0
+offset_top = -70.0
+offset_right = 300.0
+offset_bottom = -16.0
+theme_override_colors/font_color = Color(0.5, 1, 0.5, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 40
+text = "+ 100"
+
+[node name="Info" type="Label" parent="HUD"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -360.0
+offset_top = 12.0
+offset_right = -20.0
+offset_bottom = 50.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 26
+text = ""
+horizontal_alignment = 2
+
+[node name="Message" type="Label" parent="HUD"]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -500.0
+offset_top = -140.0
+offset_right = 500.0
+offset_bottom = -60.0
+theme_override_colors/font_color = Color(1, 0.85, 0.3, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 8
+theme_override_font_sizes/font_size = 44
+text = ""
+horizontal_alignment = 1
+
 [node name="Help" type="Label" parent="HUD"]
 offset_left = 16.0
 offset_top = 12.0
@@ -631,4 +728,4 @@ offset_right = 900.0
 offset_bottom = 70.0
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 6
-text = "WASD 이동   Shift 달리기   Space 점프   C 앉기\n화살표/마우스 시점   F/클릭 사격   E 정조준   ESC 마우스 풀기"
+text = "WASD 이동   Shift 달리기   Space 점프   C 앉기   Enter 전체 화면\n화살표/마우스 시점   F/클릭 사격   E 정조준   ESC 마우스 풀기"
