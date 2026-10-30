@@ -27,10 +27,13 @@
     벽까지의 거리를 재요. 가까운 벽은 길게, 먼 벽은 짧게 그리면 3D처럼 보여요.
 """
 
+import asyncio
 import math
 import random
 
 import pygame
+
+from browser import fit_canvas
 
 # ---------------------------------------------------------------
 # 화면 / 게임 설정값
@@ -574,10 +577,14 @@ class Game:
         screen.blit(image, image.get_rect(center=(WIDTH / 2, y)))
 
 
-def main():
-    pygame.init()
+async def run():
+    """게임 한 판 실행. ESC를 누르면 끝나요.
+
+    창을 닫으면 False, ESC로 끝내면 True를 돌려줘요 (메뉴로 돌아갈지 판단용).
+    """
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Strike Zone")
+    fit_canvas()
     clock = pygame.time.Clock()
     font = pygame.font.Font(None, 30)
     big_font = pygame.font.Font(None, 56)
@@ -589,25 +596,35 @@ def main():
 
     game = Game()
     running = True
+    closed = False             # 창을 닫았는지 여부
     while running:
         dt = min(0.05, clock.tick(FPS) / 1000)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
+                running, closed = False, True
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.key == pygame.K_r and game.game_over:
                     game.reset()
+        if not running:
+            break
 
         mouse_dx = pygame.mouse.get_rel()[0]
         mouse_down = pygame.mouse.get_pressed()[0]
         game.update(dt, pygame.key.get_pressed(), mouse_dx, mouse_down)
         game.draw(screen, font, big_font)
         pygame.display.flip()
+        # 웹 브라우저에서 화면이 멈추지 않도록 잠깐 차례를 넘겨줘요
+        await asyncio.sleep(0)
 
-    pygame.quit()
+    # 마우스 원래대로
+    pygame.event.set_grab(False)
+    pygame.mouse.set_visible(True)
+    return not closed
 
 
 if __name__ == "__main__":
-    main()
+    pygame.init()
+    asyncio.run(run())
+    pygame.quit()
