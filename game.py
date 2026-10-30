@@ -20,7 +20,7 @@ import random
 
 import pygame
 
-from browser import fit_canvas
+from browser import prepare_window
 
 # ---------------------------------------------------------------
 # 게임 설정값 (숫자를 바꾸면 난이도가 바뀌어요)
@@ -284,7 +284,7 @@ async def run():
     """
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Don't Look - SCP-096")
-    fit_canvas()
+    prepare_window()
     clock = pygame.time.Clock()
     font = pygame.font.Font(None, 30)
     big_font = pygame.font.Font(None, 64)

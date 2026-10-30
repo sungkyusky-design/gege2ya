@@ -28,8 +28,8 @@
     1 ~ 6            : 무기 바꾸기 (소총/권총/저격총/산탄총/기관단총/로켓) = 휠
     Q                : 방금 쓰던 무기로
     R                : 재장전
-    F3               : FPS와 화면 선명도 표시
-    F11              : 전체 화면 (컴퓨터에서 실행할 때)
+    P 또는 F3        : FPS와 화면 선명도 표시
+    Enter 또는 F11   : 전체 화면 (컴퓨터에서 실행할 때)
     ESC              : 종료 (메뉴로)
 
 팁:
@@ -57,7 +57,7 @@ import time
 
 import pygame
 
-from browser import fit_canvas
+from browser import prepare_window
 
 # ---------------------------------------------------------------
 # 화면 / 게임 설정값
@@ -920,7 +920,7 @@ class Game:
         self.set_col_w(START_COL_W)
         self.fire_was_down = False
         self.aim_on = False        # E 키로 켠 정조준
-        self.show_fps = False      # F3
+        self.show_fps = False      # P 또는 F3
         self.fps = 0.0
         self.reset()
 
@@ -1032,7 +1032,7 @@ class Game:
 
     # ----- 입력 -----
     def handle_event(self, event):
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_F3:
+        if event.type == pygame.KEYDOWN and event.key in (pygame.K_p, pygame.K_F3):
             self.show_fps = not self.show_fps
         if self.game_over:
             return
@@ -1600,7 +1600,7 @@ class Game:
 
         if self.hint_timer > 0 and not self.game_over:
             hints = ["WASD move   ARROWS look   SPACE jump   F fire   E aim   Z zoom   R reload",
-                     "G grenade   V knife   1-6 weapon   Q last weapon   F3 fps   F11 fullscreen"]
+                     "G grenade   V knife   1-6 weapon   Q last weapon   P fps   ENTER fullscreen"]
             for i, hint in enumerate(hints):
                 self.center_text(screen, self.small_font, hint, WHITE, HEIGHT - (82 - i * 20) * UI)
         if self.banner_timer > 0:
@@ -1646,14 +1646,14 @@ async def run():
 
     창을 닫으면 False, ESC로 끝내면 True를 돌려줘요 (메뉴로 돌아갈지 판단용).
     """
-    # 컴퓨터에서는 SCALED: F11로 전체 화면을 켜면 화면 크기에 맞춰 늘려줘요
+    # 컴퓨터에서는 SCALED: Enter(또는 F11)로 전체 화면을 켜면 화면 크기에 맞춰 늘려줘요
     # (지원하지 않는 컴퓨터면 보통 창으로 열어요)
     try:
         screen = pygame.display.set_mode((WIDTH, HEIGHT), 0 if IN_BROWSER else pygame.SCALED)
     except pygame.error:
         screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Strike Zone: Neon Beach")
-    fit_canvas()
+    prepare_window()
     clock = pygame.time.Clock()
 
     # 마우스를 창 안에 가두고 커서 숨기기 (FPS 게임처럼)
@@ -1674,7 +1674,8 @@ async def run():
                 running = False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_r and game.game_over:
                 game.reset()
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_F11 and not IN_BROWSER:
+            elif (event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_F11)
+                  and not IN_BROWSER):
                 try:
                     pygame.display.toggle_fullscreen()
                 except pygame.error:

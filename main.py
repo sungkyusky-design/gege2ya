@@ -15,7 +15,7 @@ import pygame
 
 import game
 import shooter
-from browser import fit_canvas
+from browser import prepare_window
 
 WIDTH, HEIGHT = 960, 600
 
@@ -55,7 +55,7 @@ async def main():
     while True:
         screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("Game Select")
-        fit_canvas()
+        prepare_window()
         chosen = None
 
         while chosen is None:
