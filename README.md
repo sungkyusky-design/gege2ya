@@ -232,6 +232,11 @@ GitHub 저장소 페이지에서 초록색 **Code** 버튼 → **Download ZIP** 
 
 ---
 
+## 🧪 Strike Zone 3D (Godot, 만드는 중)
+
+총게임을 진짜 3D 엔진(Godot)으로 옮기는 연습 프로젝트예요. `godot_fps` 폴더에 있어요.
+Godot 설치부터 실행까지는 [godot_fps/README.md](godot_fps/README.md)를 보세요.
+
 ## 쉿, 쳐다보지 마! (SCP-096 추격 게임)
 
 얌전히 있는 SCP-096의 얼굴을 손전등으로 비추면… 미친 듯이 쫓아옵니다.
