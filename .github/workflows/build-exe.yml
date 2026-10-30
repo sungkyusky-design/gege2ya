@@ -1,0 +1,38 @@
+# main 브랜치에 코드가 올라오면 Windows용 Games.exe를 만들어서
+# Releases(다운로드 페이지)의 "latest"에 올려요.
+# 받는 곳: https://github.com/sungkyusky-design/gege2ya/releases/latest
+name: Build Windows exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-exe
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build Games.exe
+        run: |
+          pip install pygame pyinstaller
+          pyinstaller --onefile --windowed --name Games main.py
+      - name: Publish to the "latest" release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest dist/Games.exe \
+            --title "게임 모음 (Windows)" \
+            --notes "Games.exe를 받아서 더블클릭하면 바로 실행돼요. Python 설치가 필요 없어요. (빌드: ${GITHUB_SHA::7})"
