@@ -1,10 +1,13 @@
 """
 스트라이크 존 - 1인칭 총게임 (레이캐스팅 FPS)
 
-80년대 해변 도시를 무대로 라운드마다 맵이 바뀌어요.
-    네온 비치 (노을) : 해변, 호텔 안뜰, 오피스 골목, 주차장, 공원, 공사장, 시장 골목
-    다운타운 (밤)    : 마천루, 네온 간판이 빛나는 광장, 주차장, 좁은 골목
-    하버 (새벽)      : 컨테이너 미로, 크레인, 창고, 바다로 뻗은 부두
+두 가지 모드:
+    캠페인    : 라운드마다 맵이 바뀌어요 (작고 빠른 맵 9개). 라운드가 오를수록 적이 강해져요.
+    좀비 모드 : 핏빛 달이 뜬 마을에서 좀비 웨이브를 버텨요. 점수로 탄약과 총 강화를 사요.
+
+시작 전에 로드아웃(주무기 / 보조무기 / 퍼크)을 골라요.
+    퍼크: HEAVY ROUNDS 피해+25%, QUICK HANDS 재장전 빠르게, LIGHTFOOT 조용한 발걸음,
+          IRON SKIN 체력 130, SCAVENGER 탄약 1.5배
 
 규칙:
     - 적을 모두 쓰러뜨리면 라운드 승리. 라운드가 올라갈수록 적이 많아지고 종류도 늘어나요.
@@ -32,8 +35,8 @@
     Z                : 저격총 조준경 배율 (3 → 6 → 12배) = 조준경을 보면서 휠
     G                : 수류탄 던지기
     V                : 칼 공격
-    1 ~ 9            : 무기 바꾸기 = 휠
-                       (소총/권총/저격총/산탄총/기관단총/로켓/기관총/점사 소총/지정사수 소총)
+    1, 2             : 주무기 / 보조무기 = 휠
+    B / U            : 좀비 모드 상점 - 탄약 가득(500점) / 들고 있는 총 강화(2500점)
     X                : 킬스트릭 쓰기 (죽지 않고 3킬 레이더 / 5킬 공습 / 7킬 자동 포탑)
     Q                : 방금 쓰던 무기로
     R                : 재장전
@@ -44,7 +47,9 @@
     ESC              : 종료 (메뉴로)
 
 시작 화면:
-    Enter : 새 게임    C : 이어하기    T : 해상도 바꾸기 (컴퓨터에서)
+    Enter : 캠페인    Z : 좀비 모드    C : 이어하기    T : 해상도 바꾸기 (컴퓨터에서)
+로드아웃 화면:
+    ↑↓ : 줄 고르기    ←→ : 바꾸기    Enter : 시작    ESC : 뒤로
 
 점수와 계급:
     처치 +100, 헤드샷·칼 +50, 연속 처치 메달(DOUBLE / TRIPLE KILL), 라운드 클리어 +250.
@@ -66,6 +71,7 @@ import math
 import random
 import sys
 import time
+from collections import deque
 
 import pygame
 
@@ -163,6 +169,31 @@ DROP_CHANCE = 0.8                 # 적이 상자를 떨어뜨릴 확률
 DROP_WEIGHTS = {"ammo": 5, "health": 3, "grenade": 2}
 HEALTH_PACK = 35
 
+# 로드아웃: 시작하기 전에 주무기 / 보조무기 / 퍼크(특수 능력)를 골라요
+PRIMARIES = ["RIFLE", "BURST", "SMG", "SHOTGUN", "LMG", "DMR", "SNIPER"]
+SECONDARIES = ["PISTOL", "ROCKET"]
+# 퍼크: (이름, 한국어 설명, 영어 설명)
+PERKS = [
+    ("HEAVY ROUNDS", "총알 피해 +25%", "Bullets deal 25% more damage"),
+    ("QUICK HANDS", "재장전·무기 교체 40% 빠르게", "Reload and swap 40% faster"),
+    ("LIGHTFOOT", "이동 +12%, 발소리를 적이 못 들어요", "Move 12% faster, enemies can't hear your steps"),
+    ("IRON SKIN", "최대 체력 130", "Max health 130"),
+    ("SCAVENGER", "탄약 1.5배, 수류탄 +2", "1.5x ammo, +2 grenades"),
+]
+DEFAULT_LOADOUT = dict(primary="RIFLE", secondary="PISTOL", perk="HEAVY ROUNDS")
+# 무기 설명: 이름 -> (한국어, 영어)
+WEAPON_INFO = {
+    "RIFLE": ("돌격소총 - 균형 잡힌 연사", "Assault rifle - balanced full auto"),
+    "BURST": ("점사 소총 - 한 번에 3발, 정확해요", "Burst rifle - 3 round bursts, accurate"),
+    "SMG": ("기관단총 - 아주 빠른 연사, 가까운 거리", "SMG - very fast fire, close range"),
+    "SHOTGUN": ("산탄총 - 가까이서 한 방", "Shotgun - one shot up close"),
+    "LMG": ("기관총 - 탄창 100발, 무거워요", "LMG - 100 round box, heavy"),
+    "DMR": ("지정사수 소총 - 단발, 강하고 정확해요", "Marksman rifle - strong single shots"),
+    "SNIPER": ("저격총 - 조준경, 몸통도 한 방", "Sniper - scope, one shot kills"),
+    "PISTOL": ("권총 - 가볍고 빠르게 꺼내요", "Pistol - light and quick"),
+    "ROCKET": ("로켓 - 넓은 폭발", "Rocket launcher - big explosion"),
+}
+
 # 무기 목록
 #   auto   : 꾹 누르면 연사되는지
 #   delay  : 다음 발까지 걸리는 시간(초)
@@ -195,6 +226,8 @@ WEAPONS = [
     dict(name="DMR", auto=False, delay=0.25, mag=15, reserve=60, body=55, head=150,
          spread=2, kick=22, reload=2.0, pellets=1, ads=2.2, scope=False, projectile=False),
 ]
+
+WEAPON_BY_NAME = {spec["name"]: spec for spec in WEAPONS}
 
 # 적 종류
 #   hp       : 체력            speed : 이동 속도        sight : 플레이어를 알아보는 거리
@@ -241,10 +274,47 @@ ENEMY_TYPES = {
                  height=1.15, width=0.72, throw=(4, 6), throw_range=(3, 12),
                  look=dict(uniform=(240, 240, 235), vest=(240, 120, 170), pants=(235, 235, 230),
                            head="slick", gun=36)),
+    # 좀비 모드: 총 대신 가까이 와서 할퀴어요. melee = (피해, 할퀴는 간격 초)
+    "ZOMBIE": dict(hp=80, speed=1.25, sight=99, reaction=0, keep=0, range=0,
+                   fire=(1, 1), damage=(0, 0), accuracy=0, falloff=0,
+                   height=0.88, width=0.46, melee=(14, 1.0),
+                   look=dict(head="zombie", skin=(125, 150, 105), shirt=(95, 85, 75), pants=(55, 50, 62),
+                             eyes=(255, 225, 90))),
+    "RUNNER": dict(hp=50, speed=2.5, sight=99, reaction=0, keep=0, range=0,
+                   fire=(1, 1), damage=(0, 0), accuracy=0, falloff=0,
+                   height=0.84, width=0.4, melee=(10, 0.7),
+                   look=dict(head="zombie", skin=(150, 140, 120), shirt=(120, 40, 40), pants=(40, 45, 70),
+                             eyes=(255, 60, 50), thin=True)),
+    "BRUTE": dict(hp=650, speed=0.85, sight=99, reaction=0, keep=0, range=0,
+                  fire=(1, 1), damage=(0, 0), accuracy=0, falloff=0,
+                  height=1.12, width=0.72, melee=(32, 1.4),
+                  look=dict(head="zombie", skin=(95, 120, 90), shirt=(60, 55, 50), pants=(40, 38, 45),
+                            eyes=(255, 120, 40), big=True)),
 }
+ZOMBIE_KINDS = ("ZOMBIE", "RUNNER", "BRUTE")
+ZOMBIE_POINTS = dict(hit=10, kill=60, headshot=100, knife=130, wave=250)
+ZOMBIE_SHOP = dict(ammo=500, upgrade=2500)     # B: 탄약 가득, U: 들고 있는 총 강화
+
+
+def scaled_type(kind, skill):
+    """라운드가 올라갈수록 적이 강해져요 (skill 1.0 = 기본, 최대 2.0).
+    더 정확하게, 더 빨리 반응하고, 더 자주 쏘고, 조금 더 단단해져요."""
+    t = dict(ENEMY_TYPES[kind])
+    if skill > 1.0:
+        up = skill - 1.0
+        t["accuracy"] = min(0.95, t["accuracy"] * (1 + up * 0.6))
+        t["reaction"] = t["reaction"] / skill
+        t["fire"] = (t["fire"][0] / skill ** 0.5, t["fire"][1] / skill ** 0.5)
+        t["damage"] = tuple(round(d * (1 + up * 0.4)) for d in t["damage"])
+        t["speed"] = t["speed"] * (1 + up * 0.25)
+        t["sight"] = t["sight"] + up * 5
+        t["hp"] = round(t["hp"] * (1 + up * 0.3))
+        if "melee" in t:
+            t["melee"] = (round(t["melee"][0] * (1 + up * 0.4)), t["melee"][1])
+    return t
 
 # ---------------------------------------------------------------
-# 맵 6개: 라운드마다 바뀌어요 (1 → 2 → ... → 6 → 1 ...)
+# 맵: 캠페인은 라운드마다 바뀌어요 (1 → 2 → ... → 9 → 1 ...). 마지막 맵은 좀비 모드 전용
 # ---------------------------------------------------------------
 #   바닥   '~' 바다(못 들어가요)  '.' 모래사장  '_' 보드워크  ':' 인도  '=' 차도
 #          'g' 잔디  'x' 광장 타일  ',' 부두 콘크리트  'p' 나무 부두
@@ -265,6 +335,8 @@ ENEMY_TYPES = {
 #   ground : 지평선 아래 기본 바닥        lit  : 창문 몇 개 중 하나에 불이 켜지는지
 #   fog    : 안개 거리 비율 (작을수록 짙은 안개)   snow : 눈이 내리는지
 #   camo   : 적 위장복 색 (None이면 기본 군복)
+#   rain   : 비가 오는지     dark : 밤이라 바닥과 건물이 어두워지는 정도 (1 = 그대로)
+#   sun_colors : 해(또는 달) 색 세 겹 (바깥 → 안쪽)
 #   op / brief : 라운드 시작 때 나오는 작전 이름과 임무
 MAPS = [
     dict(
@@ -273,32 +345,25 @@ MAPS = [
         haze=(250, 170, 140), sun=math.pi, stars=False, ground=".", lit=4, fog=1.0, snow=False, camo=None,
         op="OPERATION SUNSET", brief="Hostiles have taken the boardwalk. Clear the beach district.",
         rows=[
-            "~~~.T_:==:DDDDDxRRR:==:GGGG:CCCCC:GG",
-            "~~~.._L==:DxxxxxRRR:==:GGGG:CCCCC:GG",
-            "~~~.E_:=c:DxFFxxxaR:==:GGGG:::K:::GG",
-            "~~~.._:==:DxFFxExxR:==:GGGGE:NNNN:GG",
-            "~~~.T_:==:DxxxxxxxR:c=:::::::NNNN:GG",
-            "~~~.._:==:DDDxDDQxR:==:AAAA:hNNNN:GG",
-            "~~~..h:==LDDDxDDDxR:==:AAAA:KNNNN:GG",
-            "~~~.._:==:::::::::::==::::::::::::GG",
-            "~~~.T_======c==============c========",
-            "~~~.._==========c=============c=====",
-            "~~~..E:==:::::::::::==::::::::::::GG",
-            "~~~.._L==:BBBBc:c:c:==:ggTgggg:NN:GG",
-            "~~~.P_:==:BBBB:::E::==:gggFFgg:NN:GG",
-            "~~~.._:c=:BBBB:Ka:::==:gEgFFgh:NN:GG",
-            "~~~.T_:==:BBBB:c:c::==LggTggTg:NN:GG",
-            "~~~.._:==:CCCCCCCC::==:ggggggEgNN:GG",
-            "~~~.n_:==:::::::::::==::::::::::::GG",
-            "~~~.._========c=========c===========",
-            "~~~.T_=============c============c===",
-            "~~~.._:==:::::::::::==::::::::::::GG",
-            "~~~.._:==:KK:K:KK:R:==:CC:AA:BB:D:GG",
-            "~~~.E_L==::::K:::KR:==:CC:AA:BB:D:GG",
-            "~~~.._:==:K:E:K:K:R:=c:::::E::::::GG",
-            "~~~.T_:==:K:KKK:n:R:==:CC:AA:BB:D:GG",
-            "~~~.._:==::::::K::R:==:CCh:A:BB:D:GG",
-            "~~~.T_:=c:RRRRRRRRR:==:CCCAAABBBD:GG",
+            "~~~.._:==:::::::::::==:::E",
+            "~~~.T_======c=============",
+            "~~~.._==========c=========",
+            "~~~..E:==:::::::::::==::::",
+            "~~~.._L==:BBBBc:c:c:==:ggT",
+            "~~~.P_:==:BBBB:::E::==:Egg",
+            "~~~.._:c=:BBBB:Ka:::==:gEg",
+            "~~~.T_:==:BBBB:c:c::==LggT",
+            "~~~.._:==:CCCCCCCC::==:ggg",
+            "~~~.n_:==:::::E:::::==::::",
+            "~~~.._========c=========c=",
+            "~~~.T_=============c======",
+            "~~~.._:==:::::::::::==::::",
+            "~~~.._:==:KK:K:KK:R:==:CC:",
+            "~~~.E_L==::::K:::KR:==:CC:",
+            "~~~.._:==:K:E:K:K:R:=c::E:",
+            "~~~.T_:==:K:KKK:n:R:==:CC:",
+            "~~~.._:==::E:::K::R:==:CCh",
+            "~~~.T_:=c:RRRRRRRRR:==:CCC",
         ],
     ),
     dict(
@@ -307,30 +372,24 @@ MAPS = [
         haze=(70, 40, 95), sun=None, stars=True, ground=":", lit=2, fog=1.0, snow=False, camo=None,
         op="OPERATION NIGHTFALL", brief="Enemy snipers on the high-rises. Move fast between cover.",
         rows=[
-            "SSSSS:==:GGGGGG:==:NNNEAA:==:SSS",
-            "SSSSSL==:Gxxxx::==:NNNhAA:==:SSS",
-            "SS::::==:GxFFx::==T::E::::==:SSS",
-            "SS:a::==:GxbxxE:==:AAA:NN:==:::E",
-            "SSSSST==:GGG:GG:==:AAA:NN:==:SSS",
-            "SSSSS:==:GGG:GG:==LAAA:NN:==:SSS",
-            "::::::==::::::::==::::::::==::E:",
-            "===========c=========c==========",
-            "==P==========================c==",
-            "::::::==::::::::==::::::::==::::",
-            "c:c:c:==:gggggg:==:xxxxxx:==:BBB",
-            "::::E:==TgTggbg:==:xbxxbxL==:BBB",
-            ":c:c::==:ggFFgg:==:xxKKxx:==::a:",
-            "::::n:==:gEFFgg:==:xxKKxE:==:BBB",
-            "c:c:c:==LgggTgg:==:xbxxbxT==:BBB",
-            "RRRRR:==:gggggg:==:xxxxxx:==:BBB",
-            "::::::==::::E:::==::::::::==::::",
-            "=======c================c=======",
-            "=============c================c=",
-            "::::::==::::::::==::::E:::==::::",
-            "CCCCC:==:DDD:DD:==:RR:RRR:==LSSS",
-            ":::E:L==:DDD:DD:==:RR:RRR:==:SSS",
-            "CCCCC:==:DDDEDD:==:RRnRRR:==:SSS",
-            "CCCCC:==:DDDDDD:==:RRRRRR:==TSSS",
+            "SS:a::==:GxbxxE:==:AAA:NN:",
+            "SSSSST==:GGG:GG:==:AAA:NN:",
+            "SSSSS:==:GGG:GG:==LAAA:NN:",
+            "::::::==::::::::==:::::::E",
+            "===========c=========c====",
+            "==P=======================",
+            "::::::==::::::::==::::::::",
+            "c:c:c:==:gggggg:==:xxxxxx:",
+            "::::E:==TgTggbg:==:xbxxbxL",
+            ":c:c::==:ggFFgg:==:xxKKxxE",
+            "::::n:==:gEFFgg:==:xxKKxE:",
+            "c:c:c:==LgggTgg:==:xbxxbxT",
+            "RRRRR:==:gggggg:==:xxxxxx:",
+            "::::::==::::E:::==::E:::::",
+            "=======c================c=",
+            "=============c============",
+            "::::::==::E:::::==::::E:::",
+            "CCCCC:==:DDD:DD:==:RR:RRR:",
         ],
     ),
     dict(
@@ -339,30 +398,26 @@ MAPS = [
         haze=(225, 205, 185), sun=0.0, stars=False, ground=",", lit=6, fog=1.0, snow=False, camo=None,
         op="OPERATION TIDEWATER", brief="Secure the container yard before the shipment leaves.",
         rows=[
-            "~~~~~~pp~~~~~~~~pp~~~~~~~~pp~~~~",
-            "~~~~~~pp~~~~~~~~pp~~~~~~~~pp~~~~",
-            "~~~~~~pE~~~~~~~~pp~~~~~~~~Ep~~~~",
-            "~~~~~~pp~~~~~~~~pa~~~~~~~~pp~~~~",
-            "~~~,,,,,,,,,,,,,,,,,,,,,,,,,E,,,",
-            "~~~,X,,,,,,,X,,,,,,,,,X,,,,,,,L,",
-            "~~~,,rrr,uuu,,ooo,rrr,,uuu,YY,,,",
-            "~~~,,rrr,uuu,,ooo,rrr,,uuu,YY,a,",
-            "~~~,,,,,,,,,,E,,,,,,,,,,,,,,,,,,",
-            "~~~,,YYY,ooo,,uuu,,K,,rrr,ooo,,,",
-            "~~~,,YYY,ooo,,uuu,,KE,rrr,ooo,,,",
-            "~~~,,,,,,,,,,,,,,,,,E,,,,,,,,,n,",
-            "~~~,,uu,rr,oo,,YY,,,,uu,rr,,E,,,",
-            "~~~=============================",
-            "~~~=======E=====c========c======",
-            "~~~,,,L,,,,,,L,,,,,,L,,,,,,L,,,,",
-            "~~~,WWWWW,,WWWWW,,BBBB,,c,c,c,,,",
-            "~~~,WWWWW,,WWWWW,,BBBB,,,,,,,E,,",
-            "~~~,WWWWW,,WWWWW,,BBBB,,c,c,c,,,",
-            "~~~,,,,,,,E,,,,,,,,,,,,,,,,,,,E,",
-            "~~~,,,QQ,KK,K,,QQ,,,h,,,,KK,,,,,",
-            "~~~,P,,,,,,,,,,,,,,,,,,E,,,,,,,,",
-            "~~~WWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
-            "~~~WWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+            "~~~,,,,,,,,,,,,,,,,,,,,,E,",
+            "~~~,X,,,,,,,X,,,,,,,,,X,,,",
+            "~~~,,rrr,uuu,,ooo,rrr,,uuu",
+            "~~~,,rrr,uuu,,ooo,rrr,,uuu",
+            "~~~,,,,,E,,,,E,,,,,,,,,,,,",
+            "~~~,,YYY,ooo,,uuu,,K,,rrr,",
+            "~~~,,YYY,ooo,,uuu,,KE,rrr,",
+            "~~~,,,,,,,,,,,,,,,,,E,,,,E",
+            "~~~,,uu,rr,oo,,YY,,,,uu,rr",
+            "~~~=======================",
+            "~~~=======E=====c========c",
+            "~~~,,,L,,,,,,L,,,,,,L,,,,,",
+            "~~~,WWWWW,,WWWWW,,BBBB,,c,",
+            "~~~,WWWWW,,WWWWW,EBBBB,,,,",
+            "~~~,WWWWW,,WWWWW,,BBBB,,c,",
+            "~~~,,,,,,,E,,,,,,,,,,,,,,,",
+            "~~~,,,QQ,KK,K,,QQ,,,h,,,,K",
+            "~~~,P,,,,,,,,,,,,,,,,,,E,,",
+            "~~~WWWWWWWWWWWWWWWWWWWWWWW",
+            "~~~WWWWWWWWWWWWWWWWWWWWWWW",
         ],
     ),
     dict(
@@ -372,30 +427,24 @@ MAPS = [
         camo=dict(uniform=(185, 160, 110), vest=(150, 125, 85), pants=(165, 140, 100)),
         op="OPERATION SANDSTORM", brief="Insurgents are holed up in the old town. Check every courtyard.",
         rows=[
-            ";;;;;;;;;;;;E;;##;;;;;;;;;;;;;;;",
-            ";MMMMMM;MMMMM;;##;MMMMM;MMMMMMM;",
-            ";M;a;;M;M;;;M;;##;ME;nM;M;;;;EM;",
-            ";M;;;;M;;;h;M;;##;M;;;M;;;;a;;M;",
-            ";MM;MMM;M;;;M;;##;MM;MM;M;;;;;M;",
-            ";;;;;;;;MMMMM;;v#;;;;;;;MMM;MMM;",
-            ";MMMM;;;;;;;;T;##;MMMM;;;;;;;;;;",
-            ";MMMM;MMM;MMM;;##;MMMM;;;K;K;;;;",
-            ";MMMM;M;;E;;M;;##;MMMM;;;E;;;K;;",
-            ";MMMM;MMMMMMM;;##;MMMM;;;;K;K;;;",
-            ";;;;;;;;;;;;;ZZ##;;T;;;;;;;;;;;;",
-            "P####v######################v###",
-            "######################v#######E#",
-            ";;;;;;;T;;;;;;;##ZZ;;;;;;;;E;;T;",
-            ";MMMMM;;MMMMMM;##;MMMMM;;MMMMM;;",
-            ";M;;;M;;M;;n;M;##;M;;;;;;;;;;M;;",
-            ";M;h;;;;MM;MMM;##;M;ZZ;;a;ZZ;M;;",
-            ";ME;;M;;;;;;;;;##;M;;;;K;;;;;M;;",
-            ";MMMMM;;;;;;;;;##;M;;E;;K;;;;M;;",
-            ";;;;;;;;;MMMMM;#v;M;ZZ;;;;ZZ;M;;",
-            ";MM;MMM;;MMMMM;##;M;;;;;;;;;EM;;",
-            ";M;E;;M;;MMMMM;##;MMMMM;;MMMMM;;",
-            ";MMMMMM;;MMMMM;#E;;;;;;;;;;;;;;;",
-            ";;;;;;;;;;;;;;;##;;;;;;;;;;;;;;;",
+            ";M;;;;M;E;h;M;;##;M;E;M;;;",
+            ";MM;MMM;M;;;M;;##;MM;MM;M;",
+            ";;;;;;;;MMMMM;;v#;;;;;;;MM",
+            ";MMMM;;;;;;;;T;##;MMMM;;;;",
+            ";MMMM;MMM;MMM;;##;MMMM;;;K",
+            ";MMMM;M;;E;;M;;##;MMMM;;;E",
+            ";MMMM;MMMMMMM;;##;MMMM;;;;",
+            ";;;;;;;;;;;;;ZZ##;;T;;;;;E",
+            "P####v####################",
+            "######################v###",
+            ";;;;;;;T;;;;;;;##ZZ;;;;;;;",
+            ";MMMMM;;MMMMMM;##;MMMMM;;M",
+            ";M;;;M;;M;;n;M;##;M;;;;;E;",
+            ";M;h;;;;MM;MMM;##;M;ZZ;;a;",
+            ";ME;;M;;;;;E;;;##;M;;;;K;;",
+            ";MMMMM;;;;;;;;;##;M;;E;;K;",
+            ";;;;;;;;;MMMMM;#v;M;ZZ;;;;",
+            ";MM;MMM;;MMMMM;##;M;;;E;;;",
         ],
     ),
     dict(
@@ -405,30 +454,24 @@ MAPS = [
         camo=dict(uniform=(225, 228, 232), vest=(165, 170, 180), pants=(200, 205, 212)),
         op="OPERATION WHITEOUT", brief="Infiltrate the arctic base. Watch the bunkers.",
         rows=[
-            "II*I******-***********-*****I*I*",
-            "*****I**E*-***********-*********",
-            "**OOOOOO**-*WWWWWWWW**-*UU*****I",
-            "I*OOOOOO**-*W*E****W**-*UU**UU**",
-            "**OOOOOO**-*W*h****W**-*****UU**",
-            "**OOOOOO**-*WWW**WWW**-*********",
-            "**********-***********-******E**",
-            "*****a****-********E*Z-****a****",
-            "------c-------------------------",
-            "**********-Z**********-*********",
-            "**JJJJJJ**-*OOOOOOOO**-**OOOOO**",
-            "**J**E*J**-*O******O**-**OOOOO**",
-            "**Ja***J**-****Kn*****-**OOOOO**",
-            "**JJ*JJJ**-*O****E*O**-**OOOOO**",
-            "**********-*OOOOOOOO**-***E***n*",
-            "**********-***********-Z********",
-            "P--------------------------c----",
-            "*********Z-***********-*********",
-            "**ZZZ*****-**ZZ*******-***ZZZ*E*",
-            "**********-*********E*-*WWWWW***",
-            "*******ZZ*-******h****-*WWWWW***",
-            "***E******-*E*****ZZ**-*WWWWW*I*",
-            "I*********-***********-*****E***",
-            "******I***-***********-**I*****I",
+            "**OOOOOOE*-*WWW**WWW**-***",
+            "**********-***********-**E",
+            "*****a****-********E*Z-***",
+            "------c-------------------",
+            "**********-Z********E*-***",
+            "**JJJJJJ**-*OOOOOOOO**-**O",
+            "**J**E*J**-*O**E***O**-**O",
+            "**Ja***J**-****Kn*****-**O",
+            "**JJ*JJJ**-*O****E*O**-**O",
+            "**********-*OOOOOOOO**-***",
+            "**********-***********-Z**",
+            "P-------------------------",
+            "*********Z-***********-**E",
+            "**ZZZ*****-**ZZ*******-***",
+            "**********-*********E*-*WW",
+            "*******ZZ*-******h****-*WW",
+            "***E******-*E*****ZZ**-*WW",
+            "I*********-***********-***",
         ],
     ),
     dict(
@@ -438,33 +481,134 @@ MAPS = [
         camo=dict(uniform=(70, 95, 55), vest=(50, 70, 40), pants=(60, 70, 50)),
         op="OPERATION GREENWOOD", brief="Enemy squad spotted near the village. Use the trees for cover.",
         rows=[
-            "ggggIggggggggggggggI~~ggggg#gggg",
-            "gIgIgIIggggggggEIgIg~~ggggg#gggg",
-            "ggggggggEIggIggggIgg~~gIgEg#gJJJ",
-            "gggggggggggIgIgIgggg~~ggggg#ggaJ",
-            "ggggggggggggggggggIg~~ggggg#gJEJ",
-            "ggggggggggggIggIgggg~~ggggg#IJJJ",
-            "####################pp##########",
-            "ggggggggg#gggggggEgg~~ggggg#gggg",
-            "ggggggggg#gJJJJJgggg~~gIggg#Iggg",
-            "ggVgIIggg#gJaggJJJJg~~gJJJJ#gggg",
-            "ggVghgggg#gJggEJJgJg~~gJngJ#gggg",
-            "IgVgggggg#gJJgJJJggg~~gJgEg#gggg",
-            "ggVgggggg#ggggggJhJg~~gJJJJ#gggg",
-            "ggVVVVVVg#gJJJJgJJJg~~ggggg#ggEg",
-            "ggIgggIgg#gJJJJggggg~~ggggg#gggg",
-            "ggggggggg#gJJJJggggg~~ggEIg#gggg",
-            "P###################pp##########",
-            "gggggggggggggggggggg~~gggIg#gggg",
-            "ggggEgggggggEgggggIg~~gJJJg#gggg",
-            "gggggggggIIggggggggg~~gJJJI#gggg",
-            "gIggggggggVVVVVVgggg~~gJJJg#gEgg",
-            "ggggggggggggaggggggg~~ggggg#gggg",
-            "gggggggggggggggggggg~~Igggg#ggIg",
-            "gggIggIggggggggggggg~~ggggg#gggg",
+            "ggggggggEgggggggggIg~~gggE",
+            "ggggggggggggIggIgggg~~gggg",
+            "####################pp####",
+            "ggggggggg#gggggggEgg~~gggg",
+            "ggggggggg#gJJJJJgggg~~gIgg",
+            "ggVgIIggg#gJaggJJJJg~~gJJJ",
+            "ggVghgggg#gJggEJJgJg~~gJng",
+            "IgVgggggg#gJJgJJJggg~~gJgE",
+            "ggVgggggg#ggggggJhJg~~gJgJ",
+            "ggVVVVVVg#gJJJJgJJJg~~gggg",
+            "ggIgggIgg#gJJJJggggg~~gggg",
+            "ggggggggg#gJJJJggggg~~ggEI",
+            "P###################pp####",
+            "gggggggggggggggggggg~~EggI",
+            "ggggEgggggggEgggggIg~~gJJJ",
+            "gggggggggIIggggggggg~~gJJJ",
+            "gIggggggggVVVVVVgggg~~gJJJ",
+            "ggggggggggggaggggEgg~~gggg",
+        ],
+    ),
+    dict(
+        name="RAIN DISTRICT",
+        sky=[(0.0, (12, 14, 24)), (0.6, (35, 40, 60)), (0.9, (70, 75, 95)), (1.0, (95, 100, 120))],
+        haze=(70, 76, 96), sun=None, stars=False, ground=":", lit=2, fog=0.65, snow=False, rain=True, dark=0.72,
+        camo=dict(uniform=(55, 60, 70), vest=(35, 38, 45), pants=(40, 42, 50)),
+        op="OPERATION DOWNPOUR", brief="Neon alleys in heavy rain. Listen for their boots.",
+        rows=[
+            "SSSS:==:NNNNN:==:GGGG",
+            "S:ES:==:N:::N:==:GGGG",
+            "S:aS:==:::b:::==:::EG",
+            "S:::L==:N:E:N:==:G::G",
+            "SSSS:==:NNKNN:==LGGGG",
+            ":::::==:::::::==:::::",
+            "===c===========c=====",
+            "========c============",
+            ":E:::==:::::::==::E::",
+            "RRRR:==:c:c::L==:CCCC",
+            "R:K::==:::::::==:::EC",
+            "R:E::==:c:E:c:==:::hC",
+            "RRRR:==:KK:KK:==:CCCC",
+            "::::L==:::::::==:::::",
+            "======c==========c===",
+            "=====================",
+            ":P:::==:::E:::==:::E:",
+        ],
+    ),
+    dict(
+        name="CARGO SHIP",
+        sky=[(0.0, (50, 60, 120)), (0.55, (160, 100, 120)), (0.85, (250, 150, 90)), (1.0, (255, 190, 120))],
+        haze=(240, 170, 120), sun=math.pi / 2, stars=False, ground=",", lit=6, fog=1.0, snow=False, camo=None,
+        op="OPERATION DEADWEIGHT", brief="Board the cargo ship. Containers everywhere - check every corner.",
+        rows=[
+            "~~~~~~~~~~~~~~~~~~~~~~~~",
+            "~WWWW,,,,E,,,,,,,,E,,,,~",
+            "~WWWW,rr,,uu,,oo,,YY,,a~",
+            "~WWWW,rr,,uu,,oo,,YY,,,~",
+            "~,,,,,,,,,,,,,,,,,,,,,,~",
+            "~,E,,YY,,oo,,K,,rr,,uu,~",
+            "~,,,,YY,,oo,,,E,rr,,uu,~",
+            "~P,,,,,,,,,,,,,,,,,,,,E~",
+            "~,,,,uu,,rr,,K,,oo,,YY,~",
+            "~,n,,uu,,rr,,,,,oo,,YY,~",
+            "~,,,,,,,,,,,E,,,,,,,,h,~",
+            "~WWWW,oo,,YY,,uu,,rr,,,~",
+            "~WWWW,oo,,YY,,uu,,rr,E,~",
+            "~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    ),
+    dict(
+        name="MOTEL",
+        sky=[(0.0, (70, 60, 130)), (0.6, (190, 110, 120)), (0.9, (250, 170, 110)), (1.0, (255, 205, 150))],
+        haze=(245, 190, 150), sun=-math.pi / 2, stars=False, ground=";", lit=5, fog=1.1, snow=False,
+        camo=dict(uniform=(185, 160, 110), vest=(150, 125, 85), pants=(165, 140, 100)),
+        op="OPERATION ROADSIDE", brief="Hostiles holed up in a desert motel. Clear the rooms.",
+        rows=[
+            ";;;;;;;;;;;;;;;;;;;;;;",
+            ";MMMMMMMMMMMMM;;;;T;E;",
+            ";M;aM;EM;;M;hM;;UU;;;;",
+            ";M;MM;MM;MM;MM;;UU;;E;",
+            ";;;;;;;;;;;;;;;;;;;;;;",
+            ";;c;;c;;c;;;;Z;;;;v;;;",
+            "======================",
+            "=====c=========v======",
+            ";;;;;;;;;;;;;;;;;;;;;;",
+            ";CCCCC;;Q;Q;;;KK;;;E;;",
+            ";C;;;C;;;;;;;;KK;;;;;;",
+            ";C;a;;;;Q;Q;;;;;;MMM;;",
+            ";CCCCC;;;;;;;E;;;MEM;;",
+            ";;;;;;;;Z;;;;;;;;M;M;;",
+            ";P;;;;;;;;;;;;v;;;;;n;",
+            ";;;T;;;;;;;E;;;;;;;;;;",
+        ],
+    ),
+    # 좀비 모드 전용 맵 (캠페인에는 안 나와요)
+    dict(
+        name="BLOOD MOON", zombie=True,
+        sky=[(0.0, (5, 2, 8)), (0.6, (30, 8, 18)), (0.9, (70, 18, 25)), (1.0, (95, 30, 30))],
+        haze=(60, 18, 22), sun=0.6, sun_colors=((120, 20, 20), (190, 35, 35), (235, 80, 70)),
+        stars=True, ground="g", lit=7, fog=0.55, snow=False, dark=0.5, camo=None,
+        op="BLOOD MOON", brief="They are coming. Survive as long as you can.",
+        rows=[
+            "IgIggIgg#gggIggIggIgggIg",
+            "gEgggggg#ggggggggggggEgg",
+            "ggJJJJgg#ggVgVgVgggJJJgg",
+            "ggJggJgg#gggggggggJ;aJgg",
+            "ggJgaJgg#ggVgVgVgggJ;Jgg",
+            "ggJJgJgg#gggggggggggg;gg",
+            "Egggggg########L#######E",
+            "ggVVggg#gggggggggg#ggggg",
+            "gggggLg#ggJJJJJJgg#gIggg",
+            "gIggggg#ggJggggJgg#ggggg",
+            "ggggggg#gggghggJgg#gVVgg",
+            "gggVVgg#ggJggggJgg#ggggg",
+            "Egggggg#ggJJgJJJgg#ggggE",
+            "gggggLg#gggggggggg#gggLg",
+            "########L####P#########g",
+            "ggIggggg#gggggggg#gggggg",
+            "gggJJJgg#ggVVgVVg#gJJJgg",
+            "gggJnJgg#ggggggg#ggJgaJg",
+            "gEgJ;Jgg#gggg#ggggggJ;Jg",
+            "IgggggIgggEgggIggggEgggI",
         ],
     ),
 ]
+
+# 캠페인에서 라운드마다 돌아가며 나오는 맵 (좀비 맵은 빼고)
+CAMPAIGN_MAPS = [i for i, m in enumerate(MAPS) if not m.get("zombie")]
+ZOMBIE_MAP = next(i for i, m in enumerate(MAPS) if m.get("zombie"))
 
 # 건물 종류: 글자 -> (색, 높이, 무늬, 네온사인 색 또는 None)
 #   무늬: True = 창문, "ribs" = 컨테이너/창고 세로 골, False = 무늬 없음
@@ -538,13 +682,17 @@ def floor_of(col, row):
 
 def load_map(index):
     """index번째 맵으로 바꿔요. 다른 함수들이 쓰는 맵 정보(전역 변수)를 새로 채워요."""
-    global GAME_MAP, MAP_W, MAP_H, FLOOR_GRID, WALL_GRID, MAX_WALL, HAZE, LIT
+    global GAME_MAP, MAP_W, MAP_H, FLOOR_GRID, WALL_GRID, MAX_WALL, HAZE, LIT, FLOOR_COLORS
     theme = MAPS[index]
     GAME_MAP = theme["rows"]
     MAP_W, MAP_H = len(GAME_MAP[0]), len(GAME_MAP)
     # 매번 계산하지 않도록 칸마다 바닥/건물 정보를 미리 만들어 둬요
     FLOOR_GRID = [[floor_of(col, row) for col in range(MAP_W)] for row in range(MAP_H)]
-    WALL_GRID = [[WALLS.get(ch) for ch in line] for line in GAME_MAP]
+    # 밤 맵(dark)은 바닥과 건물을 어둡게 칠해요. 네온사인은 그대로 밝게
+    dark = theme.get("dark", 1.0)
+    FLOOR_COLORS = {k: shade(c, dark) for k, c in FLOORS.items()}
+    walls = {k: (shade(c, dark), h, pattern, neon) for k, (c, h, pattern, neon) in WALLS.items()}
+    WALL_GRID = [[walls.get(ch) for ch in line] for line in GAME_MAP]
     # 이 맵에서 가장 높은 건물 (광선이 여기에 닿으면 더 멀리 안 봐도 돼요)
     MAX_WALL = max((spec[1] for line in WALL_GRID for spec in line if spec), default=1.0)
     HAZE = theme["haze"]
@@ -703,6 +851,8 @@ load_map(0)       # 처음엔 첫 번째 맵
 # ---------------------------------------------------------------
 def make_enemy_image(look, state="normal"):
     """적 그림. state: normal(평소) / flash(총구 불꽃) / hurt(맞음) / aim(저격 조준 불빛)"""
+    if look["head"] == "zombie":
+        return make_zombie_image(look, state)
     if state == "hurt":
         # 맞으면 붉게 물들고 몸에 핏자국이 생겨요
         img = make_enemy_image(look, "normal")
@@ -777,6 +927,59 @@ def make_enemy_image(look, state="normal"):
     if state == "aim":
         pygame.draw.circle(img, (255, 40, 40), (34, 50), 6)                       # 조준경 반짝임
         pygame.draw.circle(img, WHITE, (34, 50), 2)
+    return img
+
+
+def make_zombie_image(look, state="normal"):
+    """좀비 그림: 찢어진 옷, 피 얼룩, 빛나는 눈, 앞으로 뻗은 팔. flash = 할퀴는 모습(팔을 들고 입을 벌려요)"""
+    if state == "hurt":
+        img = make_zombie_image(look, "normal")
+        img.fill((255, 120, 120, 255), special_flags=pygame.BLEND_RGBA_MULT)
+        for x, y, r in ((24, 50, 7), (36, 62, 5), (30, 30, 4)):
+            pygame.draw.circle(img, BLOOD, (x, y), r)
+        return img
+    img = pygame.Surface((60, 120), pygame.SRCALPHA)
+    skin, shirt, pants = look["skin"], look["shirt"], look["pants"]
+    rot = shade(skin, 0.65)
+    big, thin = look.get("big"), look.get("thin")
+    bw = 44 if big else (26 if thin else 34)          # 몸통 폭
+    bx = 30 - bw // 2
+    # 다리: 한쪽을 질질 끌어요
+    leg = bw // 2 - 3
+    pygame.draw.rect(img, pants, (bx + 2, 80, leg, 40))
+    pygame.draw.rect(img, pants, (31, 84, leg, 34))
+    pygame.draw.rect(img, rot, (32, 112, leg - 2, 8))
+    # 몸통: 찢어진 셔츠와 피 얼룩
+    pygame.draw.rect(img, shirt, (bx, 32, bw, 50), border_radius=5)
+    pygame.draw.polygon(img, (0, 0, 0, 0), [(bx, 82), (bx + bw * 0.3, 72), (bx + bw * 0.5, 82)])
+    pygame.draw.polygon(img, (0, 0, 0, 0), [(bx + bw * 0.6, 82), (bx + bw * 0.8, 70), (bx + bw, 82)])
+    pygame.draw.polygon(img, rot, [(bx + 5, 62), (bx + 12, 50), (bx + 16, 66)])
+    for x, y, r in ((bx + 8, 44, 5), (bx + bw - 9, 58, 4), (30, 70, 6), (bx + bw - 6, 40, 3)):
+        pygame.draw.circle(img, BLOOD, (x, y), r)
+    # 머리: 썩은 자국, 헝클어진 머리카락, 빛나는 눈
+    hr = 13 if big else 11
+    pygame.draw.circle(img, skin, (30, 20), hr)
+    pygame.draw.circle(img, rot, (25, 15), 4)
+    pygame.draw.circle(img, rot, (36, 26), 3)
+    for x in range(22, 40, 4):
+        pygame.draw.line(img, (40, 35, 30), (x, 20 - hr + 2), (x + random.randint(-3, 3), 20 - hr - 4), 2)
+    eyes = look["eyes"]
+    for ex in (25, 35):
+        pygame.draw.circle(img, (*eyes, 90), (ex, 19), 5)
+        pygame.draw.circle(img, eyes, (ex, 19), 2)
+    if state == "flash":
+        pygame.draw.ellipse(img, (40, 0, 0), (25, 23, 10, 8))       # 벌린 입
+    else:
+        pygame.draw.line(img, (40, 10, 10), (25, 27), (35, 26), 2)
+    # 팔: 나를 향해 앞으로 뻗어요 (할퀼 때는 높이 들어요)
+    hand_y = 24 if state == "flash" else 40
+    for side in (-1, 1):
+        shoulder = (30 + side * (bw // 2 - 2), 38)
+        hand = (max(5, min(55, 30 + side * (bw // 2 + 9))), hand_y)
+        pygame.draw.line(img, shirt, shoulder, hand, 9 if big else 7)
+        pygame.draw.circle(img, skin, hand, 6 if big else 5)
+        for k in (-1, 0, 1):
+            pygame.draw.line(img, rot, hand, (hand[0] + side * 4 + k * 2, hand[1] - 6), 1)
     return img
 
 
@@ -1020,6 +1223,16 @@ SOUND_RECIPES = {
     "step_soft": (0.09, 45, 0.9, 0.85, 90, 0.30, 0, 0, 0.30),
     "step_snow": (0.12, 35, 1.0, 0.35, 0, 0, 0, 0, 0.26),
     "step_wood": (0.07, 55, 0.6, 0.60, 180, 0.50, 0, 0, 0.35),
+    # 적 군화 소리: 내 발소리보다 낮고 묵직하고, 장비가 '찰칵' 부딪혀요
+    "boot_hard": (0.11, 38, 0.7, 0.75, 72, 0.75, 2900, 0.07, 0.50),
+    "boot_soft": (0.14, 28, 0.8, 0.90, 58, 0.65, 2900, 0.05, 0.45),
+    "boot_snow": (0.17, 24, 1.0, 0.60, 52, 0.45, 0, 0, 0.40),
+    "boot_wood": (0.12, 33, 0.6, 0.70, 105, 0.85, 2900, 0.06, 0.50),
+    # 좀비: 질질 끄는 발소리, 그르렁, 할퀴기
+    "zstep":     (0.22, 16, 0.9, 0.93, 48, 0.35, 0, 0, 0.40),
+    "groan":     (0.80, 3.5, 0.35, 0.95, 82, 0.6, 130, 0.25, 0.50),
+    "swipe":     (0.16, 16, 1.0, 0.55, 0, 0, 0, 0, 0.40),
+    "cash":      (0.25, 10, 0.0, 0.0, 0, 0, 1500, 0.5, 0.45),
     "reload":    (0.05, 80, 1.0, 0.90, 0, 0, 2000, 0.3, 0.40),
     "streak":    (0.30, 6, 0.0, 0.0, 0, 0, 880, 0.6, 0.50),
     "knife":     (0.20, 12, 1.0, 0.70, 0, 0, 0, 0, 0.30),
@@ -1029,6 +1242,10 @@ SOUND_RECIPES = {
 # 바닥 -> 발소리 (없는 바닥은 step_hard)
 STEP_SOUNDS = {".": "step_soft", ";": "step_soft", "g": "step_soft", "#": "step_soft",
                "*": "step_snow", "-": "step_snow", "_": "step_wood", "p": "step_wood"}
+
+
+# 내 발소리 -> 같은 바닥에서 적이 내는 군화 소리
+ENEMY_STEPS = {"step_hard": "boot_hard", "step_soft": "boot_soft", "step_snow": "boot_snow", "step_wood": "boot_wood"}
 
 
 def step_sound_at(pos):
@@ -1079,12 +1296,14 @@ class Sounds:
             samples.extend([value] * channels)
         return pygame.mixer.Sound(buffer=samples.tobytes())
 
-    def play(self, name, volume=1.0):
+    def play(self, name, volume=1.0, pan=0.0):
+        """pan: -1이면 왼쪽, 1이면 오른쪽에서 들려요 (이어폰을 끼면 방향을 알 수 있어요)"""
         sound = self.bank.get(name)
         if sound and not self.muted and volume > 0.02:
             channel = sound.play()
             if channel:
-                channel.set_volume(min(1.0, volume))
+                v = min(1.0, volume)
+                channel.set_volume(v * min(1.0, 1 - pan * 0.85), v * min(1.0, 1 + pan * 0.85))
 
 
 _sounds = None
@@ -1111,16 +1330,17 @@ HELP_TEXT = {
         keys=[("W A S D", "이동"), ("Shift", "달리기 (W와 함께)"), ("C", "앉기 / 달리다가: 슬라이딩"),
               ("← → ↑ ↓", "시점 (마우스도 돼요)"), ("스페이스바", "점프"),
               ("F,  왼쪽 클릭", "사격 (꾹 누르면 연사)"), ("E,  오른쪽 클릭", "정조준 / 저격총 조준경"), ("Z", "조준경 배율 3·6·12배"),
-              ("G", "수류탄"), ("V", "칼"), ("X", "킬스트릭 쓰기"), ("1 ~ 9,  Q", "무기 바꾸기,  직전 무기"),
-              ("R", "재장전"), ("H,  M", "도움말 (일시정지),  소리 끄기"), ("P,  Enter", "FPS 표시,  전체 화면"),
+              ("G", "수류탄"), ("V", "칼"), ("X", "킬스트릭 쓰기"), ("1, 2,  Q", "주무기 / 보조무기 바꾸기"),
+              ("R,  B,  U", "재장전,  좀비 상점 (탄약 / 강화)"), ("H,  M", "도움말 (일시정지),  소리 끄기"), ("P,  Enter", "FPS 표시,  전체 화면"),
               ("ESC", "메뉴로")],
         tips=["적을 모두 쓰러뜨리면 다음 라운드! 라운드마다 맵이 바뀌어요.",
               "죽지 않고 연속으로 쓰러뜨리면 킬스트릭: 3킬 레이더, 5킬 공습, 7킬 자동 포탑 (X).",
-              "처치·헤드샷·연속 처치로 경험치를 모으면 계급(RANK)이 올라가요.",
               "앉으면 덜 맞고 잘 맞혀요. 차·상자 뒤에 숨으면 총알을 막아요.",
               "GRENADE! 경고가 뜨면 빨리 피하세요. 방패병은 머리나 옆을 노리세요.",
-              "5라운드마다 보스가 나와요.",
-              "죽으면 R: 그 라운드부터 다시,  N: 처음부터"],
+              "라운드가 오를수록 적이 더 정확하고 빨라져요. 5라운드마다 보스!",
+              "적 군화 소리는 묵직하게, 소리 난 방향에서 들려요. 달리거나 쏘면 적도 내 소리를 듣고 와요.",
+              "좀비 모드: 웨이브를 버티며 점수를 모아 B 탄약, U 총 강화.",
+              "죽으면 R: 다시,  N: 처음부터"],
         resume="H 를 누르면 계속해요",
     ),
     "en": dict(
@@ -1128,15 +1348,16 @@ HELP_TEXT = {
         keys=[("W A S D", "move"), ("SHIFT", "sprint (with W)"), ("C", "crouch / slide while sprinting"),
               ("ARROWS", "look (or mouse)"), ("SPACE", "jump"),
               ("F, LEFT CLICK", "fire (hold for auto)"), ("E, RIGHT CLICK", "aim / sniper scope"), ("Z", "scope zoom 3/6/12x"),
-              ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1-9, Q", "weapons, last weapon"),
-              ("R", "reload"), ("H, M", "help (pause), mute"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "menu")],
+              ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1, 2, Q", "primary / secondary"),
+              ("R, B, U", "reload, zombie shop"), ("H, M", "help (pause), mute"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "menu")],
         tips=["Kill every enemy to clear the round. The map changes each round.",
               "Killstreaks without dying: 3 radar, 5 airstrike, 7 sentry turret (X).",
-              "Kills, headshots and multi-kills give XP. Rank up every 1000 XP.",
               "Crouch to be harder to hit. Cars and crates stop bullets.",
               "GRENADE! warning: move away. Shield guys: aim for the head or flank.",
-              "A boss shows up every 5 rounds.",
-              "When you die: R retry the round, N new game."],
+              "Enemies get sharper every round. A boss every 5 rounds.",
+              "Enemy boots sound heavy and come from their direction. Sprinting or shooting gives you away.",
+              "Zombies: survive waves, spend points on B ammo and U weapon upgrades.",
+              "When you die: R retry, N new game."],
         resume="Press H to resume",
     ),
 }
@@ -1226,7 +1447,7 @@ def draw_help(screen, fonts, footer):
         for j, line in enumerate(wrap_text(small, tip, WIDTH * 0.42)):
             screen.blit(small.render(("-  " if j == 0 else "   ") + line, True, (200, 230, 255)), (tip_left, y))
             y += line_h
-        y += line_h * 0.4
+        y += line_h * 0.25
 
     image = small.render(footer, True, YELLOW)
     screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.94)))
@@ -1473,9 +1694,10 @@ def draw_muzzle_flash(surface, pos, size):
 # 등장인물과 물건들
 # ---------------------------------------------------------------
 class Enemy:
-    def __init__(self, x, y, kind):
+    def __init__(self, x, y, kind, skill=1.0):
         self.kind = kind
-        self.t = ENEMY_TYPES[kind]           # 이 종류의 능력치
+        self.skill = skill
+        self.t = scaled_type(kind, skill)    # 이 종류의 능력치 (라운드가 오를수록 강해져요)
         self.pos = pygame.Vector2(x, y)
         self.hp = self.t["hp"]
         self.dir = pygame.Vector2(1, 0).rotate(random.uniform(0, 360))
@@ -1489,6 +1711,12 @@ class Enemy:
         throw = self.t.get("throw")
         self.throw_timer = random.uniform(*throw) if throw else 0.0
         self.throw_at = None      # 수류탄을 던질 곳 (Game이 보고 수류탄을 만들어요)
+        self.step_timer = random.uniform(0, 0.5)
+        self.alert = 0.0          # 내 발소리나 총소리를 듣고 그쪽으로 가는 시간
+        self.strafe = 0           # 옆으로 피하는 방향 (-1, 0, 1)
+        self.strafe_timer = 0.0
+        self.attack_timer = 0.0   # 좀비가 할퀴는 간격
+        self.groan_timer = random.uniform(1, 6)   # 좀비가 그르렁거리는 간격
 
     @property
     def aiming(self):
@@ -1508,16 +1736,23 @@ class Enemy:
         self.flash_timer -= dt
         self.hurt_timer -= dt
         dist = self.pos.distance_to(player.pos)
+        if t.get("melee"):
+            return self.update_zombie(dt, player, dist)
         self.los_timer -= dt
         if self.los_timer <= 0:
             self.los_timer = 0.2
             self.sees = dist < t["sight"] and can_see(self.pos, player.pos)
 
         if not self.sees:
-            # 못 봤을 때: 어슬렁거리다가 막히면 방향 바꾸기
+            # 못 봤을 때: 어슬렁거리다가 막히면 방향 바꾸기.
+            # 내 발소리나 총소리가 들리면 소리 난 쪽으로 다가와요
             self.spotted = 0.0
+            self.alert -= dt
+            if dist < player.noise and dist > 0:
+                self.dir = (player.pos - self.pos).normalize()
+                self.alert = 2.5
             before = pygame.Vector2(self.pos)
-            move_with_collision(self.pos, self.dir * t["speed"] * 0.6 * dt)
+            move_with_collision(self.pos, self.dir * t["speed"] * (1.0 if self.alert > 0 else 0.6) * dt)
             if self.pos == before or random.random() < 0.005:
                 self.dir = pygame.Vector2(1, 0).rotate(random.uniform(0, 360))
             self.facing = pygame.Vector2(self.dir)
@@ -1529,6 +1764,16 @@ class Enemy:
             self.facing = (player.pos - self.pos).normalize()
         if dist > t["keep"]:
             move_with_collision(self.pos, self.facing * t["speed"] * dt)
+        # 옆으로 왔다 갔다 피해요 (실력이 좋을수록 많이). 저격수와 무거운 적은 안 피해요
+        if self.kind not in ("SNIPER", "HEAVY", "BOSS"):
+            self.strafe_timer -= dt
+            if self.strafe_timer <= 0:
+                self.strafe_timer = random.uniform(0.5, 1.4)
+                self.strafe = random.choice((-1, 0, 1))
+            if self.strafe:
+                side = pygame.Vector2(-self.facing.y, self.facing.x)
+                dodge = min(0.8, 0.25 + (self.skill - 1.0))
+                move_with_collision(self.pos, side * self.strafe * t["speed"] * dodge * dt)
         if self.spotted < t["reaction"]:
             return 0
 
@@ -1562,6 +1807,49 @@ class Enemy:
         return 0
 
 
+    # 좀비 길찾기 지도: 칸마다 플레이어까지 몇 걸음인지 (Game이 0.3초마다 새로 만들어요)
+    flow = None
+
+    def update_zombie(self, dt, player, dist):
+        """좀비: 건물을 돌아서 나에게 다가와 할퀴어요. 준 피해를 돌려줘요."""
+        t = self.t
+        self.sees = True
+        self.attack_timer -= dt
+        if dist > 0.7:
+            target = self.next_step(player, dist)
+            offset = target - self.pos
+            if offset.length() > 0:
+                self.facing = offset.normalize()
+                move_with_collision(self.pos, self.facing * t["speed"] * dt)
+            return 0
+        if dist > 0:
+            self.facing = (player.pos - self.pos).normalize()
+        if self.attack_timer <= 0:
+            self.attack_timer = t["melee"][1]
+            self.flash_timer = 0.25               # 팔을 들고 할퀴는 모습
+            return t["melee"][0]
+        return 0
+
+    def next_step(self, player, dist):
+        """길찾기 지도에서 나에게 한 걸음 더 가까운 옆 칸의 가운데 (대각선은 모서리를 가로지르지 않게)"""
+        flow = Enemy.flow
+        if flow is None or dist < 1.5:
+            return player.pos
+        col, row = int(self.pos.x), int(self.pos.y)
+        best, best_d = None, flow[row][col] if in_map(col, row) and flow[row][col] is not None else math.inf
+        for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+            c, r = col + dc, row + dr
+            if not in_map(c, r) or flow[r][c] is None:
+                continue
+            if dc and dr and (is_blocked(col + dc, row) or is_blocked(col, row + dr)):
+                continue
+            if flow[r][c] < best_d:
+                best, best_d = (c, r), flow[r][c]
+        if best is None:
+            return player.pos
+        return pygame.Vector2(best[0] + 0.5, best[1] + 0.5)
+
+
 class Player:
     def __init__(self, x, y):
         self.pos = pygame.Vector2(x, y)
@@ -1576,6 +1864,7 @@ class Player:
         self.crouch_amt = 0.0     # 앉은 정도 0(서 있음) ~ 1(앉음). 부드럽게 바뀌어요
         self.slide_timer = 0.0    # 슬라이딩 남은 시간
         self.slide_dir = pygame.Vector2(1, 0)
+        self.noise = 0.0          # 내 소리가 들리는 거리 (적이 듣고 다가와요)
 
     @property
     def forward(self):
@@ -1655,10 +1944,11 @@ class Player:
 class Weapon:
     """무기 하나의 총알 수"""
 
-    def __init__(self, spec):
+    def __init__(self, spec, ammo_mult=1.0):
         self.spec = spec
         self.mag = spec["mag"]
-        self.reserve = spec["reserve"]
+        self.reserve = int(spec["reserve"] * ammo_mult)
+        self.upgraded = False      # 좀비 모드에서 강화했는지
 
 
 class Arsenal:
@@ -1666,10 +1956,14 @@ class Arsenal:
 
     SWITCH_TIME = 0.4
 
-    def __init__(self):
-        self.weapons = [Weapon(spec) for spec in WEAPONS]
+    def __init__(self, specs=None, reload_mult=1.0, ammo_mult=1.0):
+        """specs: 가지고 다닐 무기들 (로드아웃). 없으면 모든 무기"""
+        self.ammo_mult = ammo_mult
+        self.reload_mult = reload_mult
+        self.SWITCH_TIME = Arsenal.SWITCH_TIME * reload_mult
+        self.weapons = [Weapon(spec, ammo_mult) for spec in (specs or WEAPONS)]
         self.index = 0
-        self.last_index = 1
+        self.last_index = 1 % len(self.weapons)
         self.cooldown = 0.0
         self.reload_left = 0.0
         self.switch_left = 0.0
@@ -1697,15 +1991,15 @@ class Arsenal:
     def reload(self):
         w = self.current
         if not self.busy and w.mag < w.spec["mag"] and w.reserve > 0:
-            self.reload_left = w.spec["reload"]
+            self.reload_left = w.spec["reload"] * self.reload_mult
 
     def add_ammo(self):
         """탄약 상자: 모든 무기의 여분 총알을 채워요. 하나라도 채웠으면 True"""
         added = False
         for w in self.weapons:
-            cap = w.spec["reserve"] * 2
+            cap = int(w.spec["reserve"] * 2 * self.ammo_mult)
             if w.reserve < cap:
-                w.reserve = min(cap, w.reserve + max(1, w.spec["reserve"] // 2))
+                w.reserve = min(cap, w.reserve + max(1, int(w.spec["reserve"] * self.ammo_mult) // 2))
                 added = True
         return added
 
@@ -1870,8 +2164,14 @@ class Effect:
 # 게임 전체
 # ---------------------------------------------------------------
 class Game:
-    def __init__(self, save, start_round=1):
-        """save: 저장 정보(dict). 라운드를 깨거나 죽을 때마다 고쳐서 파일에 써요."""
+    def __init__(self, save, start_round=1, mode="campaign", loadout=None):
+        """save: 저장 정보(dict). 라운드를 깨거나 죽을 때마다 고쳐서 파일에 써요.
+        mode: "campaign"(라운드마다 맵이 바뀌는 전투) 또는 "zombies"(좀비 웨이브 버티기)
+        loadout: 고른 주무기/보조무기/퍼크 (없으면 모든 무기를 들고 시작)"""
+        self.mode = mode
+        self.loadout = loadout
+        self.perk = loadout["perk"] if loadout else None
+        self.max_hp = 130 if self.perk == "IRON SKIN" else 100
         self.pickup_images = {kind: make_pickup_image(kind) for kind in DROP_WEIGHTS}
         self.decor_images = {
             "T": make_palm_image(), "L": make_lamp_image(),
@@ -1912,6 +2212,10 @@ class Game:
         self.show_fps = False      # P 또는 F3
         self.show_help = False     # H
         self.fps = 0.0
+        self.hitstop = 0.0         # 쓰러뜨리는 순간 화면이 아주 잠깐 멈춰요 (묵직한 손맛)
+        self.slowmo = 0.0          # 라운드 마지막 적을 쓰러뜨리면 잠깐 느리게
+        self.gun_noise = 0.0       # 방금 총을 쐈으면 적이 듣고 다가와요
+        self.on_target = False     # 조준점이 적 위에 있는지 (조준선이 빨개지고 시점이 살짝 끈적해져요)
         self.reset(start_round)
 
     def set_col_w(self, col_w):
@@ -1972,6 +2276,7 @@ class Game:
         """새 게임 (또는 저장된 라운드부터 시작)"""
         self.round = start_round
         self.kills = 0
+        self.points = 0            # 좀비 모드 점수 (B 탄약, U 총 강화에 써요)
         self.game_over = False
         self.hint_timer = 8.0      # 처음 8초 동안 화면 아래에 조작법 안내
         self.reset_streak()
@@ -1983,10 +2288,29 @@ class Game:
         self.streaks_ready = []    # 받은 킬스트릭 (X로 하나씩 써요)
 
     def retry_round(self):
-        """죽은 라운드부터 다시 (처치 수는 그대로)"""
+        """죽은 라운드부터 다시 (처치 수는 그대로). 좀비 모드는 1웨이브부터"""
+        if self.mode == "zombies":
+            self.reset(1)
+            return
         self.game_over = False
         self.reset_streak()
         self.start_round()
+
+    def make_arsenal(self):
+        """로드아웃대로 무기를 챙겨요. 퍼크도 적용해요."""
+        specs = None
+        if self.loadout:
+            specs = [WEAPON_BY_NAME[self.loadout["primary"]], WEAPON_BY_NAME[self.loadout["secondary"]]]
+        arsenal = Arsenal(specs, reload_mult=0.6 if self.perk == "QUICK HANDS" else 1.0,
+                          ammo_mult=1.5 if self.perk == "SCAVENGER" else 1.0)
+        if self.perk == "SCAVENGER":
+            arsenal.grenades += 2
+        return arsenal
+
+    @property
+    def skill(self):
+        """적 실력: 라운드마다 8%씩 올라가요 (최대 2배)"""
+        return min(2.0, 1 + 0.08 * (self.round - 1))
 
     def pick_enemy_kind(self):
         """라운드가 올라갈수록 새로운 적이 섞여 나와요"""
@@ -2002,33 +2326,69 @@ class Game:
         return random.choice(pool)
 
     def start_round(self):
-        index = (self.round - 1) % len(MAPS)
+        if self.mode == "zombies":
+            self.start_wave()
+        else:
+            self.start_battle()
+        self.reset_round_state()
+
+    def start_wave(self):
+        """좀비 웨이브: 1웨이브에서만 새로 시작하고, 다음 웨이브는 체력과 무기를 그대로 이어가요."""
+        if self.map_index != ZOMBIE_MAP:
+            self.setup_map(ZOMBIE_MAP)
+        if self.round == 1 or not hasattr(self, "arsenal"):
+            self.player = Player(*find_cells("P")[0])
+            self.player.hp = self.max_hp
+            self.arsenal = self.make_arsenal()
+        else:
+            self.arsenal.grenades = min(GRENADES_MAX, self.arsenal.grenades + 1)
+        self.enemies = []
+        self.zombies_left = 5 + self.round * 3     # 이번 웨이브에 나올 좀비 수
+        self.spawn_timer = 2.5
+        self.flow_timer = 0.0
+        self.brute_due = self.round % 5 == 0       # 5웨이브마다 거대 좀비
+        self.pickups = [Pickup(x, y, kind) for letter, kind in PICKUP_TILES.items()
+                        for x, y in find_cells(letter)]
+        self.banner = f"WAVE {self.round}"
+        self.sub_banners = [(f"{self.zombies_left} ZOMBIES", RED)]
+        if self.brute_due:
+            self.sub_banners.append(("BRUTE INCOMING!", (255, 120, 40)))
+
+    def start_battle(self):
+        index = CAMPAIGN_MAPS[(self.round - 1) % len(CAMPAIGN_MAPS)]
         if index != self.map_index:
             self.setup_map(index)
         start = find_cells("P")[0]
         self.player = Player(*start)
-        self.arsenal = Arsenal()
+        self.player.hp = self.max_hp
+        self.arsenal = self.make_arsenal()
         far = [p for p in self.spawn_points if self.player.pos.distance_to(p) > SAFE_SPAWN]
         count = min(len(far), 2 + self.round)
-        self.enemies = [Enemy(*p, self.pick_enemy_kind()) for p in random.sample(far, count)]
+        self.enemies = [Enemy(*p, self.pick_enemy_kind(), self.skill) for p in random.sample(far, count)]
         # 새로운 적이 처음 나오는 라운드에는 그 적이 꼭 한 명은 있게. 5라운드마다 보스
         news = {2: "SNIPER", 3: "HEAVY", 4: "BOMBER", 6: "SHIELD"}
         special = "BOSS" if self.round % 5 == 0 else news.get(self.round)
         if special:
             first = self.enemies[0]
-            self.enemies[0] = Enemy(first.pos.x, first.pos.y, special)
+            self.enemies[0] = Enemy(first.pos.x, first.pos.y, special, self.skill)
         # 맵에 놓인 상자는 라운드마다 다시 채워져요
         self.pickups = [Pickup(x, y, kind) for letter, kind in PICKUP_TILES.items()
                         for x, y in find_cells(letter)]
-        self.projectiles = []
-        self.effects = []
+        self.zombies_left = 0
         self.banner = f"ROUND {self.round}"
         self.sub_banners = [(f"{self.theme['op']}  -  {self.theme['name']}", WHITE)]
-        self.brief_age = 0.0       # 임무 설명이 타자 치듯 나와요
         if special == "BOSS":
             self.sub_banners.append(("BOSS ROUND!", RED))
         elif special:
             self.sub_banners.append((f"NEW ENEMY: {special}", RED))
+        if self.round > 1:
+            self.sub_banners.append((f"ENEMY SKILL {self.skill * 100:.0f}%", (255, 160, 60)))
+
+    def reset_round_state(self):
+        """라운드(웨이브)마다 새로 시작하는 것들"""
+        self.projectiles = []
+        self.effects = []
+        self.brief_age = 0.0       # 임무 설명이 타자 치듯 나와요
         self.banner_timer = 4.0
         self.round_clear_timer = 0.0
         self.damage_flash = 0.0
@@ -2059,6 +2419,93 @@ class Game:
         self.hit_head = False      # 히트마커를 크게 (헤드샷)
         self.last_kill = -99.0
         self.multi = 0
+
+    def update_flow(self):
+        """좀비 길찾기 지도: 플레이어 칸에서 시작해 걸어갈 수 있는 칸마다 걸음 수를 적어요 (너비 우선 탐색)"""
+        start = (int(self.player.pos.x), int(self.player.pos.y))
+        flow = [[None] * MAP_W for _ in range(MAP_H)]
+        flow[start[1]][start[0]] = 0
+        queue = deque([start])
+        while queue:
+            col, row = queue.popleft()
+            d = flow[row][col] + 1
+            for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                c, r = col + dc, row + dr
+                if in_map(c, r) and flow[r][c] is None and not is_blocked(c + 0.5, r + 0.5):
+                    flow[r][c] = d
+                    queue.append((c, r))
+        Enemy.flow = flow
+
+    def spawn_zombie(self):
+        """내가 안 보는 먼 곳에서 좀비가 나와요"""
+        p = self.player.pos
+        spots = [pt for pt in self.spawn_points
+                 if p.distance_to(pt) > 6 and not can_see(p, pygame.Vector2(pt))]
+        if not spots:
+            spots = sorted(self.spawn_points, key=lambda pt: -p.distance_to(pt))[:3]
+        x, y = random.choice(spots)
+        if self.brute_due:
+            kind, self.brute_due = "BRUTE", False
+        elif self.round >= 6 and random.random() < 0.05:
+            kind = "BRUTE"
+        elif self.round >= 3 and random.random() < min(0.45, 0.08 * self.round):
+            kind = "RUNNER"
+        else:
+            kind = "ZOMBIE"
+        skill = min(3.0, 1 + 0.12 * (self.round - 1))
+        self.enemies.append(Enemy(x, y, kind, skill))
+        self.zombies_left -= 1
+
+    def update_zombies(self, dt):
+        """좀비 모드: 길찾기 지도 갱신, 좀비 나오기, 서로 겹치지 않게 밀기, 그르렁 소리"""
+        self.flow_timer -= dt
+        if self.flow_timer <= 0:
+            self.flow_timer = 0.3
+            self.update_flow()
+        cap = min(24, 6 + self.round * 2)          # 한 번에 나와 있는 좀비 수 한도
+        if self.zombies_left > 0 and len(self.enemies) < cap:
+            self.spawn_timer -= dt
+            if self.spawn_timer <= 0:
+                self.spawn_timer = max(0.35, 1.6 - self.round * 0.08)
+                self.spawn_zombie()
+        for i, a in enumerate(self.enemies):
+            for b in self.enemies[i + 1:]:
+                offset = a.pos - b.pos
+                d = offset.length()
+                if 0 < d < 0.45:
+                    push = offset.normalize() * (0.45 - d) * 0.5
+                    move_with_collision(a.pos, push)
+                    move_with_collision(b.pos, -push)
+            offset = a.pos - self.player.pos              # 내 몸 안으로는 못 들어와요
+            if 0 < offset.length() < 0.5:
+                move_with_collision(a.pos, offset.normalize() * (0.5 - offset.length()))
+            a.groan_timer -= dt
+            if a.groan_timer <= 0:
+                a.groan_timer = random.uniform(3, 7)
+                self.play_at("groan", a.pos, 14, 0.8)
+
+    def buy(self, item):
+        """좀비 모드 상점: B 탄약 가득 / U 들고 있는 총 강화 (피해 1.6배, 탄창 1.5배)"""
+        cost = ZOMBIE_SHOP[item]
+        w = self.arsenal.current
+        if self.points < cost:
+            self.popups.append([f"NEED {cost} POINTS", RED, 1.2])
+            return
+        if item == "ammo":
+            for weapon in self.arsenal.weapons:
+                weapon.reserve = int(weapon.spec["reserve"] * 2 * self.arsenal.ammo_mult)
+                weapon.mag = weapon.spec["mag"]
+            self.popups.append(["MAX AMMO!", (80, 240, 255), 1.5])
+        else:
+            if w.upgraded or w.spec["projectile"]:
+                self.popups.append(["CAN'T UPGRADE THIS", RED, 1.2])
+                return
+            spec = dict(w.spec, body=w.spec["body"] * 1.6, head=w.spec["head"] * 1.6,
+                        mag=int(w.spec["mag"] * 1.5), reserve=int(w.spec["reserve"] * 1.5))
+            w.spec, w.mag, w.upgraded = spec, spec["mag"], True
+            self.popups.append([f"{spec['name']} UPGRADED!", (255, 200, 60), 2.0])
+        self.points -= cost
+        self.sounds.play("cash")
 
     @property
     def rank(self):
@@ -2147,7 +2594,7 @@ class Game:
             if event.key == pygame.K_m:            # 소리 끄기/켜기
                 self.sounds.muted = not self.sounds.muted
                 self.popups.append(["SOUND OFF" if self.sounds.muted else "SOUND ON", WHITE, 1.0])
-            elif pygame.K_1 <= event.key <= pygame.K_9:
+            elif pygame.K_1 <= event.key <= pygame.K_9 and event.key - pygame.K_1 < len(a.weapons):
                 a.switch(event.key - pygame.K_1)
             elif event.key == pygame.K_q:
                 a.switch(a.last_index)
@@ -2165,11 +2612,21 @@ class Game:
                 self.player.toggle_crouch()
             elif event.key == pygame.K_x:
                 self.use_streak()
+            elif event.key == pygame.K_b and self.mode == "zombies":
+                self.buy("ammo")
+            elif event.key == pygame.K_u and self.mode == "zombies":
+                self.buy("upgrade")
 
     # ----- 게임 진행 -----
     def update(self, dt, keys, mouse_dx, mouse_dy, buttons):
         if self.show_help:          # 도움말을 보는 동안은 멈춰요
             return
+        if self.hitstop > 0:        # 쓰러뜨린 순간: 아주 잠깐 멈춤 (묵직한 손맛)
+            self.hitstop -= dt
+            return
+        if self.slowmo > 0:         # 마지막 적: 잠깐 슬로모션
+            self.slowmo -= dt
+            dt *= 0.35
         self.banner_timer -= dt
         self.brief_age += dt
         self.hint_timer -= dt
@@ -2193,7 +2650,8 @@ class Game:
             if self.round_clear_timer <= 0:
                 self.round += 1
                 self.start_round()
-            return
+            if self.mode != "zombies":
+                return                     # 좀비 모드는 쉬는 동안에도 움직이고 상점을 쓸 수 있어요
 
         arsenal = self.arsenal
         spec = arsenal.current.spec
@@ -2208,8 +2666,13 @@ class Game:
         self.aiming = (self.aim_on and not arsenal.busy
                        and self.knife_timer == 0 and not self.player.sprinting)
         speed = (AIM_MOVE if self.aiming else 1.0) * spec.get("move", 1.0)
+        if self.perk == "LIGHTFOOT":
+            speed *= 1.12
+        # 조준점이 적 위에 있으면 시점이 살짝 느리게 돌아요 (키보드로도 적을 놓치지 않게)
+        self.on_target = self.enemy_at(WIDTH / 2, HEIGHT / 2) is not None
+        sens = min(1.0, 1.5 / self.zoom) * (0.55 if self.on_target and not self.scoped else 1.0)
         angle_before = self.player.angle
-        self.player.update(dt, keys, mouse_dx, mouse_dy, min(1.0, 1.5 / self.zoom), speed,
+        self.player.update(dt, keys, mouse_dx, mouse_dy, sens, speed,
                            allow_sprint=not self.aiming and not fire_down)
         turn = self.player.angle - angle_before
         self.sway = max(-50 * UI, min(50 * UI, self.sway * 0.85 - turn * 900 * UI))
@@ -2249,19 +2712,32 @@ class Game:
                 self.burst_left -= 1
                 self.burst_timer = spec["burst_delay"]
 
+        # 내 소리가 들리는 거리: 걸으면 4.5칸, 달리면 9칸, 앉으면 안 들려요. 총을 쏘면 16칸
+        p = self.player
+        step_noise = 0.0
+        if p.moving and p.z == 0 and not p.crouch and self.perk != "LIGHTFOOT":
+            step_noise = 9.0 if p.sprinting else 4.5
+        self.gun_noise = max(0.0, self.gun_noise - dt)
+        p.noise = max(step_noise, 16.0 if self.gun_noise > 0 else 0.0)
+        if self.mode == "zombies":
+            self.update_zombies(dt)
+
         for enemy in self.enemies:
             before = pygame.Vector2(enemy.pos)
             damage = enemy.update(dt, self.player)
-            # 가까이서 걷는 적의 발소리 (멀수록 작게)
-            dist = enemy.pos.distance_to(self.player.pos)
-            if enemy.pos != before and dist < 10:
-                enemy.step_timer = getattr(enemy, "step_timer", random.uniform(0, 0.5)) - dt * enemy.t["speed"] / 1.4
+            # 걷는 적의 군화 소리: 멀수록 작게, 소리 나는 방향(왼쪽/오른쪽)에서 들려요
+            if enemy.pos != before and enemy.pos.distance_to(p.pos) < 13:
+                enemy.step_timer -= dt * enemy.t["speed"] / 1.4
                 if enemy.step_timer <= 0:
-                    enemy.step_timer = 0.5
-                    self.sounds.play(step_sound_at(enemy.pos), (1 - dist / 10) * 0.7)
-            if enemy.flash_timer == 0.08:          # 방금 쐈어요: 멀수록 작게 들려요
-                self.sounds.play("enemy", 1 - enemy.pos.distance_to(self.player.pos) / 22)
+                    zombie = "melee" in enemy.t
+                    enemy.step_timer = 0.65 if zombie else 0.5
+                    name = "zstep" if zombie else ENEMY_STEPS[step_sound_at(enemy.pos)]
+                    self.play_at(name, enemy.pos, 13, 0.95)
+            if enemy.flash_timer == 0.08:          # 방금 쐈어요
+                self.play_at("enemy", enemy.pos, 24)
             if damage:
+                if "melee" in enemy.t:
+                    self.sounds.play("swipe")
                 self.hurt_player(damage, enemy.pos)
             if enemy.throw_at is not None:
                 self.enemy_throw(enemy, enemy.throw_at)
@@ -2275,8 +2751,23 @@ class Game:
         if self.player.hp <= 0:
             self.player.hp = 0
             self.game_over = True
-            self.record_progress(self.round)          # 다음에 이 라운드부터 이어할 수 있게
-        elif not self.enemies:
+            if self.mode == "zombies":
+                self.save["zbest"] = max(self.save.get("zbest", 0), self.round)
+                write_save(self.save)
+            else:
+                self.record_progress(self.round)      # 다음에 이 라운드부터 이어할 수 있게
+        elif self.mode == "zombies" and not self.enemies and self.zombies_left == 0 and self.round_clear_timer <= 0:
+            self.slowmo = 0.8
+            self.round_clear_timer = 6.0              # 다음 웨이브까지 숨 돌리기
+            self.banner = f"WAVE {self.round} SURVIVED"
+            self.sub_banners = [("NEXT WAVE IN 6s", WHITE)]
+            self.banner_timer = 6.0
+            self.points += ZOMBIE_POINTS["wave"]
+            self.add_xp(XP["round"], f"WAVE CLEAR  +{ZOMBIE_POINTS['wave']} POINTS")
+            self.save["zbest"] = max(self.save.get("zbest", 0), self.round + 1)
+            write_save(self.save)
+        elif self.mode != "zombies" and not self.enemies:
+            self.slowmo = 0.8                         # 마지막 한 명: 슬로모션
             self.round_clear_timer = 2.5
             self.banner = "ROUND CLEAR"
             self.sub_banners = []
@@ -2288,6 +2779,8 @@ class Game:
         """쏠 때마다: 조준이 옆으로 살짝 튀고, 화면이 번쩍이고, 탄피가 튀어나와요"""
         self.player.angle += random.uniform(-1, 1) * HORIZONTAL_KICK.get(spec["name"], 0.005)
         self.light_timer = 0.05
+        self.gun_noise = 0.5
+        self.shake = max(self.shake, 0.03 + spec["kick"] / 450)     # 총이 셀수록 화면이 크게 흔들려요
         if not spec["projectile"]:
             shotgun = spec["name"] == "SHOTGUN"
             x, y = WIDTH * (0.5 if self.aiming else 0.62), HEIGHT * 0.72
@@ -2316,6 +2809,7 @@ class Game:
         self.player.hp -= int(damage)
         self.since_hurt = 0.0
         self.damage_flash = min(1.0, 0.4 + damage / 40)
+        self.shake = max(self.shake, 0.08 + damage / 200)          # 맞으면 화면이 움찔
         self.sounds.play("hurt")
         if source is not None and source != self.player.pos:
             offset = source - self.player.pos
@@ -2346,16 +2840,20 @@ class Game:
         enemy.sees = True
         if how not in STREAK_KILLS:
             self.sounds.play("hit")
+            if self.mode == "zombies" and enemy.hp > 0:
+                self.points += ZOMBIE_POINTS["hit"]
         # 움찔: 잠깐 못 쏘고 뒤로 살짝 밀려요
         enemy.shoot_timer = max(enemy.shoot_timer, 0.2)
         away = enemy.pos - self.player.pos
         away = away.normalize() if away.length() > 0 else pygame.Vector2(1, 0)
-        move_with_collision(enemy.pos, away * 0.06)
+        move_with_collision(enemy.pos, away * min(0.35, 0.05 + amount / 500))   # 셀수록 크게 밀려요
         self.hitmarker = 0.18
         self.hitmarker_kill = enemy.hp <= 0
         self.hit_head = how == "HEADSHOT!"
         if enemy.hp <= 0 and enemy in self.enemies:
             self.enemies.remove(enemy)
+            if how not in STREAK_KILLS:
+                self.hitstop = max(self.hitstop, 0.07 if how == "HEADSHOT!" else 0.04)
             self.corpses.append(Corpse(enemy, away * (3.0 if how in ("BOOM!", "AIRSTRIKE!") else 1.6)))
             if len(self.corpses) > MAX_CORPSES:
                 self.corpses.pop(0)
@@ -2366,13 +2864,16 @@ class Game:
                 for i, kind in enumerate(("ammo", "health", "grenade", "health")):
                     offset = pygame.Vector2(0.5, 0).rotate(i * 90)
                     self.pickups.append(Pickup(enemy.pos.x + offset.x, enemy.pos.y + offset.y, kind))
-            elif random.random() < DROP_CHANCE:
+            elif random.random() < (0.12 if self.mode == "zombies" else DROP_CHANCE):
                 kind = random.choices(list(DROP_WEIGHTS), weights=list(DROP_WEIGHTS.values()))[0]
                 self.pickups.append(Pickup(enemy.pos.x, enemy.pos.y, kind))
 
     def on_kill(self, enemy, how):
         """처치 보상: 경험치, 연속 처치 메달, 킬스트릭"""
         self.sounds.play("headshot" if how == "HEADSHOT!" else "kill")
+        if self.mode == "zombies":
+            key = {"HEADSHOT!": "headshot", "KNIFE!": "knife"}.get(how, "kill")
+            self.points += ZOMBIE_POINTS[key]
         xp = XP["kill"]
         if how == "HEADSHOT!":
             xp += XP["headshot"]
@@ -2446,14 +2947,16 @@ class Game:
             self.step_timer -= dt * (1.6 if p.sprinting else (0.65 if p.crouch else 1.0))
             if self.step_timer <= 0:
                 self.step_timer = 0.42
-                self.sounds.play(step_sound_at(p.pos), random.uniform(0.35, 0.5) if p.crouch else random.uniform(0.75, 1.0))
+                quiet = 0.5 if self.perk == "LIGHTFOOT" else 1.0
+                volume = random.uniform(0.2, 0.3) if p.crouch else random.uniform(0.5, 0.65)
+                self.sounds.play(step_sound_at(p.pos), volume * quiet)
         if self.was_airborne and p.z == 0:              # 점프하고 착지
             self.sounds.play(step_sound_at(p.pos), 1.0)
         self.was_airborne = p.z > 0
         self.since_hurt += dt
         self.light_timer = max(0.0, self.light_timer - dt)
-        if self.since_hurt > REGEN_DELAY and 0 < p.hp < 100:
-            p.hp = min(100, p.hp + REGEN_RATE * dt)
+        if self.since_hurt > REGEN_DELAY and 0 < p.hp < self.max_hp:
+            p.hp = min(self.max_hp, p.hp + REGEN_RATE * dt)
         if 0 < p.hp < 30:                       # 체력이 낮으면 심장 소리
             self.heart_timer -= dt
             if self.heart_timer <= 0:
@@ -2517,24 +3020,19 @@ class Game:
         for _ in range(spec["pellets"]):
             ax = WIDTH / 2 + random.uniform(-spread, spread)
             ay = HEIGHT / 2 + random.uniform(-spread, spread) * 0.6
-            target, target_dist, head = None, math.inf, False
-            for enemy in self.enemies:
-                box = self.project(enemy.pos, enemy.t["height"], enemy.t["width"])
-                if not box:
-                    continue
-                sx, top, bottom, w, perp = box
-                if not (sx - w / 2 <= ax <= sx + w / 2 and top <= ay <= bottom):
-                    continue
-                col = int(ax // self.col_w)
-                if 0 <= col < self.num_rays and perp > self.zbuffer[col]:
-                    continue                      # 건물 뒤에 숨어 있음
-                if perp < target_dist:
-                    target, target_dist = enemy, perp
-                    head = ay < top + (bottom - top) * 0.2   # 위쪽 20% = 머리
+            # 정확히 맞았는지 보고, 아깝게 빗나갔으면 조준 보정으로 몸통에 맞혀요 (조준경 저격은 보정 없음)
+            found = self.enemy_at(ax, ay)
+            if not found and not self.scoped:
+                found = self.enemy_at(ax, ay, assist=1.0)
+            target, target_dist, head = found[:3] if found else (None, math.inf, False)
+            if found:
+                ax, ay = found[3], found[4]       # 피는 적 몸 위에서 튀게
             if target and self.blocked_by_cover(ax, ay, target_dist):
                 target = None                     # 자동차에 막힘
             if target:
                 amount = spec["head"] if head else spec["body"]
+                if self.perk == "HEAVY ROUNDS":
+                    amount *= 1.25
                 if not head and target.shield_blocks(self.player.pos):
                     amount *= 0.15                # 방패에 막힘
                 damage[target] = damage.get(target, 0) + amount
@@ -2547,6 +3045,45 @@ class Game:
             self.spray_blood(x, y, perp, head)
         for enemy, amount in damage.items():
             self.damage_enemy(enemy, amount, "HEADSHOT!" if enemy in headshots else "DOWN")
+
+    def enemy_at(self, ax, ay, assist=0.0):
+        """화면의 (ax, ay)에 보이는 가장 가까운 적.
+        assist가 있으면 적 둘레를 조금 넓혀서 찾아요 (아깝게 빗나간 총알도 맞게 하는 조준 보정).
+        돌려주는 값: (적, 거리, 머리인지, 맞은 x, 맞은 y) 또는 None"""
+        best = None
+        for enemy in self.enemies:
+            box = self.project(enemy.pos, enemy.t["height"], enemy.t["width"])
+            if not box:
+                continue
+            sx, top, bottom, w, perp = box
+            pad = assist * (8 * UI + w * 0.3)
+            if not (sx - w / 2 - pad <= ax <= sx + w / 2 + pad and top - pad * 0.5 <= ay <= bottom):
+                continue
+            hx = min(max(ax, sx - w * 0.4), sx + w * 0.4)
+            hy = min(max(ay, top), bottom)
+            col = int(hx // self.col_w)
+            if 0 <= col < self.num_rays and perp > self.zbuffer[col]:
+                continue                          # 건물 뒤에 숨어 있음
+            if best is None or perp < best[1]:
+                head = top <= ay < top + (bottom - top) * 0.2 and abs(ax - sx) <= w / 2   # 위쪽 20% = 머리
+                best = (enemy, perp, head, hx, hy)
+        return best
+
+    def spatial(self, pos, reach):
+        """pos에서 난 소리의 (크기, 방향). reach보다 멀면 안 들려요. 뒤에서 난 소리는 조금 작게."""
+        offset = pos - self.player.pos
+        dist = offset.length()
+        if dist >= reach:
+            return 0.0, 0.0
+        rel = angle_diff(math.atan2(offset.y, offset.x), self.player.angle) if dist > 0 else 0.0
+        volume = 1 - dist / reach
+        if math.cos(rel) < 0:
+            volume *= 0.8
+        return volume, math.sin(rel)
+
+    def play_at(self, name, pos, reach, loud=1.0):
+        volume, pan = self.spatial(pos, reach)
+        self.sounds.play(name, volume * loud, pan)
 
     def throw_grenade(self):
         if self.arsenal.grenades <= 0 or self.knife_timer > 0:
@@ -2603,7 +3140,7 @@ class Game:
             return min(1.0, 1.25 * (1 - d / radius))
 
         self.effects.append(Effect(pos, self.explosion_frames, 0.5, radius * 0.9))
-        self.sounds.play("explosion", 1.1 - self.player.pos.distance_to(pos) / 25)
+        self.play_at("explosion", pos, 25, 1.1)
         if owner in ("player", "streak"):
             how = "AIRSTRIKE!" if owner == "streak" else "BOOM!"
             for enemy in list(self.enemies):
@@ -2644,8 +3181,8 @@ class Game:
                 continue
             if item.kind == "ammo" and self.arsenal.add_ammo():
                 self.feed.append(["+AMMO", 1.5])
-            elif item.kind == "health" and self.player.hp < 100:
-                self.player.hp = min(100, self.player.hp + HEALTH_PACK)
+            elif item.kind == "health" and self.player.hp < self.max_hp:
+                self.player.hp = min(self.max_hp, self.player.hp + HEALTH_PACK)
                 self.feed.append([f"+{HEALTH_PACK} HP", 1.5])
             elif item.kind == "grenade" and self.arsenal.grenades < GRENADES_MAX:
                 self.arsenal.grenades += 1
@@ -2692,6 +3229,8 @@ class Game:
         self.draw_particles(screen, casings=False)       # 튀는 피
         if self.theme["snow"]:
             self.draw_snow(screen)
+        if self.theme.get("rain"):
+            self.draw_rain(screen)
         if self.scoped:
             screen.blit(self.scope_overlay, (0, 0))
             label = self.font.render(f"x{self.zoom}", True, WHITE)
@@ -2726,6 +3265,16 @@ class Game:
             size = 2 if speed > 0.14 else 1
             pygame.draw.circle(screen, (240, 245, 255), (x, y), size * UI)
 
+    def draw_rain(self, screen):
+        """빗줄기: 비스듬히 빠르게 떨어져요"""
+        t = pygame.time.get_ticks() / 1000
+        shift = self.player.angle / self.fov * WIDTH
+        length = 22 * UI
+        for x0, y0, speed in self.snowflakes:
+            y = (y0 + t * speed * 9) % 1.0 * HEIGHT
+            x = (x0 * WIDTH - shift + y * 0.25) % WIDTH
+            pygame.draw.line(screen, (150, 165, 200), (x, y), (x - length * 0.25, y + length), 1)
+
     def draw_sky(self, screen):
         horizon = self.horizon
         screen.blit(self.sky, (0, horizon - self.sky.get_height()))
@@ -2736,10 +3285,11 @@ class Game:
             z = min(2, self.zoom)            # 조준경으로 봐도 해가 화면을 다 가리지 않게
             x = WIDTH / 2 + math.tan(rel) * self.proj
             y = horizon - 45 * UI * z
-            pygame.draw.circle(screen, (255, 200, 140), (x, y), 70 * UI * z)
-            pygame.draw.circle(screen, (255, 225, 160), (x, y), 48 * UI * z)
-            pygame.draw.circle(screen, (255, 245, 210), (x, y), 34 * UI * z)
-        pygame.draw.rect(screen, FLOORS[self.theme["ground"]], (0, horizon, WIDTH, max(0, HEIGHT - horizon)))
+            outer, middle, inner = self.theme.get("sun_colors", ((255, 200, 140), (255, 225, 160), (255, 245, 210)))
+            pygame.draw.circle(screen, outer, (x, y), 70 * UI * z)
+            pygame.draw.circle(screen, middle, (x, y), 48 * UI * z)
+            pygame.draw.circle(screen, inner, (x, y), 34 * UI * z)
+        pygame.draw.rect(screen, FLOOR_COLORS[self.theme["ground"]], (0, horizon, WIDTH, max(0, HEIGHT - horizon)))
 
     def draw_world(self, screen):
         p = self.player
@@ -2757,7 +3307,7 @@ class Game:
                 y_far = horizon if d1 == math.inf else horizon + eye * proj / (d1 * fix)
                 if y_near > y_far and y_far < HEIGHT:
                     # 바닥은 벽보다 안개를 약하게 (바다가 회색으로 안 보이게)
-                    color = fog(FLOORS[kind], (min(d1, fog_dist) + d0) * 0.3, fog_dist)
+                    color = fog(FLOOR_COLORS[kind], (min(d1, fog_dist) + d0) * 0.3, fog_dist)
                     pygame.draw.rect(screen, color, (x, y_far, col_w, min(HEIGHT, y_near) - y_far + 1))
 
             # 2) 건물: 먼 것부터 그려야 가까운 것이 앞에 보여요
@@ -2962,7 +3512,7 @@ class Game:
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 start = (cx + dx * gap, cy + dy * gap)
                 end = (cx + dx * (gap + 10 * UI), cy + dy * (gap + 10 * UI))
-                pygame.draw.line(screen, GREEN, start, end, 2)
+                pygame.draw.line(screen, RED if self.on_target else GREEN, start, end, 2)
         if self.hitmarker > 0:
             # 히트마커: 맞히면 하얀 X, 쓰러뜨리면 빨간 X, 헤드샷이면 크게. 처음에 살짝 커졌다가 줄어요
             color = RED if self.hitmarker_kill else WHITE
@@ -3018,22 +3568,39 @@ class Game:
         image = big_font.render(ammo, True, WHITE)
         rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, HEIGHT - 20 * UI)))
         image = font.render(f"GRENADE x{self.arsenal.grenades}", True, YELLOW)
-        screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 4)))
+        rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 4)))
+        if self.mode == "zombies":
+            image = font.render(f"POINTS {self.points}", True, (255, 200, 60))
+            rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 4)))
+            shop = f"B ammo {ZOMBIE_SHOP['ammo']}   U upgrade {ZOMBIE_SHOP['upgrade']}"
+            image = self.fonts["tiny"].render(shop, True, WHITE)
+            screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 2)))
 
         # 아래 가운데 무기 칸
         slot_w = 76 * UI
-        left = WIDTH / 2 - slot_w * len(WEAPONS) / 2
+        if len(self.arsenal.weapons) <= 3:
+            slot_w = 120 * UI                     # 로드아웃(무기 2개)은 칸을 넓게
+        left = WIDTH / 2 - slot_w * len(self.arsenal.weapons) / 2
         for i, weapon in enumerate(self.arsenal.weapons):
             rect = pygame.Rect(left + i * slot_w + 3, HEIGHT - 44 * UI, slot_w - 6, 30 * UI)
             selected = i == self.arsenal.index
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 220, 90, 200) if selected else (0, 0, 0, 120))
             screen.blit(panel, rect)
-            label = self.fonts["tiny"].render(f"{i + 1} {weapon.spec['name']}", True, BLACK if selected else WHITE)
+            name = weapon.spec["name"] + (" +" if weapon.upgraded else "")
+            color = BLACK if selected else ((255, 200, 60) if weapon.upgraded else WHITE)
+            label = self.fonts["tiny"].render(f"{i + 1} {name}", True, color)
             screen.blit(label, label.get_rect(center=rect.center))
+        if self.perk:
+            label = self.fonts["tiny"].render(f"PERK: {self.perk}", True, (80, 240, 255))
+            screen.blit(label, label.get_rect(center=(WIDTH / 2, HEIGHT - 54 * UI)))
 
         # 위쪽 정보
-        info = f"ROUND {self.round}   {self.theme['name']}   ENEMIES {len(self.enemies)}   KILLS {self.kills}"
+        if self.mode == "zombies":
+            info = (f"WAVE {self.round}   {self.theme['name']}   "
+                    f"ZOMBIES {len(self.enemies) + self.zombies_left}   KILLS {self.kills}")
+        else:
+            info = f"ROUND {self.round}   {self.theme['name']}   ENEMIES {len(self.enemies)}   KILLS {self.kills}"
         screen.blit(font.render(info, True, WHITE), (16, 12))
         # 계급과 경험치 막대
         rank_label = self.small_font.render(f"RANK {self.rank}", True, WHITE)
@@ -3052,7 +3619,7 @@ class Game:
 
         if self.hint_timer > 0 and not self.game_over:
             hints = ["WASD move   SHIFT sprint   C crouch/slide   ARROWS look   SPACE jump   F fire   E aim",
-                     "G grenade   V knife   X killstreak   1-9 weapon   R reload   H help (pause)"]
+                     f"G grenade   V knife   X killstreak   1-{len(self.arsenal.weapons)} weapon   R reload   H help (pause)"]
             for i, hint in enumerate(hints):
                 self.center_text(screen, self.small_font, hint, WHITE, HEIGHT - (82 - i * 20) * UI)
         if self.banner_timer > 0:
@@ -3063,7 +3630,12 @@ class Game:
                 typed = self.theme["brief"][:int(self.brief_age * 40)]
                 y = HEIGHT / 3 + (45 + len(self.sub_banners) * 32) * UI
                 self.center_text(screen, self.small_font, typed, (200, 230, 255), y)
-        if self.game_over:
+        if self.game_over and self.mode == "zombies":
+            self.center_text(screen, big_font, "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
+            self.center_text(screen, font, f"Survived to wave {self.round}  /  Kills {self.kills}  /  "
+                                           f"Best wave {self.save.get('zbest', self.round)}", WHITE, HEIGHT / 2 + 10 * UI)
+            self.center_text(screen, font, "R: try again    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
+        elif self.game_over:
             self.center_text(screen, big_font, "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
             self.center_text(screen, font, f"Round {self.round}  /  Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
             self.center_text(screen, font, f"R: retry round {self.round}    N: new game    ESC: menu",
@@ -3076,7 +3648,7 @@ class Game:
         for row in range(MAP_H):
             for col in range(MAP_W):
                 spec = WALL_GRID[row][col]
-                color = spec[0] if spec else FLOORS[FLOOR_GRID[row][col]]
+                color = spec[0] if spec else FLOOR_COLORS[FLOOR_GRID[row][col]]
                 pygame.draw.rect(mini, (*color, 190), (col * cell, row * cell, cell, cell))
         return mini
 
@@ -3146,8 +3718,8 @@ def open_window():
 
 
 async def intro_screen(save):
-    """시작 화면: 조작법을 보여주고 새 게임 / 이어하기 / 해상도를 골라요.
-    고른 시작 라운드를 돌려줘요. ESC나 창 닫기면 None (닫기는 "closed")."""
+    """시작 화면: 조작법을 보여주고 캠페인 / 좀비 모드 / 이어하기 / 해상도를 골라요.
+    고른 것을 dict(mode=..., round=...)로 돌려줘요. ESC면 None, 창 닫기면 "closed"."""
     options = available_resolutions()
     res_index = min(save.get("res", 0), len(options) - 1)
     set_resolution(*options[res_index])
@@ -3165,9 +3737,11 @@ async def intro_screen(save):
             if event.key == pygame.K_ESCAPE:
                 return None
             if event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
-                return 1
+                return dict(mode="campaign", round=1)
+            if event.key == pygame.K_z:
+                return dict(mode="zombies", round=1)
             if event.key == pygame.K_c and continue_round > 1:
-                return continue_round
+                return dict(mode="campaign", round=continue_round)
             if event.key == pygame.K_t and len(options) > 1:
                 res_index = (res_index + 1) % len(options)
                 save["res"] = res_index
@@ -3177,7 +3751,7 @@ async def intro_screen(save):
                 fonts = make_fonts()
 
         ko = fonts["lang"] == "ko"
-        parts = ["Enter 새 게임" if ko else "ENTER new game"]
+        parts = ["Enter 캠페인" if ko else "ENTER campaign", "Z 좀비 모드" if ko else "Z zombies"]
         if continue_round > 1:
             parts.append(f"C 이어하기 (라운드 {continue_round})" if ko else f"C continue (round {continue_round})")
         if len(options) > 1:
@@ -3193,10 +3767,130 @@ async def intro_screen(save):
             pygame.draw.line(screen, (255, 80, 200) if i % 2 else (80, 240, 255), (0, y), (WIDTH, y), 2)
         title = fonts["title"].render("STRIKE ZONE", True, (255, 80, 200))
         screen.blit(title, title.get_rect(center=(WIDTH / 2, HEIGHT * 0.09)))
-        best = save.get("best", 0)
+        best, zbest = save.get("best", 0), save.get("zbest", 0)
+        records = []
         if best:
-            label = fonts["help"].render(f"최고 기록: 라운드 {best}" if ko else f"Best: round {best}", True, WHITE)
+            records.append(f"캠페인 최고 라운드 {best}" if ko else f"Campaign best: round {best}")
+        if zbest:
+            records.append(f"좀비 최고 웨이브 {zbest}" if ko else f"Zombies best: wave {zbest}")
+        if records:
+            label = fonts["help"].render("     ".join(records), True, WHITE)
             screen.blit(label, label.get_rect(center=(WIDTH / 2, HEIGHT * 0.88)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
+def weapon_stats(spec):
+    """로드아웃 화면의 성능 막대 (0~1): 피해, 연사, 탄창, 정확도, 기동성"""
+    if spec["projectile"]:
+        damage = 1.0
+    else:
+        damage = min(1.0, spec["body"] * spec["pellets"] / 160)
+    return [("DAMAGE", damage), ("FIRE RATE", min(1.0, 0.065 / spec["delay"])),
+            ("MAGAZINE", min(1.0, spec["mag"] / 100)), ("ACCURACY", max(0.05, 1 - spec["spread"] / 50)),
+            ("MOBILITY", spec.get("move", 1.0) * (0.85 if spec["scope"] else 1.0))]
+
+
+async def loadout_screen(save, choice):
+    """로드아웃: 주무기 / 보조무기 / 퍼크를 골라요. ↑↓ 줄 고르기, ←→ 바꾸기, Enter 시작, ESC 뒤로.
+    고른 로드아웃(dict)을 돌려줘요. ESC면 None, 창 닫기면 "closed"."""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    perk_names = [name for name, _, _ in PERKS]
+    options = [PRIMARIES, SECONDARIES, perk_names]
+    labels = ["PRIMARY", "SECONDARY", "PERK"]
+    saved = dict(DEFAULT_LOADOUT, **save.get("loadout", {}))
+    picks = [options[0].index(saved["primary"]) if saved["primary"] in options[0] else 0,
+             options[1].index(saved["secondary"]) if saved["secondary"] in options[1] else 0,
+             options[2].index(saved["perk"]) if saved["perk"] in options[2] else 0]
+    row = 0
+    previews = {}
+    while True:
+        clock.tick(30)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key == pygame.K_ESCAPE:
+                return None
+            if event.key in (pygame.K_UP, pygame.K_w):
+                row = (row - 1) % 3
+            elif event.key in (pygame.K_DOWN, pygame.K_s):
+                row = (row + 1) % 3
+            elif event.key in (pygame.K_LEFT, pygame.K_a):
+                picks[row] = (picks[row] - 1) % len(options[row])
+            elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                picks[row] = (picks[row] + 1) % len(options[row])
+            elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                loadout = dict(primary=options[0][picks[0]], secondary=options[1][picks[1]],
+                               perk=options[2][picks[2]])
+                save["loadout"] = loadout
+                write_save(save)
+                return loadout
+
+        # 배경과 제목
+        screen.fill((14, 10, 30))
+        for i in range(0, HEIGHT, max(2, int(4 * UI))):
+            shade_v = int(10 + 20 * i / HEIGHT)
+            pygame.draw.line(screen, (shade_v, 8, shade_v + 18), (0, i), (WIDTH, i))
+        title = fonts["big"].render("LOADOUT", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
+        if choice["mode"] == "zombies":
+            mode_text = "ZOMBIES  -  BLOOD MOON"
+        else:
+            mode_text = f"CAMPAIGN  -  ROUND {choice['round']}"
+        label = fonts["normal"].render(mode_text, True, (80, 240, 255))
+        screen.blit(label, label.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.16)))
+
+        # 왼쪽: 세 줄 (주무기 / 보조무기 / 퍼크)
+        card_w, card_h = WIDTH * 0.44, HEIGHT * 0.19
+        for i in range(3):
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.23 + i * 0.22), card_w, card_h)
+            selected = i == row
+            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+            panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
+            screen.blit(panel, rect)
+            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1)
+            screen.blit(fonts["small"].render(labels[i], True, (200, 200, 220)), (rect.x + 14, rect.y + 10))
+            name = options[i][picks[i]]
+            arrows = f"<  {name}  >" if selected else name
+            image = fonts["big"].render(arrows, True, YELLOW if selected else WHITE)
+            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.28))
+            if i < 2:
+                desc = WEAPON_INFO[name][0 if ko else 1]
+            else:
+                desc = PERKS[picks[2]][1 if ko else 2]
+            image = fonts["help"].render(desc, True, (200, 230, 255))
+            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.72))
+
+        # 오른쪽: 고른 무기 모습과 성능 막대
+        weapon = options[1][picks[1]] if row == 1 else options[0][picks[0]]
+        if weapon not in previews:
+            image = make_viewmodel(weapon, False)[0]
+            scale = min(WIDTH * 0.4 / image.get_width(), HEIGHT * 0.4 / image.get_height())
+            previews[weapon] = pygame.transform.smoothscale(
+                image, (int(image.get_width() * scale), int(image.get_height() * scale)))
+        box = pygame.Rect(WIDTH * 0.54, HEIGHT * 0.23, WIDTH * 0.40, HEIGHT * 0.41)
+        pygame.draw.rect(screen, (0, 0, 0), box)
+        pygame.draw.rect(screen, (70, 60, 100), box, 1)
+        preview = previews[weapon]
+        screen.blit(preview, preview.get_rect(bottomright=box.bottomright))
+        screen.blit(fonts["normal"].render(weapon, True, WHITE), (box.x + 12, box.y + 10))
+        for k, (stat, value) in enumerate(weapon_stats(WEAPON_BY_NAME[weapon])):
+            y = HEIGHT * (0.69 + k * 0.045)
+            screen.blit(fonts["small"].render(stat, True, (200, 200, 220)), (box.x, y))
+            bar = pygame.Rect(box.x + WIDTH * 0.12, y + 4 * UI, WIDTH * 0.28, 10 * UI)
+            pygame.draw.rect(screen, (45, 40, 70), bar)
+            bar.width = int(bar.width * value)
+            pygame.draw.rect(screen, (80, 240, 255), bar)
+
+        hint = ("↑↓ 고르기     ←→ 바꾸기     Enter 시작     ESC 뒤로" if ko
+                else "UP/DOWN choose     LEFT/RIGHT change     ENTER start     ESC back")
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -3207,9 +3901,15 @@ async def run():
     창을 닫으면 False, ESC로 끝내면 True를 돌려줘요 (메뉴로 돌아갈지 판단용).
     """
     save = load_save()
-    start_round = await intro_screen(save)
-    if start_round is None or start_round == "closed":
-        return start_round is None
+    while True:
+        choice = await intro_screen(save)            # 모드 고르기
+        if choice is None or choice == "closed":
+            return choice is None
+        loadout = await loadout_screen(save, choice)  # 무기와 퍼크 고르기 (ESC면 시작 화면으로)
+        if loadout == "closed":
+            return False
+        if loadout:
+            break
     screen = pygame.display.get_surface()
     clock = pygame.time.Clock()
 
@@ -3218,7 +3918,7 @@ async def run():
     pygame.mouse.set_visible(False)
     pygame.mouse.get_rel()
 
-    game = Game(save, start_round)
+    game = Game(save, choice["round"], mode=choice["mode"], loadout=loadout)
     running = True
     closed = False             # 창을 닫았는지 여부
     work_time, frames, check_timer = 0.0, 0, 0.0   # 자동 해상도 조절용 기록
