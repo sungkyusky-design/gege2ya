@@ -1,5 +1,7 @@
 @echo off
+chcp 65001 >nul
 rem 더블클릭하면 게임에 필요한 pygame을 설치하고 게임 메뉴를 열어요.
+rem (chcp 65001: 아래 한글 안내 문구가 깨지지 않게 명령 창을 UTF-8로 바꿔요)
 cd /d "%~dp0"
 python -m pip install --quiet --user pygame
 python main.py
