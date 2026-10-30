@@ -7,14 +7,33 @@ Python + pygame으로 만든 게임들입니다.
 | 쉿, 쳐다보지 마! | SCP-096을 놀리고 도망치는 추격 게임 |
 | 스트라이크 존: 네온 비치 | 80년대 네온 해변 도시에서 싸우는 1인칭 총게임 |
 
-## 🪟 Windows: exe 하나로 바로 하기 (가장 쉬움)
+## ⬇️ 받아서 바로 하기 (가장 쉬움, Python 필요 없음)
+
+### 🪟 Windows
 
 **[Games.exe 받기](https://github.com/sungkyusky-design/gege2ya/releases/latest/download/Games.exe)** → 받은 파일 더블클릭. 끝!
 
-- Python 설치가 필요 없어요. 처음 켤 때는 몇 초 걸려요.
+- 처음 켤 때는 몇 초 걸려요.
 - 파란 창 **"Windows의 PC 보호"** 가 뜨면 **추가 정보 → 실행** 을 누르세요 (인터넷에서 받은 새 프로그램이라 한 번 확인하는 거예요).
-- `main` 브랜치에 코드가 올라오면 GitHub가 exe를 자동으로 새로 만들어요 (`.github/workflows/build-exe.yml`).
-  다시 받으면 항상 최신 버전이에요.
+
+### 🍎 Mac (M1 이후 Apple Silicon 맥)
+
+**[Games-mac.zip 받기](https://github.com/sungkyusky-design/gege2ya/releases/latest/download/Games-mac.zip)** → 받은 ZIP을 더블클릭해서 풀면 **Games** 앱이 나와요. (응용 프로그램 폴더로 옮겨 두면 편해요.)
+
+애플 개발자 인증이 없는 앱이라 **처음 한 번만** 이렇게 열어 주세요.
+
+1. **Games** 앱을 더블클릭 → "열 수 없습니다 / 확인할 수 없습니다" 창이 뜨면 **완료(또는 확인)** 를 눌러 닫아요.
+2. **시스템 설정 → 개인정보 보호 및 보안** 으로 가서 아래로 내리면 *"Games"이(가) 차단되었습니다* 옆에 **그래도 열기** 버튼이 있어요. 누르고 암호를 입력해요.
+3. 다음부터는 그냥 더블클릭하면 열려요.
+
+> "Games이(가) 손상되었기 때문에 열 수 없습니다" 가 뜨면 터미널에 아래를 붙여넣고 다시 열어 보세요.
+> ```bash
+> xattr -dr com.apple.quarantine ~/Downloads/Games.app
+> ```
+> (앱을 다른 곳으로 옮겼다면 경로를 바꿔 주세요.) 인텔 맥이라면 아래 "Python으로 하기" 방법을 쓰세요.
+
+`main` 브랜치에 코드가 올라오면 GitHub가 두 파일을 자동으로 새로 만들어요 (`.github/workflows/build-apps.yml`).
+다시 받으면 항상 최신 버전이에요.
 
 ## 💻 내 컴퓨터에서 하기 (Python으로)
 
