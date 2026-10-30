@@ -38,6 +38,7 @@
     Q                : 방금 쓰던 무기로
     R                : 재장전
     H                : 도움말 (보는 동안 일시정지)
+    M                : 소리 끄기 / 켜기
     P 또는 F3        : FPS와 화면 선명도 표시
     Enter 또는 F11   : 전체 화면 (컴퓨터에서 실행할 때)
     ESC              : 종료 (메뉴로)
@@ -59,6 +60,7 @@
     세로 줄이 가늘수록 선명하지만 느려져요. 그래서 컴퓨터 속도에 맞춰 줄 폭을 자동으로 바꿔요.
 """
 
+import array
 import asyncio
 import math
 import random
@@ -231,15 +233,18 @@ ENEMY_TYPES = {
 }
 
 # ---------------------------------------------------------------
-# 맵 3개: 라운드마다 바뀌어요 (1 → 2 → 3 → 1 ...)
+# 맵 6개: 라운드마다 바뀌어요 (1 → 2 → ... → 6 → 1 ...)
 # ---------------------------------------------------------------
 #   바닥   '~' 바다(못 들어가요)  '.' 모래사장  '_' 보드워크  ':' 인도  '=' 차도
 #          'g' 잔디  'x' 광장 타일  ',' 부두 콘크리트  'p' 나무 부두
+#          ';' 사막 모래  '#' 흙길  '*' 눈  '-' 다져진 눈길
 #   건물   'A' 분홍 호텔  'B' 민트 건물  'C' 노란 가게  'D' 하얀 아르데코 호텔
 #          'R' 붉은 벽돌  'N' 나이트클럽  'G' 유리 오피스 타워  'S' 마천루
 #          'W' 창고  'r' 'u' 'o' 빨강/파랑/주황 컨테이너  'Y' 두 층으로 쌓인 컨테이너
-#          'K' 나무 상자  'Q' 쓰레기통  'F' 분수/동상  (K Q F 와 컨테이너는 엄폐물)
-#   장식   'T' 야자수  'c' 자동차(총알을 막아요)  'L' 가로등  'b' 네온 광고판  'X' 크레인
+#          'M' 흙벽돌 집  'O' 콘크리트 벙커  'U' 연료 탱크  'J' 나무집  'V' 돌담  'Z' 모래주머니
+#          'K' 나무 상자  'Q' 쓰레기통  'F' 분수/동상  (K Q F Z V 와 컨테이너는 엄폐물)
+#   장식   'T' 야자수  'c' 자동차(총알을 막아요)  'v' 불탄 차(총알을 막아요)  'L' 가로등
+#          'b' 네온 광고판  'X' 크레인  'I' 침엽수
 #   상자   'a' 탄약  'h' 체력  'n' 수류탄
 #   위치   'P' 플레이어 시작  'E' 적이 나타날 수 있는 곳
 #
@@ -247,11 +252,15 @@ ENEMY_TYPES = {
 #   sky    : 하늘 색 (위에서 아래로)   haze : 멀리 있는 것이 묻히는 안개 색
 #   sun    : 해의 방향 (None이면 해 없음)   stars : 밤하늘 별
 #   ground : 지평선 아래 기본 바닥        lit  : 창문 몇 개 중 하나에 불이 켜지는지
+#   fog    : 안개 거리 비율 (작을수록 짙은 안개)   snow : 눈이 내리는지
+#   camo   : 적 위장복 색 (None이면 기본 군복)
+#   op / brief : 라운드 시작 때 나오는 작전 이름과 임무
 MAPS = [
     dict(
         name="NEON BEACH",
         sky=[(0.0, (40, 30, 90)), (0.55, (150, 70, 140)), (0.85, (245, 120, 120)), (1.0, (250, 170, 140))],
-        haze=(250, 170, 140), sun=math.pi, stars=False, ground=".", lit=4,
+        haze=(250, 170, 140), sun=math.pi, stars=False, ground=".", lit=4, fog=1.0, snow=False, camo=None,
+        op="OPERATION SUNSET", brief="Hostiles have taken the boardwalk. Clear the beach district.",
         rows=[
             "~~~.T_:==:DDDDDxRRR:==:GGGG:CCCCC:GG",
             "~~~.._L==:DxxxxxRRR:==:GGGG:CCCCC:GG",
@@ -284,7 +293,8 @@ MAPS = [
     dict(
         name="DOWNTOWN",
         sky=[(0.0, (8, 8, 30)), (0.6, (30, 20, 70)), (0.9, (90, 40, 110)), (1.0, (130, 60, 130))],
-        haze=(70, 40, 95), sun=None, stars=True, ground=":", lit=2,
+        haze=(70, 40, 95), sun=None, stars=True, ground=":", lit=2, fog=1.0, snow=False, camo=None,
+        op="OPERATION NIGHTFALL", brief="Enemy snipers on the high-rises. Move fast between cover.",
         rows=[
             "SSSSS:==:GGGGGG:==:NNNEAA:==:SSS",
             "SSSSSL==:Gxxxx::==:NNNhAA:==:SSS",
@@ -315,7 +325,8 @@ MAPS = [
     dict(
         name="HARBOR",
         sky=[(0.0, (60, 100, 165)), (0.6, (140, 165, 200)), (0.9, (250, 190, 140)), (1.0, (255, 215, 170))],
-        haze=(225, 205, 185), sun=0.0, stars=False, ground=",", lit=6,
+        haze=(225, 205, 185), sun=0.0, stars=False, ground=",", lit=6, fog=1.0, snow=False, camo=None,
+        op="OPERATION TIDEWATER", brief="Secure the container yard before the shipment leaves.",
         rows=[
             "~~~~~~pp~~~~~~~~pp~~~~~~~~pp~~~~",
             "~~~~~~pp~~~~~~~~pp~~~~~~~~pp~~~~",
@@ -343,6 +354,105 @@ MAPS = [
             "~~~WWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
         ],
     ),
+    dict(
+        name="DESERT TOWN",
+        sky=[(0.0, (60, 110, 190)), (0.6, (130, 175, 225)), (0.9, (225, 215, 185)), (1.0, (240, 225, 195))],
+        haze=(235, 220, 190), sun=-math.pi / 2, stars=False, ground=";", lit=9, fog=1.1, snow=False,
+        camo=dict(uniform=(185, 160, 110), vest=(150, 125, 85), pants=(165, 140, 100)),
+        op="OPERATION SANDSTORM", brief="Insurgents are holed up in the old town. Check every courtyard.",
+        rows=[
+            ";;;;;;;;;;;;E;;##;;;;;;;;;;;;;;;",
+            ";MMMMMM;MMMMM;;##;MMMMM;MMMMMMM;",
+            ";M;a;;M;M;;;M;;##;ME;nM;M;;;;EM;",
+            ";M;;;;M;;;h;M;;##;M;;;M;;;;a;;M;",
+            ";MM;MMM;M;;;M;;##;MM;MM;M;;;;;M;",
+            ";;;;;;;;MMMMM;;v#;;;;;;;MMM;MMM;",
+            ";MMMM;;;;;;;;T;##;MMMM;;;;;;;;;;",
+            ";MMMM;MMM;MMM;;##;MMMM;;;K;K;;;;",
+            ";MMMM;M;;E;;M;;##;MMMM;;;E;;;K;;",
+            ";MMMM;MMMMMMM;;##;MMMM;;;;K;K;;;",
+            ";;;;;;;;;;;;;ZZ##;;T;;;;;;;;;;;;",
+            "P####v######################v###",
+            "######################v#######E#",
+            ";;;;;;;T;;;;;;;##ZZ;;;;;;;;E;;T;",
+            ";MMMMM;;MMMMMM;##;MMMMM;;MMMMM;;",
+            ";M;;;M;;M;;n;M;##;M;;;;;;;;;;M;;",
+            ";M;h;;;;MM;MMM;##;M;ZZ;;a;ZZ;M;;",
+            ";ME;;M;;;;;;;;;##;M;;;;K;;;;;M;;",
+            ";MMMMM;;;;;;;;;##;M;;E;;K;;;;M;;",
+            ";;;;;;;;;MMMMM;#v;M;ZZ;;;;ZZ;M;;",
+            ";MM;MMM;;MMMMM;##;M;;;;;;;;;EM;;",
+            ";M;E;;M;;MMMMM;##;MMMMM;;MMMMM;;",
+            ";MMMMMM;;MMMMM;#E;;;;;;;;;;;;;;;",
+            ";;;;;;;;;;;;;;;##;;;;;;;;;;;;;;;",
+        ],
+    ),
+    dict(
+        name="SNOW BASE",
+        sky=[(0.0, (10, 15, 35)), (0.6, (35, 50, 80)), (0.9, (90, 110, 140)), (1.0, (150, 165, 185))],
+        haze=(150, 165, 185), sun=None, stars=True, ground="*", lit=3, fog=0.8, snow=True,
+        camo=dict(uniform=(225, 228, 232), vest=(165, 170, 180), pants=(200, 205, 212)),
+        op="OPERATION WHITEOUT", brief="Infiltrate the arctic base. Watch the bunkers.",
+        rows=[
+            "II*I******-***********-*****I*I*",
+            "*****I**E*-***********-*********",
+            "**OOOOOO**-*WWWWWWWW**-*UU*****I",
+            "I*OOOOOO**-*W*E****W**-*UU**UU**",
+            "**OOOOOO**-*W*h****W**-*****UU**",
+            "**OOOOOO**-*WWW**WWW**-*********",
+            "**********-***********-******E**",
+            "*****a****-********E*Z-****a****",
+            "------c-------------------------",
+            "**********-Z**********-*********",
+            "**JJJJJJ**-*OOOOOOOO**-**OOOOO**",
+            "**J**E*J**-*O******O**-**OOOOO**",
+            "**Ja***J**-****Kn*****-**OOOOO**",
+            "**JJ*JJJ**-*O****E*O**-**OOOOO**",
+            "**********-*OOOOOOOO**-***E***n*",
+            "**********-***********-Z********",
+            "P--------------------------c----",
+            "*********Z-***********-*********",
+            "**ZZZ*****-**ZZ*******-***ZZZ*E*",
+            "**********-*********E*-*WWWWW***",
+            "*******ZZ*-******h****-*WWWWW***",
+            "***E******-*E*****ZZ**-*WWWWW*I*",
+            "I*********-***********-*****E***",
+            "******I***-***********-**I*****I",
+        ],
+    ),
+    dict(
+        name="FOREST VILLAGE",
+        sky=[(0.0, (85, 110, 140)), (0.6, (145, 165, 175)), (0.9, (195, 205, 195)), (1.0, (205, 212, 202))],
+        haze=(190, 200, 190), sun=None, stars=False, ground="g", lit=5, fog=0.6, snow=False,
+        camo=dict(uniform=(70, 95, 55), vest=(50, 70, 40), pants=(60, 70, 50)),
+        op="OPERATION GREENWOOD", brief="Enemy squad spotted near the village. Use the trees for cover.",
+        rows=[
+            "ggggIggggggggggggggI~~ggggg#gggg",
+            "gIgIgIIggggggggEIgIg~~ggggg#gggg",
+            "ggggggggEIggIggggIgg~~gIgEg#gJJJ",
+            "gggggggggggIgIgIgggg~~ggggg#ggaJ",
+            "ggggggggggggggggggIg~~ggggg#gJEJ",
+            "ggggggggggggIggIgggg~~ggggg#IJJJ",
+            "####################pp##########",
+            "ggggggggg#gggggggEgg~~ggggg#gggg",
+            "ggggggggg#gJJJJJgggg~~gIggg#Iggg",
+            "ggVgIIggg#gJaggJJJJg~~gJJJJ#gggg",
+            "ggVghgggg#gJggEJJgJg~~gJngJ#gggg",
+            "IgVgggggg#gJJgJJJggg~~gJgEg#gggg",
+            "ggVgggggg#ggggggJhJg~~gJJJJ#gggg",
+            "ggVVVVVVg#gJJJJgJJJg~~ggggg#ggEg",
+            "ggIgggIgg#gJJJJggggg~~ggggg#gggg",
+            "ggggggggg#gJJJJggggg~~ggEIg#gggg",
+            "P###################pp##########",
+            "gggggggggggggggggggg~~gggIg#gggg",
+            "ggggEgggggggEgggggIg~~gJJJg#gggg",
+            "gggggggggIIggggggggg~~gJJJI#gggg",
+            "gIggggggggVVVVVVgggg~~gJJJg#gEgg",
+            "ggggggggggggaggggggg~~ggggg#gggg",
+            "gggggggggggggggggggg~~Igggg#ggIg",
+            "gggIggIggggggggggggg~~ggggg#gggg",
+        ],
+    ),
 ]
 
 # 건물 종류: 글자 -> (색, 높이, 무늬, 네온사인 색 또는 None)
@@ -364,6 +474,12 @@ WALLS = {
     "K": ((150, 110, 70), 1.0, False, None),
     "Q": ((40, 110, 70), 0.9, False, None),
     "F": ((200, 220, 235), 0.8, False, None),
+    "M": ((200, 160, 110), 1.4, True, None),
+    "O": ((140, 145, 150), 1.3, False, None),
+    "U": ((225, 225, 220), 2.2, "ribs", None),
+    "J": ((125, 85, 50), 1.5, True, None),
+    "V": ((120, 120, 112), 0.9, False, None),
+    "Z": ((165, 145, 100), 0.7, "ribs", None),
 }
 
 # 바닥 종류: 글자 -> 색
@@ -377,6 +493,10 @@ FLOORS = {
     "x": (215, 190, 200),
     ",": (160, 160, 150),
     "p": (125, 90, 60),
+    ";": (215, 185, 130),
+    "#": (135, 105, 75),
+    "*": (232, 238, 245),
+    "-": (190, 198, 210),
 }
 CAR_COLORS = [(255, 90, 170), (60, 210, 230), (245, 245, 245), (220, 40, 50), (255, 210, 60)]
 PICKUP_TILES = {"a": "ammo", "h": "health", "n": "grenade"}
@@ -394,7 +514,7 @@ BLACK = (0, 0, 0)
 def floor_of(col, row):
     """그 칸의 바닥 종류. 자동차는 차도, 가로등은 인도 위에 있어요.
     'P', 'E', 'T', 상자 같은 칸은 왼쪽 칸의 바닥을 따라가요."""
-    special = {"c": "=", "L": ":", "b": ":", "X": ","}
+    special = {"c": "=", "L": ":", "b": ":", "X": ",", "v": "#"}
     while col >= 0:
         ch = GAME_MAP[row][col]
         if ch in FLOORS:
@@ -426,12 +546,12 @@ def in_map(col, row):
 
 
 def is_blocked(x, y):
-    """그 위치로 걸어갈 수 없으면 True (건물, 바다, 야자수, 자동차, 크레인, 맵 바깥)"""
+    """그 위치로 걸어갈 수 없으면 True (건물, 바다, 나무, 자동차, 크레인, 맵 바깥)"""
     col, row = int(x), int(y)
     if not in_map(col, row):
         return True
     ch = GAME_MAP[row][col]
-    return ch in WALLS or ch in "~TcX"
+    return ch in WALLS or ch in "~TcXIv"
 
 
 def is_opaque(x, y):
@@ -448,7 +568,7 @@ def obstacle_height(x, y):
     spec = WALL_GRID[row][col]
     if spec:
         return spec[1]
-    return 0.6 if GAME_MAP[row][col] == "c" else 0.0
+    return 0.6 if GAME_MAP[row][col] in "cv" else 0.0
 
 
 def find_cells(letter):
@@ -676,6 +796,27 @@ def make_car_image(color):
     return img
 
 
+def make_pine_image(snowy=False):
+    """침엽수 (설원에서는 눈이 쌓여 있어요)"""
+    img = pygame.Surface((100, 220), pygame.SRCALPHA)
+    pygame.draw.rect(img, (90, 60, 35), (44, 170, 12, 50))                   # 줄기
+    for i, (w, y) in enumerate(((90, 120), (72, 80), (54, 42), (34, 8))):     # 층층이 쌓인 잎
+        points = [(50 - w / 2, y + 60), (50 + w / 2, y + 60), (50, y)]
+        pygame.draw.polygon(img, (30, 80 + i * 8, 45), points)
+        if snowy:
+            pygame.draw.polygon(img, (235, 240, 248), [(50 - w / 4, y + 30), (50 + w / 4, y + 30), (50, y)])
+    return img
+
+
+def make_burnt_car_image():
+    """불탄 차 (엄폐물)"""
+    img = make_car_image((70, 60, 55))
+    for x, y, r in ((50, 50, 10), (110, 45, 14), (140, 60, 8)):             # 그을음
+        pygame.draw.circle(img, (30, 25, 25), (x, y), r)
+    pygame.draw.polygon(img, (25, 25, 30), [(50, 38), (65, 17), (120, 17), (135, 38)])   # 깨진 유리창
+    return img
+
+
 def make_lamp_image():
     """가로등"""
     img = pygame.Surface((40, 220), pygame.SRCALPHA)
@@ -813,6 +954,92 @@ def make_sky(theme):
 
 
 # ---------------------------------------------------------------
+# 소리 (소리 파일 없이 코드로 만들어요)
+# ---------------------------------------------------------------
+# 이름 -> (길이초, 줄어드는 빠르기, 지직 소리 양, 소리 부드러움 0~1, 쿵 소리 높이, 쿵 크기, 삐 소리 높이, 삐 크기, 음량)
+#   지직 소리(잡음)는 총소리·폭발, 쿵 소리는 묵직한 울림, 삐 소리는 맞힘/알림
+SOUND_RECIPES = {
+    "rifle":     (0.18, 28, 1.0, 0.50, 90, 0.5, 0, 0, 0.55),
+    "pistol":    (0.14, 32, 1.0, 0.60, 140, 0.4, 0, 0, 0.50),
+    "sniper":    (0.45, 9, 1.0, 0.35, 60, 0.8, 0, 0, 0.80),
+    "shotgun":   (0.35, 12, 1.0, 0.30, 70, 0.9, 0, 0, 0.80),
+    "smg":       (0.10, 45, 1.0, 0.65, 160, 0.3, 0, 0, 0.45),
+    "lmg":       (0.16, 26, 1.0, 0.45, 80, 0.6, 0, 0, 0.55),
+    "dmr":       (0.25, 16, 1.0, 0.45, 100, 0.6, 0, 0, 0.65),
+    "rocket":    (0.60, 4, 1.0, 0.15, 0, 0, 0, 0, 0.50),
+    "explosion": (1.00, 3.5, 1.0, 0.08, 45, 1.0, 0, 0, 0.90),
+    "enemy":     (0.12, 35, 1.0, 0.35, 0, 0, 0, 0, 0.30),
+    "hit":       (0.05, 60, 0.0, 0.0, 0, 0, 1800, 0.6, 0.45),
+    "headshot":  (0.12, 25, 0.0, 0.0, 0, 0, 2600, 0.7, 0.55),
+    "kill":      (0.10, 30, 0.0, 0.0, 0, 0, 1200, 0.6, 0.50),
+    "reload":    (0.05, 80, 1.0, 0.90, 0, 0, 2000, 0.3, 0.40),
+    "streak":    (0.30, 6, 0.0, 0.0, 0, 0, 880, 0.6, 0.50),
+    "knife":     (0.20, 12, 1.0, 0.70, 0, 0, 0, 0, 0.30),
+    "throw":     (0.15, 15, 1.0, 0.60, 0, 0, 0, 0, 0.25),
+    "hurt":      (0.12, 20, 0.6, 0.20, 0, 0, 220, 0.5, 0.40),
+}
+# 총 이름 -> 총소리
+GUN_SOUNDS = {"RIFLE": "rifle", "PISTOL": "pistol", "SNIPER": "sniper", "SHOTGUN": "shotgun", "SMG": "smg",
+              "ROCKET": "rocket", "LMG": "lmg", "BURST": "rifle", "DMR": "dmr"}
+
+
+class Sounds:
+    """효과음. 소리를 낼 수 없는 환경이면 조용히 아무것도 안 해요. M 키로 끄고 켜요."""
+
+    def __init__(self):
+        self.bank = {}
+        self.muted = False
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+            freq, size, channels = pygame.mixer.get_init()
+            if size != -16:
+                return                       # 16비트 소리만 만들 줄 알아요
+            pygame.mixer.set_num_channels(24)
+            rng = random.Random(1)
+            for name, recipe in SOUND_RECIPES.items():
+                self.bank[name] = self.synth(freq, channels, rng, *recipe)
+        except Exception:
+            self.bank = {}
+
+    @staticmethod
+    def synth(freq, channels, rng, duration, decay, noise, smooth, thump_hz, thump, tone_hz, tone, volume):
+        samples = array.array("h")
+        prev = 0.0
+        alpha = 1 - smooth                   # 부드러울수록 잡음의 높은 소리를 깎아요
+        for i in range(int(duration * freq)):
+            t = i / freq
+            env = math.exp(-t * decay)       # 점점 작아지는 소리
+            prev += alpha * (rng.uniform(-1, 1) - prev)
+            v = noise * prev * env
+            if thump:
+                v += thump * math.sin(2 * math.pi * thump_hz * t) * math.exp(-t * decay * 0.7)
+            if tone:
+                v += tone * math.sin(2 * math.pi * tone_hz * (1 + t * 2) * t) * env
+            value = int(max(-1.0, min(1.0, v * volume)) * 32767)
+            samples.extend([value] * channels)
+        return pygame.mixer.Sound(buffer=samples.tobytes())
+
+    def play(self, name, volume=1.0):
+        sound = self.bank.get(name)
+        if sound and not self.muted and volume > 0.02:
+            channel = sound.play()
+            if channel:
+                channel.set_volume(min(1.0, volume))
+
+
+_sounds = None
+
+
+def get_sounds():
+    """효과음은 한 번만 만들어서 계속 써요"""
+    global _sounds
+    if _sounds is None:
+        _sounds = Sounds()
+    return _sounds
+
+
+# ---------------------------------------------------------------
 # 글자 / 도움말
 # ---------------------------------------------------------------
 # 한글 글꼴 후보 (맥 / 윈도우 / 리눅스). 없으면 영어로 보여줘요
@@ -826,7 +1053,8 @@ HELP_TEXT = {
               ("← → ↑ ↓", "시점 (마우스도 돼요)"), ("스페이스바", "점프"),
               ("F", "사격 (꾹 누르면 연사)"), ("E", "정조준 / 저격총 조준경"), ("Z", "조준경 배율 3·6·12배"),
               ("G", "수류탄"), ("V", "칼"), ("X", "킬스트릭 쓰기"), ("1 ~ 9,  Q", "무기 바꾸기,  직전 무기"),
-              ("R", "재장전"), ("H", "도움말 (일시정지)"), ("P,  Enter", "FPS 표시,  전체 화면"), ("ESC", "메뉴로")],
+              ("R", "재장전"), ("H,  M", "도움말 (일시정지),  소리 끄기"), ("P,  Enter", "FPS 표시,  전체 화면"),
+              ("ESC", "메뉴로")],
         tips=["적을 모두 쓰러뜨리면 다음 라운드! 라운드마다 맵이 바뀌어요.",
               "죽지 않고 연속으로 쓰러뜨리면 킬스트릭: 3킬 레이더, 5킬 공습, 7킬 자동 포탑 (X).",
               "처치·헤드샷·연속 처치로 경험치를 모으면 계급(RANK)이 올라가요.",
@@ -842,7 +1070,7 @@ HELP_TEXT = {
               ("ARROWS", "look (or mouse)"), ("SPACE", "jump"),
               ("F", "fire (hold for auto)"), ("E", "aim / sniper scope"), ("Z", "scope zoom 3/6/12x"),
               ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1-9, Q", "weapons, last weapon"),
-              ("R", "reload"), ("H", "help (pause)"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "menu")],
+              ("R", "reload"), ("H, M", "help (pause), mute"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "menu")],
         tips=["Kill every enemy to clear the round. The map changes each round.",
               "Killstreaks without dying: 3 radar, 5 airstrike, 7 sentry turret (X).",
               "Kills, headshots and multi-kills give XP. Rank up every 1000 XP.",
@@ -853,6 +1081,34 @@ HELP_TEXT = {
         resume="Press H to resume",
     ),
 }
+
+
+class ShadowFont:
+    """글자 뒤에 검은 그림자를 넣어서 밝은 배경(눈, 하늘) 위에서도 잘 보이게 해요.
+    같은 글자는 한 번 만든 그림을 다시 써서 빨라요."""
+
+    def __init__(self, font):
+        self.font = font
+        self.cache = {}
+
+    def render(self, text, antialias, color):
+        key = (text, color)
+        if key not in self.cache:
+            if len(self.cache) > 400:          # 너무 많이 쌓이면 비워요
+                self.cache.clear()
+            base = self.font.render(text, antialias, color)
+            shadow = self.font.render(text, antialias, (0, 0, 0))
+            out = pygame.Surface((base.get_width() + 2, base.get_height() + 2), pygame.SRCALPHA)
+            out.blit(shadow, (2, 2))
+            out.blit(base, (0, 0))
+            self.cache[key] = out
+        return self.cache[key]
+
+    def size(self, text):
+        return self.font.size(text)
+
+    def get_linesize(self):
+        return self.font.get_linesize()
 
 
 def make_fonts():
@@ -872,7 +1128,7 @@ def make_fonts():
     else:
         fonts["help"] = pygame.font.Font(None, int(24 * UI))
         fonts["help_big"] = pygame.font.Font(None, int(38 * UI))
-    return fonts
+    return {key: ShadowFont(f) if key != "lang" else f for key, f in fonts.items()}
 
 
 def wrap_text(font, text, max_width):
@@ -1323,17 +1579,15 @@ class Effect:
 class Game:
     def __init__(self, save, start_round=1):
         """save: 저장 정보(dict). 라운드를 깨거나 죽을 때마다 고쳐서 파일에 써요."""
-        # 적 그림: (종류, 상태)마다 하나씩 미리 만들어 둬요
-        self.enemy_images = {
-            (kind, state): make_enemy_image(t["look"], state)
-            for kind, t in ENEMY_TYPES.items()
-            for state in ("normal", "flash", "hurt", "aim")
-        }
         self.pickup_images = {kind: make_pickup_image(kind) for kind in DROP_WEIGHTS}
         self.decor_images = {
             "T": make_palm_image(), "L": make_lamp_image(),
             "X": make_crane_image(), "b": make_billboard_image(),
+            "I": make_pine_image(), "v": make_burnt_car_image(),
         }
+        self.snowy_pine = make_pine_image(snowy=True)
+        rng = random.Random(3)            # 눈송이: (x, y, 떨어지는 속도)
+        self.snowflakes = [(rng.random(), rng.random(), rng.uniform(0.08, 0.2)) for _ in range(160)]
         self.car_images = [make_car_image(color) for color in CAR_COLORS]
         self.grenade_image = make_grenade_image()
         self.rocket_image = make_rocket_image()
@@ -1341,6 +1595,8 @@ class Game:
         self.flare_frames = make_flare_frames()
         self.sentry_images = (make_sentry_image(), make_sentry_image(flash=True))
         self.scope_overlay = make_scope_overlay()
+        self.sounds = get_sounds()
+        self.was_reloading = False
         self.fonts = make_fonts()
         self.font, self.big_font, self.small_font = self.fonts["normal"], self.fonts["big"], self.fonts["small"]
         self.save = save
@@ -1374,9 +1630,20 @@ class Game:
         self.map_index = index
         self.theme = MAPS[index]
         self.decor = []
-        sizes = {"T": (2.4, 1.2), "L": (1.9, 0.3), "X": (5.5, 3.0), "b": (2.6, 1.8)}
+        images = dict(self.decor_images)
+        if self.theme["snow"]:
+            images["I"] = self.snowy_pine
+        sizes = {"T": (2.4, 1.2), "L": (1.9, 0.3), "X": (5.5, 3.0), "b": (2.6, 1.8), "I": (2.6, 1.3)}
         for letter, (height, width) in sizes.items():
-            self.decor += [Decor(x, y, self.decor_images[letter], height, width) for x, y in find_cells(letter)]
+            self.decor += [Decor(x, y, images[letter], height, width) for x, y in find_cells(letter)]
+        self.decor += [Decor(x, y, images["v"], 0.6, 1.1, cover=True) for x, y in find_cells("v")]
+        # 적 그림: 맵에 맞는 위장복으로 다시 그려요 (일반병, 저격수)
+        camo = self.theme["camo"]
+        self.enemy_images = {}
+        for kind, t in ENEMY_TYPES.items():
+            look = dict(t["look"], **camo) if camo and kind in ("GRUNT", "SNIPER") else t["look"]
+            for state in ("normal", "flash", "hurt", "aim"):
+                self.enemy_images[(kind, state)] = make_enemy_image(look, state)
         # 자동차 색은 위치에 따라 정해져요 (매번 똑같이)
         cars = self.car_images
         self.decor += [Decor(x, y, cars[int(x * 7 + y * 3) % len(cars)], 0.6, 1.1, cover=True)
@@ -1440,12 +1707,13 @@ class Game:
         self.projectiles = []
         self.effects = []
         self.banner = f"ROUND {self.round}"
-        self.sub_banners = [(self.theme["name"], WHITE)]
+        self.sub_banners = [(f"{self.theme['op']}  -  {self.theme['name']}", WHITE)]
+        self.brief_age = 0.0       # 임무 설명이 타자 치듯 나와요
         if special == "BOSS":
             self.sub_banners.append(("BOSS ROUND!", RED))
         elif special:
             self.sub_banners.append((f"NEW ENEMY: {special}", RED))
-        self.banner_timer = 2.8
+        self.banner_timer = 4.0
         self.round_clear_timer = 0.0
         self.damage_flash = 0.0
         self.hitmarker = 0.0
@@ -1524,8 +1792,8 @@ class Game:
 
     @property
     def fog_dist(self):
-        # 조준경으로 보면 안개가 걷혀서 멀리까지 선명해요
-        return FOG_DIST * min(4, self.zoom)
+        # 조준경으로 보면 안개가 걷혀서 멀리까지 선명해요. 숲은 안개가 짙어요
+        return FOG_DIST * self.theme["fog"] * min(4, self.zoom)
 
     def aim_slope(self):
         """조준점(화면 가운데)이 가리키는 위아래 기울기 (수류탄/로켓 방향 계산용)"""
@@ -1547,7 +1815,10 @@ class Game:
             else:
                 a.switch(a.index - event.y)
         elif event.type == pygame.KEYDOWN:
-            if pygame.K_1 <= event.key <= pygame.K_9:
+            if event.key == pygame.K_m:            # 소리 끄기/켜기
+                self.sounds.muted = not self.sounds.muted
+                self.popups.append(["SOUND OFF" if self.sounds.muted else "SOUND ON", WHITE, 1.0])
+            elif pygame.K_1 <= event.key <= pygame.K_9:
                 a.switch(event.key - pygame.K_1)
             elif event.key == pygame.K_q:
                 a.switch(a.last_index)
@@ -1571,6 +1842,7 @@ class Game:
         if self.show_help:          # 도움말을 보는 동안은 멈춰요
             return
         self.banner_timer -= dt
+        self.brief_age += dt
         self.hint_timer -= dt
         self.damage_flash = max(0.0, self.damage_flash - dt * 2)
         self.hitmarker = max(0.0, self.hitmarker - dt)
@@ -1609,6 +1881,9 @@ class Game:
         self.player.update(dt, keys, mouse_dx, mouse_dy, min(1.0, 1.5 / self.zoom), speed,
                            allow_sprint=not self.aiming and not fire_down)
         arsenal.update(dt)
+        if arsenal.reload_left > 0 and not self.was_reloading:
+            self.sounds.play("reload")
+        self.was_reloading = arsenal.reload_left > 0
         # 달리는 중엔 못 쏘고, 멈춘 뒤 잠깐 있어야 쏠 수 있어요
         if self.player.sprinting:
             self.sprint_recover = SPRINT_RECOVER
@@ -1621,6 +1896,7 @@ class Game:
         pressed = fire_down and not self.fire_was_down
         self.fire_was_down = fire_down
         if ready and (fire_down if spec["auto"] else pressed) and arsenal.try_fire():
+            self.sounds.play(GUN_SOUNDS[spec["name"]])
             if spec["projectile"]:
                 self.launch_rocket()
             else:
@@ -1632,6 +1908,7 @@ class Game:
             self.burst_timer -= dt
             if self.burst_timer <= 0 and arsenal.current.mag > 0 and not arsenal.busy:
                 arsenal.current.mag -= 1
+                self.sounds.play(GUN_SOUNDS[spec["name"]])
                 self.shoot(spec)
                 arsenal.add_recoil()
                 self.burst_left -= 1
@@ -1639,6 +1916,8 @@ class Game:
 
         for enemy in self.enemies:
             damage = enemy.update(dt, self.player)
+            if enemy.flash_timer == 0.08:          # 방금 쐈어요: 멀수록 작게 들려요
+                self.sounds.play("enemy", 1 - enemy.pos.distance_to(self.player.pos) / 22)
             if damage:
                 self.hurt_player(damage, enemy.pos)
             if enemy.throw_at is not None:
@@ -1665,6 +1944,7 @@ class Game:
         """나에게 피해. source(때린 위치)가 있으면 화면에 맞은 방향을 표시해요."""
         self.player.hp -= int(damage)
         self.damage_flash = min(1.0, 0.4 + damage / 40)
+        self.sounds.play("hurt")
         if source is not None and source != self.player.pos:
             offset = source - self.player.pos
             self.damage_dirs.append([math.atan2(offset.y, offset.x), 1.2])
@@ -1692,6 +1972,8 @@ class Game:
         enemy.hurt_timer = 0.08
         enemy.spotted = max(enemy.spotted, enemy.t["reaction"])   # 맞으면 바로 반격
         enemy.sees = True
+        if how not in STREAK_KILLS:
+            self.sounds.play("hit")
         self.hitmarker = 0.15
         self.hitmarker_kill = enemy.hp <= 0
         if enemy.hp <= 0 and enemy in self.enemies:
@@ -1709,6 +1991,7 @@ class Game:
 
     def on_kill(self, enemy, how):
         """처치 보상: 경험치, 연속 처치 메달, 킬스트릭"""
+        self.sounds.play("headshot" if how == "HEADSHOT!" else "kill")
         xp = XP["kill"]
         if how == "HEADSHOT!":
             xp += XP["headshot"]
@@ -1732,6 +2015,7 @@ class Game:
             for need, name in STREAKS:
                 if self.streak == need:
                     self.streaks_ready.append(name)
+                    self.sounds.play("streak")
                     self.popups.append([f"{name} READY!  press X", (80, 240, 255), 2.5])
 
     def use_streak(self):
@@ -1796,6 +2080,7 @@ class Game:
                 target = min(targets, key=lambda e: e.pos.distance_to(sentry.pos))
                 sentry.cooldown = 0.15
                 sentry.flash = 0.06
+                self.sounds.play("smg", 0.35)
                 if random.random() < 0.55:
                     self.damage_enemy(target, 20, "SENTRY")
             else:
@@ -1841,6 +2126,7 @@ class Game:
         if self.arsenal.grenades <= 0 or self.knife_timer > 0:
             return
         self.arsenal.grenades -= 1
+        self.sounds.play("throw")
         p = self.player
         forward = pygame.Vector2(math.cos(p.angle), math.sin(p.angle))
         slope = self.aim_slope()
@@ -1891,6 +2177,7 @@ class Game:
             return min(1.0, 1.25 * (1 - d / radius))
 
         self.effects.append(Effect(pos, self.explosion_frames, 0.5, radius * 0.9))
+        self.sounds.play("explosion", 1.1 - self.player.pos.distance_to(pos) / 25)
         if owner in ("player", "streak"):
             how = "AIRSTRIKE!" if owner == "streak" else "BOOM!"
             for enemy in list(self.enemies):
@@ -1909,6 +2196,7 @@ class Game:
             return
         self.knife_timer = KNIFE_TIME
         self.knife_cooldown = KNIFE_COOLDOWN
+        self.sounds.play("knife")
         self.aim_on = False
         p = self.player
         best, best_d = None, KNIFE_RANGE
@@ -1974,6 +2262,8 @@ class Game:
         self.draw_sky(screen)
         self.draw_world(screen)
         self.draw_sprites(screen)
+        if self.theme["snow"]:
+            self.draw_snow(screen)
         if self.scoped:
             screen.blit(self.scope_overlay, (0, 0))
             label = self.font.render(f"x{self.zoom}", True, WHITE)
@@ -1985,6 +2275,16 @@ class Game:
         self.draw_hud(screen)
         if self.show_help:
             draw_help(screen, self.fonts, HELP_TEXT[self.fonts["lang"]]["resume"])
+
+    def draw_snow(self, screen):
+        """눈송이: 화면에서 천천히 떨어지고, 고개를 돌리면 옆으로 흘러가요"""
+        t = pygame.time.get_ticks() / 1000
+        shift = self.player.angle / self.fov * WIDTH
+        for x0, y0, speed in self.snowflakes:
+            x = (x0 * WIDTH - shift + math.sin(t + y0 * 10) * 15) % WIDTH
+            y = (y0 + t * speed) % 1.0 * HEIGHT
+            size = 2 if speed > 0.14 else 1
+            pygame.draw.circle(screen, (240, 245, 255), (x, y), size * UI)
 
     def draw_sky(self, screen):
         horizon = self.horizon
@@ -2344,6 +2644,10 @@ class Game:
             self.center_text(screen, big_font, self.banner, YELLOW, HEIGHT / 3)
             for i, (text, color) in enumerate(self.sub_banners):
                 self.center_text(screen, font, text, color, HEIGHT / 3 + (45 + i * 32) * UI)
+            if self.round_clear_timer <= 0:
+                typed = self.theme["brief"][:int(self.brief_age * 40)]
+                y = HEIGHT / 3 + (45 + len(self.sub_banners) * 32) * UI
+                self.center_text(screen, self.small_font, typed, (200, 230, 255), y)
         if self.game_over:
             self.center_text(screen, big_font, "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
             self.center_text(screen, font, f"Round {self.round}  /  Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
