@@ -1,8 +1,8 @@
 """
-스트라이크 존: 산타모니카 - 1인칭 총게임 (레이캐스팅 FPS)
+스트라이크 존: 네온 비치 - 1인칭 총게임 (레이캐스팅 FPS)
 
-노을 지는 산타모니카 해변. 바다, 모래사장, 야자수, 대관람차가 있는 부두,
-파스텔색 건물이 늘어선 시내 곳곳에 숨어 있는 적을 모두 쓰러뜨리세요.
+노을 지는 80년대 해변 도시. 네온사인이 켜진 건물, 길가에 세워진 스포츠카,
+가로등과 야자수가 늘어선 거리와 골목 곳곳에 숨어 있는 적을 모두 쓰러뜨리세요.
 
 규칙:
     - 적을 모두 쓰러뜨리면 라운드 승리. 라운드가 올라갈수록 적이 많아지고 종류도 늘어나요.
@@ -14,14 +14,14 @@
     저격수    : 2라운드부터. 멀리서 쏴요. 쏘기 전에 빨간 불빛이 반짝여요
     중장갑병  : 3라운드부터. 체력 300. 느리지만 총알을 쉴 새 없이 쏴요
 
-조작:
+조작 (키보드만으로 다 할 수 있어요):
     W A S D          : 이동
     스페이스바       : 점프
-    마우스           : 시점 (좌우 + 위아래)
-    ← → / ↑ ↓        : 키보드로 시점 돌리기 (좌우 / 위아래)
-    마우스 왼쪽      : 사격
-    마우스 오른쪽    : 저격총 조준경 (조준경을 보면서 휠: 3배 / 6배 / 12배 확대)
-    1 2 3 4 / 휠     : 무기 바꾸기 (소총 / 권총 / 저격총 / 산탄총)
+    ← → / ↑ ↓        : 시점 돌리기 (좌우 / 위아래)    = 마우스
+    F                : 사격 (꾹 누르면 연사)          = 마우스 왼쪽
+    E                : 저격총 조준경 켜기/끄기         = 마우스 오른쪽(누르고 있기)
+    Z                : 조준경 배율 바꾸기 (3 → 6 → 12배) = 조준경을 보면서 휠
+    1 2 3 4          : 무기 바꾸기 (소총 / 권총 / 저격총 / 산탄총) = 휠
     Q                : 방금 쓰던 무기로
     R                : 재장전
     ESC              : 종료 (메뉴로)
@@ -30,6 +30,7 @@
     - 머리를 맞히면 큰 피해(HEADSHOT)! 적의 머리는 내 눈높이보다 조금 위에 있어요.
     - 쏘면 반동으로 시점이 위로 튀어요. 마우스를 살짝 내리면서 쏘면 잘 맞아요.
     - 점프하면 적 총알이 덜 맞지만, 내 총알도 퍼져요.
+    - 길가의 자동차 뒤에 숨으면 총알을 막을 수 있어요 (적도 마찬가지).
 
 실행 방법:
     pip install pygame
@@ -127,58 +128,58 @@ ENEMY_TYPES = {
 }
 
 # ---------------------------------------------------------------
-# 맵: 산타모니카 해변 (왼쪽이 바다, 오른쪽이 시내)
+# 맵: 네온 비치 (왼쪽이 바다, 오른쪽으로 촘촘한 도시 블록)
 # ---------------------------------------------------------------
-#   바닥   '~' 바다(못 들어가요)  '.' 모래사장  '_' 보드워크  '=' 도로
-#          'p' 부두(나무 데크)    'g' 잔디 공원
-#   건물   'A' 분홍  'B' 민트  'C' 노란 가게  'R' 붉은 호텔  'K' 나무 상자(엄폐물)
-#   장식   'T' 야자수  'W' 대관람차
+#   바닥   '~' 바다(못 들어가요)  '.' 모래사장  ':' 인도  '=' 차도  'g' 잔디 광장
+#   건물   'A' 분홍 호텔  'B' 민트 건물  'C' 노란 가게  'D' 하얀 아르데코 호텔
+#          'R' 붉은 벽돌  'N' 나이트클럽  'K' 나무 상자(엄폐물)
+#   장식   'T' 야자수  'c' 자동차(총알을 막아요)  'L' 가로등
 #   위치   'P' 플레이어 시작  'E' 적이 나타날 수 있는 곳
 GAME_MAP = [
-    "~~~~~~....._==RRRRR=AAAA==CCC=BB",
-    "~~~~~~.T..._==RRRRR=AAAA==CCC=BB",
-    "~~~~~~....._==RRRRR=gggggg=CCC=B",
-    "~~~~~~..T.._=========gggTgg=====",
-    "~~~~~~....._==AAAA===gggggg==KK=",
-    "~~~~~~.E..._==AAAA=E=gggggg==KK=",
-    "~~~~~~....._==AAAA===BBBBBB=E===",
-    "~~~~~~..T.._========BBBBBB======",
-    "~~~~~~....._==K=========E==RRRRR",
-    "~pppppp....__==CCCC==AAAA==RRRRR",
-    "~pWpppp.P..__==CCCC==AAAA==RRRRR",
-    "~pppppp....__==CCCC==AAAA==RRRRR",
-    "~~~~~~....._=====E======K=======",
-    "~~~~~~..T.._==BBBB==gggg==AAAAAA",
-    "~~~~~~....._==BBBB==gTgg==AAAAAA",
-    "~~~~~~.E..._==BBBB==gggE==AAAAAA",
-    "~~~~~~....._=====K============E=",
-    "~~~~~~..T.._==RRRR==CCCCC=BBBBBB",
-    "~~~~~~....._==RRRR==CCCCC=BBBBBB",
-    "~~~~~~.E..._==RRRR=E=====K====E=",
-    "~~~~~~....._==RRRR==AAAA==CCCCCC",
-    "~~~~~~.T..._==RRRR==AAAA==CCCCCC",
+    "~~~T.:==:DDDD:==:CCCC:==:RRR",
+    "~~~..L=c:DDDD:==L::c::==:RRR",
+    "~~~.E:==:DDDD:c=:E::::==LRRR",
+    "~~~T.:==LDDDD:==:c::c:=c:RRR",
+    "~~~..:==::::::==::::::==:::E",
+    "~~~..=============c=========",
+    "~~~T.======c==============E=",
+    "~~~..:==::::::==::E:::==::::",
+    "~~~..:==:BBBB:==:gggg:==:NNN",
+    "~~~T.Lc=:BBBB:==:gTgg:==LNNN",
+    "~~~.P:==::K:E:=c:ggEg:==:::E",
+    "~~~..:==LCCCC:==:gggT:c=:NNN",
+    "~~~T.:==::::::==::::E:==::::",
+    "~~~..==========c============",
+    "~~~.E==============c========",
+    "~~~..:==::::::==::::::==::E:",
+    "~~~T.:=c:CCCC:==:DDDD:==:BBB",
+    "~~~..L==:::KE:==LDDDD:=c:BBB",
+    "~~~..:==:RRRR:c=:::E::==LBBB",
+    "~~~T.:==:RRRR:==:AAAA:==:BBB",
 ]
 MAP_W, MAP_H = len(GAME_MAP[0]), len(GAME_MAP)
 
-# 건물 종류: 글자 -> (색, 높이, 창문이 있는지)
+# 건물 종류: 글자 -> (색, 높이, 창문이 있는지, 네온사인 색 또는 None)
 WALLS = {
-    "A": ((235, 150, 170), 2.0, True),
-    "B": ((100, 195, 185), 1.6, True),
-    "C": ((240, 205, 110), 1.2, True),
-    "R": ((190, 95, 75), 2.5, True),
-    "K": ((150, 110, 70), 1.0, False),
+    "A": ((235, 150, 170), 2.0, True, (255, 80, 200)),
+    "B": ((100, 195, 185), 1.6, True, (80, 240, 255)),
+    "C": ((240, 205, 110), 1.2, True, (255, 150, 60)),
+    "D": ((235, 230, 215), 2.2, True, (190, 110, 255)),
+    "R": ((190, 95, 75), 2.5, True, None),
+    "N": ((70, 40, 90), 1.4, False, (120, 255, 140)),
+    "K": ((150, 110, 70), 1.0, False, None),
 }
-MAX_WALL = max(height for _, height, _ in WALLS.values())
+MAX_WALL = max(spec[1] for spec in WALLS.values())
 
 # 바닥 종류: 글자 -> 색
 FLOORS = {
     "~": (40, 110, 170),
     ".": (225, 200, 150),
-    "_": (150, 105, 70),
-    "=": (70, 70, 80),
-    "p": (125, 90, 60),
+    ":": (175, 170, 165),
+    "=": (65, 65, 75),
     "g": (95, 160, 80),
 }
+CAR_COLORS = [(255, 90, 170), (60, 210, 230), (245, 245, 245), (220, 40, 50), (255, 210, 60)]
 
 WHITE = (240, 240, 240)
 RED = (230, 50, 50)
@@ -193,13 +194,15 @@ SUN_ANGLE = math.pi               # 해는 서쪽(바다 쪽)에 있어요
 # 맵 관련 도우미 함수
 # ---------------------------------------------------------------
 def floor_of(col, row):
-    """그 칸의 바닥 종류. 'P', 'E', 'T' 같은 칸은 왼쪽 칸의 바닥을 따라가요."""
+    """그 칸의 바닥 종류. 자동차는 차도, 가로등은 인도 위에 있어요.
+    'P', 'E', 'T' 같은 칸은 왼쪽 칸의 바닥을 따라가요."""
+    special = {"c": "=", "L": ":"}
     while col >= 0:
         ch = GAME_MAP[row][col]
         if ch in FLOORS:
             return ch
-        if ch == "W":
-            return "p"
+        if ch in special:
+            return special[ch]
         col -= 1
     return "."
 
@@ -214,12 +217,12 @@ def in_map(col, row):
 
 
 def is_blocked(x, y):
-    """그 위치로 걸어갈 수 없으면 True (건물, 바다, 야자수, 대관람차, 맵 바깥)"""
+    """그 위치로 걸어갈 수 없으면 True (건물, 바다, 야자수, 자동차, 맵 바깥)"""
     col, row = int(x), int(y)
     if not in_map(col, row):
         return True
     ch = GAME_MAP[row][col]
-    return ch in WALLS or ch in "~TW"
+    return ch in WALLS or ch in "~Tc"
 
 
 def is_opaque(x, y):
@@ -263,7 +266,7 @@ def cast_ray(px, py, angle):
 
     돌려주는 값:
         floors: [(시작 거리, 끝 거리, 바닥 글자), ...]  첫 건물 앞까지의 바닥 구간들
-        walls : [(거리, 세로벽인지, 벽에 맞은 위치 0~1, 건물 정보), ...]  가까운 순서
+        walls : [(거리, 세로벽인지, 벽에 맞은 위치 0~1, 건물 정보, 칸 x, 칸 y), ...]  가까운 순서
                 앞 건물보다 높은 건물만 기록해요 (뒤에 있는 낮은 건물은 어차피 안 보이니까)
     """
     dx, dy = math.cos(angle), math.sin(angle)
@@ -307,7 +310,7 @@ def cast_ray(px, py, angle):
                 floors.append((seg_start, dist, cur_floor))
             if spec[1] > tallest:
                 hit = py + dy * dist if vertical else px + dx * dist
-                walls.append((dist, vertical, hit - math.floor(hit), spec))
+                walls.append((dist, vertical, hit - math.floor(hit), spec, map_x, map_y))
                 tallest = spec[1]
                 if tallest >= MAX_WALL:
                     break
@@ -324,10 +327,17 @@ def angle_diff(a, b):
     return (a - b + math.pi) % (2 * math.pi) - math.pi
 
 
+_fog_cache = {}
+
+
 def fog(color, dist, fog_dist):
-    """멀수록 노을 빛 안개 색에 가까워지게"""
-    t = min(1.0, dist / fog_dist) * 0.8
-    return tuple(int(c + (h - c) * t) for c, h in zip(color, HAZE))
+    """멀수록 노을 빛 안개 색에 가까워지게.
+    같은 계산을 계속 반복하지 않도록, 한 번 구한 색은 기억해 뒀다가 다시 써요."""
+    key = (color, int(dist * 4), fog_dist)
+    if key not in _fog_cache:
+        t = min(1.0, key[1] / 4 / fog_dist) * 0.8
+        _fog_cache[key] = tuple(int(c + (h - c) * t) for c, h in zip(color, HAZE))
+    return _fog_cache[key]
 
 
 def shade(color, amount):
@@ -403,20 +413,29 @@ def make_palm_image():
     return img
 
 
-def make_ferris_wheel_image():
-    img = pygame.Surface((240, 280), pygame.SRCALPHA)
-    center, radius = (120, 115), 105
-    pygame.draw.line(img, (230, 230, 230), center, (40, 278), 6)    # 받침대
-    pygame.draw.line(img, (230, 230, 230), center, (200, 278), 6)
-    pygame.draw.circle(img, (240, 240, 240), center, radius, 5)
-    pygame.draw.circle(img, (240, 240, 240), center, radius - 20, 2)
-    colors = [(230, 60, 60), (250, 200, 60), (60, 180, 230), (120, 220, 120)]
-    for i in range(12):
-        rad = math.radians(i * 30)
-        rim = (center[0] + math.cos(rad) * radius, center[1] + math.sin(rad) * radius)
-        pygame.draw.line(img, (220, 220, 220), center, rim, 2)
-        pygame.draw.rect(img, colors[i % 4], (rim[0] - 9, rim[1], 18, 14), border_radius=4)
-    pygame.draw.circle(img, (250, 220, 120), center, 10)
+def make_car_image(color):
+    """80년대 스포츠카"""
+    img = pygame.Surface((180, 100), pygame.SRCALPHA)
+    dark = tuple(int(c * 0.6) for c in color)
+    pygame.draw.polygon(img, dark, [(40, 40), (60, 12), (125, 12), (145, 40)])    # 지붕
+    pygame.draw.polygon(img, (40, 50, 70), [(50, 38), (65, 17), (120, 17), (135, 38)])  # 유리창
+    pygame.draw.rect(img, color, (4, 38, 172, 40), border_radius=10)              # 차체
+    pygame.draw.rect(img, dark, (4, 58, 172, 6))                                  # 옆줄
+    pygame.draw.rect(img, (255, 250, 200), (6, 44, 18, 8), border_radius=3)       # 전조등
+    pygame.draw.rect(img, (255, 60, 60), (156, 44, 18, 8), border_radius=3)       # 후미등
+    for x in (38, 142):
+        pygame.draw.circle(img, (20, 20, 20), (x, 80), 17)                        # 바퀴
+        pygame.draw.circle(img, (160, 160, 170), (x, 80), 7)
+    return img
+
+
+def make_lamp_image():
+    """가로등"""
+    img = pygame.Surface((40, 220), pygame.SRCALPHA)
+    pygame.draw.rect(img, (60, 60, 70), (17, 20, 6, 200))          # 기둥
+    pygame.draw.rect(img, (60, 60, 70), (8, 14, 24, 8), border_radius=3)
+    pygame.draw.circle(img, (255, 230, 150), (20, 26), 10)        # 불빛
+    pygame.draw.circle(img, (255, 250, 220), (20, 26), 5)
     return img
 
 
@@ -645,13 +664,14 @@ class Arsenal:
 
 
 class Decor:
-    """야자수, 대관람차 같은 장식물"""
+    """야자수, 자동차, 가로등 같은 장식물. cover=True면 총알을 막아요."""
 
-    def __init__(self, x, y, image, height, width):
+    def __init__(self, x, y, image, height, width, cover=False):
         self.pos = pygame.Vector2(x, y)
         self.image = image
         self.height = height
         self.width = width
+        self.cover = cover
 
 
 # ---------------------------------------------------------------
@@ -670,12 +690,18 @@ class Game:
         self.font = pygame.font.Font(None, int(30 * UI))
         self.big_font = pygame.font.Font(None, int(56 * UI))
         self.small_font = pygame.font.Font(None, int(24 * UI))
-        palm, wheel = make_palm_image(), make_ferris_wheel_image()
+        palm, lamp = make_palm_image(), make_lamp_image()
+        cars = [make_car_image(color) for color in CAR_COLORS]
         self.decor = [Decor(x, y, palm, 2.4, 1.2) for x, y in find_cells("T")]
-        self.decor += [Decor(x, y, wheel, 4.0, 3.4) for x, y in find_cells("W")]
+        self.decor += [Decor(x, y, lamp, 1.9, 0.3) for x, y in find_cells("L")]
+        # 자동차 색은 위치에 따라 정해져요 (매번 똑같이)
+        self.decor += [Decor(x, y, cars[int(x * 7 + y * 3) % len(cars)], 0.6, 1.1, cover=True)
+                       for x, y in find_cells("c")]
         self.spawn_points = find_cells("E")
+        self.minimap = self.make_minimap()
         self.set_col_w(START_COL_W)
-        self.mouse_was_down = False
+        self.fire_was_down = False
+        self.scope_on = False      # E 키로 켠 조준경
         self.reset()
 
     def set_col_w(self, col_w):
@@ -696,6 +722,7 @@ class Game:
         self.round = 1
         self.kills = 0
         self.game_over = False
+        self.hint_timer = 10.0     # 처음 10초 동안 조작법 안내
         self.start_round()
 
     def pick_enemy_kind(self):
@@ -777,10 +804,15 @@ class Game:
                 a.switch(a.last_index)
             elif event.key == pygame.K_r:
                 a.reload()
+            elif event.key == pygame.K_e:      # 조준경 켜기/끄기
+                self.scope_on = not self.scope_on
+            elif event.key == pygame.K_z:      # 배율 바꾸기 3 -> 6 -> 12 -> 3
+                a.zoom_index = (a.zoom_index + 1) % len(SCOPE_ZOOMS)
 
     # ----- 게임 진행 -----
     def update(self, dt, keys, mouse_dx, mouse_dy, buttons):
         self.banner_timer -= dt
+        self.hint_timer -= dt
         self.damage_flash = max(0.0, self.damage_flash - dt * 2)
         self.hitmarker = max(0.0, self.hitmarker - dt)
         self.feed = [[text, t - dt] for text, t in self.feed if t - dt > 0]
@@ -796,14 +828,18 @@ class Game:
 
         arsenal = self.arsenal
         spec = arsenal.current.spec
-        self.scoped = buttons[2] and spec["scope"] and not arsenal.busy
+        if not spec["scope"]:
+            self.scope_on = False                  # 저격총이 아니면 조준경 끄기
+        self.scoped = (buttons[2] or self.scope_on) and spec["scope"] and not arsenal.busy
         self.player.update(dt, keys, mouse_dx, mouse_dy, min(1.0, 1.5 / self.zoom))
         arsenal.update(dt)
 
+        # 사격: 마우스 왼쪽 또는 F 키
         # 자동 무기는 누르고 있으면 계속, 나머지는 누를 때마다 한 발
-        clicked = buttons[0] and not self.mouse_was_down
-        self.mouse_was_down = buttons[0]
-        if (buttons[0] if spec["auto"] else clicked) and arsenal.try_fire():
+        fire_down = buttons[0] or keys[pygame.K_f]
+        pressed = fire_down and not self.fire_was_down
+        self.fire_was_down = fire_down
+        if (fire_down if spec["auto"] else pressed) and arsenal.try_fire():
             self.shoot(spec)
             arsenal.add_recoil()
 
@@ -855,6 +891,8 @@ class Game:
                 if perp < target_dist:
                     target, target_dist = enemy, perp
                     head = ay < top + (bottom - top) * 0.2   # 위쪽 20% = 머리
+            if target and self.blocked_by_cover(ax, ay, target_dist):
+                target = None                     # 자동차에 막힘
             if target:
                 damage[target] = damage.get(target, 0) + (spec["head"] if head else spec["body"])
                 if head:
@@ -872,6 +910,19 @@ class Game:
                 self.kills += 1
                 how = "HEADSHOT!" if enemy in headshots else "DOWN"
                 self.feed.append([f"{enemy.kind} {how}", 2.5])
+
+    def blocked_by_cover(self, ax, ay, target_dist):
+        """화면의 (ax, ay)로 날아간 총알이 target_dist보다 가까운 자동차에 막히면 True"""
+        for d in self.decor:
+            if not d.cover:
+                continue
+            box = self.project(d.pos, d.height, d.width)
+            if not box:
+                continue
+            sx, top, bottom, w, perp = box
+            if perp < target_dist and abs(ax - sx) < w * 0.45 and top + (bottom - top) * 0.2 <= ay <= bottom:
+                return True
+        return False
 
     def project(self, pos, height, width):
         """월드 위치 → 화면 위치/크기. 시야 밖이면 None
@@ -902,11 +953,6 @@ class Game:
             self.draw_gun(screen)
         self.draw_hud(screen)
 
-    def ray_angle(self, i):
-        """i번째 세로 줄이 바라보는 방향. 화면에 평평하게 펼쳐지도록 tan으로 계산해요."""
-        x = (i + 0.5) * self.col_w - WIDTH / 2
-        return self.player.angle + math.atan(x / self.proj)
-
     def draw_sky(self, screen):
         horizon = self.horizon
         screen.blit(self.sky, (0, horizon - self.sky.get_height()))
@@ -925,7 +971,8 @@ class Game:
         p = self.player
         horizon, proj, eye, fog_dist, col_w = self.horizon, self.proj, self.eye, self.fog_dist, self.col_w
         for i in range(self.num_rays):
-            ray_angle = self.ray_angle(i)
+            # i번째 세로 줄이 바라보는 방향. 화면에 평평하게 펼쳐지도록 tan으로 계산해요
+            ray_angle = p.angle + math.atan(((i + 0.5) * col_w - WIDTH / 2) / proj)
             floors, walls = cast_ray(p.pos.x, p.pos.y, ray_angle)
             fix = math.cos(ray_angle - p.angle)     # 물고기 눈 왜곡 보정
             x = i * col_w
@@ -941,7 +988,7 @@ class Game:
 
             # 2) 건물: 먼 것부터 그려야 가까운 것이 앞에 보여요
             self.zbuffer[i] = walls[0][0] * fix if walls else math.inf
-            for dist, vertical, wall_x, (color, height, windows) in reversed(walls):
+            for dist, vertical, wall_x, (color, height, windows, neon), cx, cy in reversed(walls):
                 perp = max(0.05, dist * fix)
                 size = proj / perp
                 bottom = horizon + eye * size
@@ -952,14 +999,21 @@ class Game:
                 if wall_x < 0.03 or wall_x > 0.97:      # 건물 모서리 선
                     base = shade(base, 0.6)
                 pygame.draw.rect(screen, fog(base, perp, fog_dist), (x, top, col_w, bottom - top + 1))
-                # 창문: 층마다 두 칸씩
+                # 창문: 층마다 두 칸씩. 몇몇 창문은 불이 켜져 있어요
                 if windows and (0.18 < wall_x < 0.42 or 0.58 < wall_x < 0.82):
-                    glass = fog((60, 80, 120) if vertical else (90, 110, 150), perp, fog_dist)
+                    dark_glass = fog((60, 80, 120) if vertical else (90, 110, 150), perp, fog_dist)
+                    lit_glass = fog((255, 215, 140), perp * 0.5, fog_dist)
+                    half = 0 if wall_x < 0.5 else 1
                     for k in range(int(height / 0.5)):
                         y0 = bottom - (k * 0.5 + 0.42) * size
                         y1 = bottom - (k * 0.5 + 0.17) * size
                         if y1 > 0 and y0 < HEIGHT:
-                            pygame.draw.rect(screen, glass, (x, y0, col_w, y1 - y0))
+                            lit = (cx * 7 + cy * 13 + k * 5 + half * 3 + vertical) % 4 == 0
+                            pygame.draw.rect(screen, lit_glass if lit else dark_glass, (x, y0, col_w, y1 - y0))
+                # 네온사인: 건물 꼭대기에 빛나는 띠 (안개를 덜 타서 멀리서도 잘 보여요)
+                if neon:
+                    glow = fog(neon, perp * 0.3, fog_dist)
+                    pygame.draw.rect(screen, glow, (x, top + 0.06 * size, col_w, max(2, 0.07 * size)))
 
     def draw_sprites(self, screen):
         items = []
@@ -999,30 +1053,42 @@ class Game:
         pygame.draw.rect(screen, RED, rect)
 
     def draw_sprite_columns(self, screen, img, sx, top, bottom, w, perp):
-        """그림을 세로 줄 단위로 잘라 그려요. 건물보다 뒤에 있는 줄은 건너뛰어요.
+        """그림을 그리되, 건물보다 뒤에 있는 세로 줄은 건너뛰어요.
 
-        화면에 보이는 부분만 잘라서 늘리기 때문에, 아주 가까이 있어도 느려지지 않아요.
+        화면에 보이는 부분만 잘라서 한 번에 늘린 뒤, 보이는 줄끼리 묶어서 붙여요.
+        그래서 아주 가까이 있어도, 장식물이 많아도 느려지지 않아요.
         """
         h = bottom - top
+        x0 = sx - w / 2
         vis_top, vis_bottom = max(0.0, top), min(float(HEIGHT), bottom)
-        if vis_bottom <= vis_top or w < 1:
+        vis_left, vis_right = max(0.0, x0), min(float(WIDTH), x0 + w)
+        if vis_bottom - vis_top < 1 or vis_right - vis_left < 1:
             return
-        col_w = self.col_w
+        col_w, zbuffer = self.col_w, self.zbuffer
+        first, last = int(vis_left // col_w), int((vis_right - 1) // col_w)
+        if all(perp >= zbuffer[col] for col in range(first, last + 1)):
+            return                                    # 전부 건물 뒤에 숨어 있음
+
+        # 1) 그림에서 화면에 보이는 부분만 잘라서 한 번에 늘리기
         img_w, img_h = img.get_size()
+        u0 = int((vis_left - x0) / w * img_w)
+        u1 = min(img_w, max(u0 + 1, math.ceil((vis_right - x0) / w * img_w)))
         v0 = int((vis_top - top) / h * img_h)
         v1 = min(img_h, max(v0 + 1, math.ceil((vis_bottom - top) / h * img_h)))
-        x0 = sx - w / 2
-        first = max(0, int(x0 // col_w))
-        last = min(self.num_rays - 1, int((x0 + w) // col_w))
-        out_h = int(vis_bottom - vis_top) + 1
-        for col in range(first, last + 1):
-            if perp >= self.zbuffer[col]:
-                continue
-            u = int((col * col_w + col_w / 2 - x0) / w * img_w)
-            if not 0 <= u < img_w:
-                continue
-            strip = img.subsurface((u, v0, 1, v1 - v0))
-            screen.blit(pygame.transform.scale(strip, (col_w, out_h)), (col * col_w, vis_top))
+        part_w, part_h = int(vis_right - vis_left) + 1, int(vis_bottom - vis_top) + 1
+        part = pygame.transform.scale(img.subsurface((u0, v0, u1 - u0, v1 - v0)), (part_w, part_h))
+
+        # 2) 건물보다 앞에 있는 줄들을 묶어서 붙이기
+        run_start = None
+        for col in range(first, last + 2):
+            visible = col <= last and perp < zbuffer[col]
+            if visible and run_start is None:
+                run_start = col
+            elif not visible and run_start is not None:
+                left = max(vis_left, run_start * col_w)
+                right = min(vis_right, col * col_w)
+                screen.blit(part, (left, vis_top), area=pygame.Rect(left - vis_left, 0, right - left, part_h))
+                run_start = None
 
     def draw_gun(self, screen):
         # 걸을 때 흔들리고, 쏠 때 뒤로 밀리고, 재장전/교체할 때 내려가요
@@ -1118,6 +1184,9 @@ class Game:
             image = font.render(text, True, YELLOW)
             screen.blit(image, image.get_rect(topright=(WIDTH - 12, map_bottom + 8 + i * 30 * UI)))
 
+        if self.hint_timer > 0 and not self.game_over:
+            hint = "WASD move   ARROWS look   F fire   SPACE jump   1-4 weapon   E scope   Z zoom   R reload"
+            self.center_text(screen, self.small_font, hint, WHITE, HEIGHT - 60 * UI)
         if self.banner_timer > 0:
             self.center_text(screen, big_font, self.banner, YELLOW, HEIGHT / 3)
             if self.sub_banner:
@@ -1127,17 +1196,25 @@ class Game:
             self.center_text(screen, font, f"Round {self.round}  /  Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
             self.center_text(screen, font, "R: retry   ESC: quit", WHITE, HEIGHT / 2 + 40 * UI)
 
-    def draw_minimap(self, screen):
-        """오른쪽 위 작은 지도. 지도 아래쪽 y좌표를 돌려줘요."""
-        cell = int(5 * UI)
-        ox, oy = WIDTH - MAP_W * cell - 12, 12
+    MINIMAP_CELL = int(5 * UI)
+
+    @classmethod
+    def make_minimap(cls):
+        """미니맵 그림은 바뀌지 않으니 처음에 한 번만 그려 둬요."""
+        cell = cls.MINIMAP_CELL
         mini = pygame.Surface((MAP_W * cell, MAP_H * cell), pygame.SRCALPHA)
         for row in range(MAP_H):
             for col in range(MAP_W):
                 spec = WALL_GRID[row][col]
                 color = spec[0] if spec else FLOORS[FLOOR_GRID[row][col]]
                 pygame.draw.rect(mini, (*color, 190), (col * cell, row * cell, cell, cell))
-        screen.blit(mini, (ox, oy))
+        return mini
+
+    def draw_minimap(self, screen):
+        """오른쪽 위 작은 지도. 지도 아래쪽 y좌표를 돌려줘요."""
+        cell = self.MINIMAP_CELL
+        ox, oy = WIDTH - MAP_W * cell - 12, 12
+        screen.blit(self.minimap, (ox, oy))
         p = self.player.pos * cell + (ox, oy)
         look = p + pygame.Vector2(math.cos(self.player.angle), math.sin(self.player.angle)) * 12
         pygame.draw.line(screen, BLACK, p, look, 2)
@@ -1156,7 +1233,7 @@ async def run():
     창을 닫으면 False, ESC로 끝내면 True를 돌려줘요 (메뉴로 돌아갈지 판단용).
     """
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Strike Zone: Santa Monica")
+    pygame.display.set_caption("Strike Zone: Neon Beach")
     fit_canvas()
     clock = pygame.time.Clock()
 

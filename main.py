@@ -22,7 +22,7 @@ WIDTH, HEIGHT = 960, 600
 # 메뉴에 보여줄 게임 목록: (키보드 숫자키, 제목, 설명, 실행 함수, 색)
 GAMES = [
     (pygame.K_1, "1. Don't Look", "SCP-096 chase game", game.run, (220, 60, 60)),
-    (pygame.K_2, "2. Strike Zone", "FPS in Santa Monica", shooter.run, (70, 150, 240)),
+    (pygame.K_2, "2. Strike Zone", "FPS in Neon Beach", shooter.run, (70, 150, 240)),
 ]
 
 
