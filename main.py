@@ -4,26 +4,61 @@
 두 게임 중 하나를 골라서 시작해요. 게임에서 ESC를 누르면 이 메뉴로 돌아와요.
 웹 브라우저 버전도 이 파일에서 시작해요 (pygbag은 main.py를 찾아서 실행해요).
 
+받아서 쓰는 앱(exe / 맥 앱)이면, 켤 때 새 버전이 있는지 확인해서 알려줘요.
+
 실행 방법:
     pip install pygame
     python main.py
 """
 
 import asyncio
+import threading
+import webbrowser
 
 import pygame
 
 import game
 import shooter
-from browser import prepare_window
+from browser import IN_BROWSER, prepare_window
+
+try:
+    from build_info import BUILD      # 앱을 만들 때 GitHub가 버전(커밋 번호)을 적어 넣어요
+except ImportError:
+    BUILD = "dev"
 
 WIDTH, HEIGHT = 960, 600
+RELEASE_PAGE = "https://github.com/sungkyusky-design/gege2ya/releases/latest"
+VERSION_URL = RELEASE_PAGE + "/download/version.txt"
 
 # 메뉴에 보여줄 게임 목록: (키보드 숫자키, 제목, 설명, 실행 함수, 색)
 GAMES = [
     (pygame.K_1, "1. Don't Look", "SCP-096 chase game", game.run, (220, 60, 60)),
-    (pygame.K_2, "2. Strike Zone", "FPS in Neon Beach", shooter.run, (70, 150, 240)),
+    (pygame.K_2, "2. Strike Zone", "FPS in a neon 80s city", shooter.run, (70, 150, 240)),
 ]
+
+latest_build = None     # 인터넷에서 확인한 최신 버전 (모르면 None)
+
+
+def check_for_update():
+    """최신 버전 번호를 받아 와요. 인터넷이 안 되면 조용히 넘어가요.
+    (메뉴가 멈추지 않도록 따로 돌아가는 작업(스레드)에서 실행해요)"""
+    global latest_build
+    try:
+        import ssl
+        import urllib.request
+        try:
+            import certifi                      # 앱 안에 들어 있는 인증서 목록
+            context = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            context = ssl.create_default_context()
+        with urllib.request.urlopen(VERSION_URL, timeout=5, context=context) as response:
+            latest_build = response.read().decode().strip()
+    except Exception:
+        pass
+
+
+def update_available():
+    return BUILD != "dev" and latest_build is not None and latest_build != BUILD
 
 
 def draw_menu(screen, title_font, font, small_font, buttons, mouse_pos):
@@ -42,10 +77,18 @@ def draw_menu(screen, title_font, font, small_font, buttons, mouse_pos):
 
     hint = small_font.render("Click or press 1 / 2   -   ESC in game: back to menu", True, (150, 150, 160))
     screen.blit(hint, hint.get_rect(center=(WIDTH / 2, HEIGHT - 60)))
+    if BUILD != "dev":
+        label = small_font.render(f"version {BUILD}", True, (110, 110, 120))
+        screen.blit(label, label.get_rect(bottomright=(WIDTH - 12, HEIGHT - 10)))
+    if update_available():
+        notice = font.render("NEW VERSION AVAILABLE!  Press U to download", True, (255, 220, 90))
+        screen.blit(notice, notice.get_rect(center=(WIDTH / 2, HEIGHT - 110)))
 
 
 async def main():
     pygame.init()
+    if not IN_BROWSER and BUILD != "dev":
+        threading.Thread(target=check_for_update, daemon=True).start()
     title_font = pygame.font.Font(None, 80)
     font = pygame.font.Font(None, 48)
     small_font = pygame.font.Font(None, 28)
@@ -67,6 +110,8 @@ async def main():
                     for key, *_, run, _ in GAMES:
                         if event.key == key:
                             chosen = run
+                    if event.key == pygame.K_u and update_available():
+                        webbrowser.open(RELEASE_PAGE)      # 다운로드 페이지 열기
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     for rect, (_, _, _, run, _) in zip(buttons, GAMES):
                         if rect.collidepoint(event.pos):

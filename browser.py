@@ -2,11 +2,16 @@
 실행 환경(웹 브라우저 / 컴퓨터)에 따라 필요한 도우미
 """
 
+import json
+import os
 import sys
 
 import pygame
 
 IN_BROWSER = sys.platform == "emscripten"
+
+SAVE_KEY = "gege2ya_save"                                            # 브라우저 저장 이름
+SAVE_PATH = os.path.join(os.path.expanduser("~"), ".gege2ya_save.json")   # 컴퓨터 저장 파일
 
 
 def prepare_window():
@@ -24,3 +29,33 @@ def prepare_window():
         platform.window.window_resize()
     else:
         pygame.key.stop_text_input()
+
+
+def load_save():
+    """저장된 진행 상황을 읽어요. 없거나 읽을 수 없으면 빈 dict.
+    컴퓨터: 내 폴더의 .gege2ya_save.json 파일 / 브라우저: 브라우저 저장소(localStorage)"""
+    try:
+        if IN_BROWSER:
+            import platform
+            raw = platform.window.localStorage.getItem(SAVE_KEY)
+        else:
+            with open(SAVE_PATH, encoding="utf-8") as f:
+                raw = f.read()
+        data = json.loads(raw) if raw else {}
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def write_save(data):
+    """진행 상황을 저장해요. 저장에 실패해도 게임은 계속돼요."""
+    try:
+        raw = json.dumps(data)
+        if IN_BROWSER:
+            import platform
+            platform.window.localStorage.setItem(SAVE_KEY, raw)
+        else:
+            with open(SAVE_PATH, "w", encoding="utf-8") as f:
+                f.write(raw)
+    except Exception:
+        pass

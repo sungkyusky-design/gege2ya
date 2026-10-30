@@ -24,8 +24,11 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build Games.exe
+        shell: bash
         run: |
-          pip install pygame pyinstaller
+          # 앱 안에 버전(커밋 번호)을 적어 넣어요. 앱이 켜질 때 새 버전이 있는지 비교해요
+          echo "BUILD = \"${GITHUB_SHA::7}\"" > build_info.py
+          pip install pygame pyinstaller certifi
           pyinstaller --onefile --windowed --name Games main.py
       - uses: actions/upload-artifact@v4
         with:
@@ -42,7 +45,8 @@ jobs:
           python-version: "3.12"
       - name: Build Games.app
         run: |
-          pip install pygame pyinstaller
+          echo "BUILD = \"${GITHUB_SHA::7}\"" > build_info.py
+          pip install pygame pyinstaller certifi
           pyinstaller --windowed --name Games main.py
           # ditto: 맥 앱 안의 링크와 서명을 깨뜨리지 않고 ZIP으로 묶어요
           ditto -c -k --keepParent dist/Games.app Games-mac.zip
@@ -63,7 +67,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
+          # version.txt: 앱이 새 버전이 있는지 확인할 때 읽는 파일
+          echo "${GITHUB_SHA::7}" > version.txt
           gh release delete latest --yes --cleanup-tag --repo "$REPO" || true
-          gh release create latest out/windows/Games.exe out/mac/Games-mac.zip --repo "$REPO" \
+          gh release create latest out/windows/Games.exe out/mac/Games-mac.zip version.txt --repo "$REPO" \
             --title "게임 모음 (Windows / Mac)" \
             --notes "Windows: Games.exe 더블클릭 / Mac: Games-mac.zip 압축을 풀고 Games 앱 실행. Python 설치가 필요 없어요. (빌드: ${GITHUB_SHA::7})"
