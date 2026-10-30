@@ -128,6 +128,17 @@ AIRSTRIKE_BLAST = (2.6, 220)
 SENTRY_TIME = 30                  # 자동 포탑이 버티는 시간(초)
 SENTRY_RANGE = 12
 
+# 체력 회복: 이 시간 동안 안 맞으면 체력이 빠르게 차요
+REGEN_DELAY = 4.0
+REGEN_RATE = 25                   # 1초에 차는 체력
+BLOOD = (150, 10, 15)
+MAX_CORPSES = 12                  # 바닥에 남는 쓰러진 적 수 (너무 많으면 느려져요)
+MAX_SPLATS = 40                   # 바닥에 남는 피 웅덩이 수
+CORPSE_TIME = 12.0                # 쓰러진 적이 남아 있는 시간(초)
+# 총마다 좌우 반동 (쏠 때 조준이 옆으로 살짝 튀어요, 단위: 라디안)
+HORIZONTAL_KICK = {"RIFLE": 0.005, "PISTOL": 0.004, "SNIPER": 0.015, "SHOTGUN": 0.012, "SMG": 0.007,
+                   "ROCKET": 0.01, "LMG": 0.006, "BURST": 0.004, "DMR": 0.008}
+
 # 경험치: 1000마다 계급(RANK)이 올라가요
 XP = dict(kill=100, headshot=50, knife=50, boss=500, double=50, triple=100, multi=150, round=250)
 XP_PER_RANK = 1000
@@ -692,6 +703,13 @@ load_map(0)       # 처음엔 첫 번째 맵
 # ---------------------------------------------------------------
 def make_enemy_image(look, state="normal"):
     """적 그림. state: normal(평소) / flash(총구 불꽃) / hurt(맞음) / aim(저격 조준 불빛)"""
+    if state == "hurt":
+        # 맞으면 붉게 물들고 몸에 핏자국이 생겨요
+        img = make_enemy_image(look, "normal")
+        img.fill((255, 120, 120, 255), special_flags=pygame.BLEND_RGBA_MULT)
+        for x, y, r in ((24, 50, 7), (36, 62, 5), (30, 44, 4), (20, 70, 4)):
+            pygame.draw.circle(img, BLOOD, (x, y), r)
+        return img
     img = pygame.Surface((60, 120), pygame.SRCALPHA)
     hurt = state == "hurt"
     pale = (210, 210, 210)
@@ -879,6 +897,30 @@ def make_explosion_frames(count=8):
     return frames
 
 
+def make_blood_pool_image():
+    """바닥의 피 웅덩이 (멀리서 보면 납작하게 깔린 모양)"""
+    img = pygame.Surface((120, 24), pygame.SRCALPHA)
+    rng = random.Random(9)
+    pygame.draw.ellipse(img, (110, 5, 10, 230), (10, 6, 100, 16))
+    for _ in range(8):
+        x, w = rng.randrange(0, 100), rng.randrange(10, 26)
+        pygame.draw.ellipse(img, (130, 8, 12, 220), (x, rng.randrange(4, 12), w, 8))
+    return img
+
+
+def make_hurt_vignette():
+    """다쳤을 때 화면 가장자리가 붉게 물드는 그림 (가운데는 투명)"""
+    img = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    steps = 24
+    for i in range(steps):
+        t = i / steps
+        alpha = int(170 * (1 - t) ** 2)
+        pad_x, pad_y = int(WIDTH * 0.22 * t), int(HEIGHT * 0.22 * t)
+        pygame.draw.rect(img, (140, 0, 0, alpha), (pad_x, pad_y, WIDTH - 2 * pad_x, HEIGHT - 2 * pad_y),
+                         int(WIDTH * 0.22 / steps) + 2, border_radius=int(60 * UI))
+    return img
+
+
 def make_sentry_image(flash=False):
     """자동 포탑: 세 발 받침대 위의 총"""
     img = pygame.Surface((80, 90), pygame.SRCALPHA)
@@ -969,9 +1011,10 @@ SOUND_RECIPES = {
     "rocket":    (0.60, 4, 1.0, 0.15, 0, 0, 0, 0, 0.50),
     "explosion": (1.00, 3.5, 1.0, 0.08, 45, 1.0, 0, 0, 0.90),
     "enemy":     (0.12, 35, 1.0, 0.35, 0, 0, 0, 0, 0.30),
-    "hit":       (0.05, 60, 0.0, 0.0, 0, 0, 1800, 0.6, 0.45),
+    "hit":       (0.08, 45, 0.6, 0.30, 120, 0.4, 1800, 0.45, 0.55),
     "headshot":  (0.12, 25, 0.0, 0.0, 0, 0, 2600, 0.7, 0.55),
-    "kill":      (0.10, 30, 0.0, 0.0, 0, 0, 1200, 0.6, 0.50),
+    "kill":      (0.16, 22, 0.7, 0.40, 90, 0.6, 1200, 0.45, 0.60),
+    "heart":     (0.25, 12, 0.0, 0.0, 50, 1.0, 0, 0, 0.55),
     "reload":    (0.05, 80, 1.0, 0.90, 0, 0, 2000, 0.3, 0.40),
     "streak":    (0.30, 6, 0.0, 0.0, 0, 0, 880, 0.6, 0.50),
     "knife":     (0.20, 12, 1.0, 0.70, 0, 0, 0, 0, 0.30),
@@ -1543,6 +1586,17 @@ class Projectile:
         return False
 
 
+class Corpse:
+    """쓰러진 적: 맞은 방향으로 밀려나며 넘어지고, 한동안 바닥에 남아요"""
+
+    def __init__(self, enemy, push):
+        self.pos = pygame.Vector2(enemy.pos)
+        self.kind = enemy.kind
+        self.vel = push                       # 밀려나는 속도
+        self.age = 0.0
+        self.side = random.choice((-1, 1))    # 왼쪽/오른쪽 중 쓰러지는 쪽
+
+
 class Sentry:
     """킬스트릭 자동 포탑: 가까이 보이는 적을 알아서 쏴요"""
 
@@ -1594,6 +1648,10 @@ class Game:
         self.explosion_frames = make_explosion_frames()
         self.flare_frames = make_flare_frames()
         self.sentry_images = (make_sentry_image(), make_sentry_image(flash=True))
+        self.blood_pool = make_blood_pool_image()
+        self.hurt_vignette = make_hurt_vignette()
+        self.muzzle_light = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        self.muzzle_light.fill((255, 220, 150, 28))
         self.scope_overlay = make_scope_overlay()
         self.sounds = get_sounds()
         self.was_reloading = False
@@ -1644,6 +1702,18 @@ class Game:
             look = dict(t["look"], **camo) if camo and kind in ("GRUNT", "SNIPER") else t["look"]
             for state in ("normal", "flash", "hurt", "aim"):
                 self.enemy_images[(kind, state)] = make_enemy_image(look, state)
+        # 쓰러지는 모습: 서 있는 그림을 25도, 55도, 90도로 기울인 그림 (왼쪽/오른쪽)
+        self.corpse_frames = {}
+        for kind, t in ENEMY_TYPES.items():
+            img = self.enemy_images[(kind, "hurt")]
+            for side in (-1, 1):
+                frames = []
+                for degrees in (25, 55, 90):
+                    rad = math.radians(degrees)
+                    h = t["height"] * math.cos(rad) + t["width"] * math.sin(rad)
+                    w = t["width"] * math.cos(rad) + t["height"] * math.sin(rad)
+                    frames.append((pygame.transform.rotate(img, degrees * side), h, w))
+                self.corpse_frames[(kind, side)] = frames
         # 자동차 색은 위치에 따라 정해져요 (매번 똑같이)
         cars = self.car_images
         self.decor += [Decor(x, y, cars[int(x * 7 + y * 3) % len(cars)], 0.6, 1.1, cover=True)
@@ -1734,6 +1804,13 @@ class Game:
         self.burst_left = 0        # 점사에서 아직 안 나간 발 수
         self.burst_timer = 0.0
         self.time = 0.0            # 라운드 시작부터 흐른 시간 (연속 처치 계산용)
+        self.particles = []        # 화면에 튀는 피와 탄피: [x, y, vx, vy, 남은 시간, 크기, 색, 탄피인지]
+        self.corpses = []
+        self.splats = []           # 피 웅덩이: [위치, 크기]
+        self.since_hurt = 99.0     # 마지막으로 맞은 뒤 흐른 시간 (체력 회복용)
+        self.heart_timer = 0.0
+        self.light_timer = 0.0     # 총구 섬광
+        self.hit_head = False      # 히트마커를 크게 (헤드샷)
         self.last_kill = -99.0
         self.multi = 0
 
@@ -1897,6 +1974,7 @@ class Game:
         self.fire_was_down = fire_down
         if ready and (fire_down if spec["auto"] else pressed) and arsenal.try_fire():
             self.sounds.play(GUN_SOUNDS[spec["name"]])
+            self.on_fire(spec)
             if spec["projectile"]:
                 self.launch_rocket()
             else:
@@ -1909,6 +1987,7 @@ class Game:
             if self.burst_timer <= 0 and arsenal.current.mag > 0 and not arsenal.busy:
                 arsenal.current.mag -= 1
                 self.sounds.play(GUN_SOUNDS[spec["name"]])
+                self.on_fire(spec)
                 self.shoot(spec)
                 arsenal.add_recoil()
                 self.burst_left -= 1
@@ -1926,6 +2005,7 @@ class Game:
 
         self.update_projectiles(dt)
         self.update_streaks(dt)
+        self.update_effects(dt)
         self.collect_pickups()
 
         if self.player.hp <= 0:
@@ -1940,9 +2020,37 @@ class Game:
             self.add_xp(XP["round"], f"ROUND CLEAR  +{XP['round']}")
             self.record_progress(self.round + 1)
 
+    def on_fire(self, spec):
+        """쏠 때마다: 조준이 옆으로 살짝 튀고, 화면이 번쩍이고, 탄피가 튀어나와요"""
+        self.player.angle += random.uniform(-1, 1) * HORIZONTAL_KICK.get(spec["name"], 0.005)
+        self.light_timer = 0.05
+        if not spec["projectile"]:
+            shotgun = spec["name"] == "SHOTGUN"
+            x, y = WIDTH * (0.5 if self.aiming else 0.62), HEIGHT * 0.72
+            self.particles.append([x, y, random.uniform(250, 450) * UI, random.uniform(-450, -280) * UI,
+                                   0.6, 4 * UI, (190, 40, 40) if shotgun else (210, 165, 60), True])
+
+    def spray_blood(self, x, y, perp, head):
+        """화면의 (x, y)에서 피가 튀어요. 멀수록 작게, 헤드샷이면 크게"""
+        near = min(1.0, 4 / perp)
+        for _ in range(16 if head else 7):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = random.uniform(80, 340 if head else 220) * UI * near
+            self.particles.append([x, y, math.cos(angle) * speed, math.sin(angle) * speed - 120 * UI * near,
+                                   random.uniform(0.25, 0.5), max(1.5, random.uniform(2, 5) * UI * near),
+                                   (random.randint(120, 190), 0, random.randint(5, 20)), False])
+        if len(self.particles) > 300:
+            del self.particles[:100]
+
+    def add_splat(self, pos, size):
+        self.splats.append([pygame.Vector2(pos), size])
+        if len(self.splats) > MAX_SPLATS:
+            self.splats.pop(0)
+
     def hurt_player(self, damage, source=None):
         """나에게 피해. source(때린 위치)가 있으면 화면에 맞은 방향을 표시해요."""
         self.player.hp -= int(damage)
+        self.since_hurt = 0.0
         self.damage_flash = min(1.0, 0.4 + damage / 40)
         self.sounds.play("hurt")
         if source is not None and source != self.player.pos:
@@ -1974,10 +2082,19 @@ class Game:
         enemy.sees = True
         if how not in STREAK_KILLS:
             self.sounds.play("hit")
-        self.hitmarker = 0.15
+        # 움찔: 잠깐 못 쏘고 뒤로 살짝 밀려요
+        enemy.shoot_timer = max(enemy.shoot_timer, 0.2)
+        away = enemy.pos - self.player.pos
+        away = away.normalize() if away.length() > 0 else pygame.Vector2(1, 0)
+        move_with_collision(enemy.pos, away * 0.06)
+        self.hitmarker = 0.18
         self.hitmarker_kill = enemy.hp <= 0
+        self.hit_head = how == "HEADSHOT!"
         if enemy.hp <= 0 and enemy in self.enemies:
             self.enemies.remove(enemy)
+            self.corpses.append(Corpse(enemy, away * (3.0 if how in ("BOOM!", "AIRSTRIKE!") else 1.6)))
+            if len(self.corpses) > MAX_CORPSES:
+                self.corpses.pop(0)
             self.kills += 1
             self.feed.append([f"{enemy.kind} {how}", 2.5])
             self.on_kill(enemy, how)
@@ -2057,6 +2174,37 @@ class Game:
             travelled += 0.25
         return target
 
+    def update_effects(self, dt):
+        """체력 회복, 튀는 피와 탄피, 쓰러지는 적, 심장 박동"""
+        p = self.player
+        self.since_hurt += dt
+        self.light_timer = max(0.0, self.light_timer - dt)
+        if self.since_hurt > REGEN_DELAY and 0 < p.hp < 100:
+            p.hp = min(100, p.hp + REGEN_RATE * dt)
+        if 0 < p.hp < 30:                       # 체력이 낮으면 심장 소리
+            self.heart_timer -= dt
+            if self.heart_timer <= 0:
+                self.heart_timer = 0.8
+                self.sounds.play("heart")
+        gravity = 1400 * UI
+        alive = []
+        for part in self.particles:
+            part[0] += part[2] * dt
+            part[1] += part[3] * dt
+            part[3] += gravity * dt
+            part[4] -= dt
+            if part[4] > 0:
+                alive.append(part)
+        self.particles = alive
+        for corpse in self.corpses:
+            corpse.age += dt
+            if corpse.age < 0.35:               # 넘어지면서 밀려나요
+                move_with_collision(corpse.pos, corpse.vel * dt)
+                corpse.vel *= 0.85
+            elif corpse.age - dt < 0.35:        # 다 쓰러지면 피 웅덩이
+                self.add_splat(corpse.pos, random.uniform(0.8, 1.2))
+        self.corpses = [c for c in self.corpses if c.age < CORPSE_TIME]
+
     def update_streaks(self, dt):
         self.radar_timer = max(0.0, self.radar_timer - dt)
         # 공습: 시간이 되면 폭발
@@ -2092,6 +2240,7 @@ class Game:
         spread = self.current_spread(spec)
         damage = {}               # 적마다 받은 피해 (산탄총은 여러 발이 한 적에게 맞을 수 있어요)
         headshots = set()
+        hits = []                 # 피가 튈 자리: (x, y, 거리, 머리인지)
         for _ in range(spec["pellets"]):
             ax = WIDTH / 2 + random.uniform(-spread, spread)
             ay = HEIGHT / 2 + random.uniform(-spread, spread) * 0.6
@@ -2118,7 +2267,11 @@ class Game:
                 damage[target] = damage.get(target, 0) + amount
                 if head:
                     headshots.add(target)
+                if amount > spec["body"] * 0.5 or head:     # 방패에 막힌 총알은 피가 안 나요
+                    hits.append((ax, ay, target_dist, head))
 
+        for x, y, perp, head in hits:
+            self.spray_blood(x, y, perp, head)
         for enemy, amount in damage.items():
             self.damage_enemy(enemy, amount, "HEADSHOT!" if enemy in headshots else "DOWN")
 
@@ -2184,6 +2337,7 @@ class Game:
                 d = enemy.pos.distance_to(pos)
                 if d < radius and can_see(pos, enemy.pos):
                     self.damage_enemy(enemy, damage * power(d), how)
+                    self.add_splat(enemy.pos, 0.7)
         d = self.player.pos.distance_to(pos)
         if owner != "streak" and d < radius and can_see(pos, self.player.pos):
             self.hurt_player(damage * power(d) * (SELF_DAMAGE if owner == "player" else 1.0), pos)
@@ -2262,6 +2416,7 @@ class Game:
         self.draw_sky(screen)
         self.draw_world(screen)
         self.draw_sprites(screen)
+        self.draw_particles(screen, casings=False)       # 튀는 피
         if self.theme["snow"]:
             self.draw_snow(screen)
         if self.scoped:
@@ -2272,9 +2427,21 @@ class Game:
             self.draw_knife(screen)
         else:
             self.draw_gun(screen)
+        self.draw_particles(screen, casings=True)        # 탄피는 총 앞에
+        if self.light_timer > 0:
+            screen.blit(self.muzzle_light, (0, 0))       # 총구 섬광
         self.draw_hud(screen)
         if self.show_help:
             draw_help(screen, self.fonts, HELP_TEXT[self.fonts["lang"]]["resume"])
+
+    def draw_particles(self, screen, casings):
+        for x, y, vx, vy, life, size, color, is_casing in self.particles:
+            if is_casing != casings:
+                continue
+            if is_casing:
+                pygame.draw.rect(screen, color, (x, y, size, size * 2.2))
+            else:
+                pygame.draw.circle(screen, color, (x, y), size)
 
     def draw_snow(self, screen):
         """눈송이: 화면에서 천천히 떨어지고, 고개를 돌리면 옆으로 흘러가요"""
@@ -2380,6 +2547,16 @@ class Game:
             else:
                 img, h, w = self.rocket_image, 0.2, 0.35
             box = self.project(proj.pos, h, w, lift=proj.z)
+            if box:
+                items.append((box, img, None))
+        for pos, size in self.splats:
+            box = self.project(pos, 0.08, size)
+            if box:
+                items.append((box, self.blood_pool, None))
+        for corpse in self.corpses:
+            frame = min(2, int(corpse.age / 0.12))
+            img, h, w = self.corpse_frames[(corpse.kind, corpse.side)][frame]
+            box = self.project(corpse.pos, h, w)
             if box:
                 items.append((box, img, None))
         for sentry in self.sentries:
@@ -2535,11 +2712,12 @@ class Game:
 
     def draw_hud(self, screen):
         font, big_font = self.font, self.big_font
-        # 맞았을 때 화면이 붉게
-        if self.damage_flash > 0:
-            overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-            overlay.fill((200, 0, 0, int(110 * self.damage_flash)))
-            screen.blit(overlay, (0, 0))
+        # 다치면 화면 가장자리가 붉게 (체력이 낮을수록 진하게)
+        low = max(0.0, 1 - self.player.hp / 60) if self.player.hp < 60 else 0.0
+        strength = min(1.0, max(self.damage_flash, low))
+        if strength > 0:
+            self.hurt_vignette.set_alpha(int(255 * strength))
+            screen.blit(self.hurt_vignette, (0, 0))
 
         # 조준선 (화면 가운데). 총알이 퍼지는 만큼 벌어져요. 정조준 중엔 빨간 점
         cx, cy = WIDTH / 2, HEIGHT / 2
@@ -2553,10 +2731,14 @@ class Game:
                 end = (cx + dx * (gap + 10 * UI), cy + dy * (gap + 10 * UI))
                 pygame.draw.line(screen, GREEN, start, end, 2)
         if self.hitmarker > 0:
+            # 히트마커: 맞히면 하얀 X, 쓰러뜨리면 빨간 X, 헤드샷이면 크게. 처음에 살짝 커졌다가 줄어요
             color = RED if self.hitmarker_kill else WHITE
+            grow = 1 + self.hitmarker * 2
+            inner, outer = 6 * UI * grow, (16 if self.hit_head else 12) * UI * grow
+            width = 3 if self.hitmarker_kill or self.hit_head else 2
             for dx, dy in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
-                pygame.draw.line(screen, color, (cx + dx * 5 * UI, cy + dy * 5 * UI),
-                                 (cx + dx * 12 * UI, cy + dy * 12 * UI), 2)
+                pygame.draw.line(screen, color, (cx + dx * inner, cy + dy * inner),
+                                 (cx + dx * outer, cy + dy * outer), width)
 
         # 맞은 방향: 조준점 둘레에 빨간 화살표 (위 = 앞, 아래 = 뒤)
         for angle, t in self.damage_dirs:
@@ -2597,7 +2779,7 @@ class Game:
 
         # 왼쪽 아래 체력, 오른쪽 아래 총알과 수류탄
         hp_color = GREEN if self.player.hp > 40 else RED
-        screen.blit(big_font.render(f"+ {self.player.hp}", True, hp_color), (24, HEIGHT - 70 * UI))
+        screen.blit(big_font.render(f"+ {int(self.player.hp)}", True, hp_color), (24, HEIGHT - 70 * UI))
         w = self.arsenal.current
         ammo = "RELOADING..." if self.arsenal.reload_left > 0 else f"{w.mag} / {w.reserve}"
         image = big_font.render(ammo, True, WHITE)
