@@ -28,7 +28,7 @@
     스페이스바       : 점프
     ← → / ↑ ↓        : 시점 돌리기 (좌우 / 위아래)    = 마우스
     F                : 사격 (꾹 누르면 연사)          = 마우스 왼쪽
-    E                : 정조준 켜기/끄기 (저격총은 조준경) = 마우스 오른쪽(누르고 있기)
+    E                : 정조준 켜기/끄기 (저격총은 조준경) = 마우스 오른쪽 클릭
     Z                : 저격총 조준경 배율 (3 → 6 → 12배) = 조준경을 보면서 휠
     G                : 수류탄 던지기
     V                : 칼 공격
@@ -99,7 +99,7 @@ JUMP_SPEED = 4.2                  # 점프 힘
 GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
 # 고를 수 있는 해상도. 화면보다 큰 해상도는 전체 화면으로 열어요
-RESOLUTIONS = [(1280, 720), (1600, 900), (1920, 1080)]
+RESOLUTIONS = [(1280, 720), (1600, 900), (1920, 1080), (2560, 1440)]
 
 
 def set_resolution(width, height):
@@ -1015,12 +1015,28 @@ SOUND_RECIPES = {
     "headshot":  (0.12, 25, 0.0, 0.0, 0, 0, 2600, 0.7, 0.55),
     "kill":      (0.16, 22, 0.7, 0.40, 90, 0.6, 1200, 0.45, 0.60),
     "heart":     (0.25, 12, 0.0, 0.0, 50, 1.0, 0, 0, 0.55),
+    # 발소리: 바닥마다 달라요
+    "step_hard": (0.06, 70, 0.8, 0.55, 140, 0.35, 0, 0, 0.35),
+    "step_soft": (0.09, 45, 0.9, 0.85, 90, 0.30, 0, 0, 0.30),
+    "step_snow": (0.12, 35, 1.0, 0.35, 0, 0, 0, 0, 0.26),
+    "step_wood": (0.07, 55, 0.6, 0.60, 180, 0.50, 0, 0, 0.35),
     "reload":    (0.05, 80, 1.0, 0.90, 0, 0, 2000, 0.3, 0.40),
     "streak":    (0.30, 6, 0.0, 0.0, 0, 0, 880, 0.6, 0.50),
     "knife":     (0.20, 12, 1.0, 0.70, 0, 0, 0, 0, 0.30),
     "throw":     (0.15, 15, 1.0, 0.60, 0, 0, 0, 0, 0.25),
     "hurt":      (0.12, 20, 0.6, 0.20, 0, 0, 220, 0.5, 0.40),
 }
+# 바닥 -> 발소리 (없는 바닥은 step_hard)
+STEP_SOUNDS = {".": "step_soft", ";": "step_soft", "g": "step_soft", "#": "step_soft",
+               "*": "step_snow", "-": "step_snow", "_": "step_wood", "p": "step_wood"}
+
+
+def step_sound_at(pos):
+    col, row = int(pos.x), int(pos.y)
+    floor = FLOOR_GRID[row][col] if in_map(col, row) else ":"
+    return STEP_SOUNDS.get(floor, "step_hard")
+
+
 # 총 이름 -> 총소리
 GUN_SOUNDS = {"RIFLE": "rifle", "PISTOL": "pistol", "SNIPER": "sniper", "SHOTGUN": "shotgun", "SMG": "smg",
               "ROCKET": "rocket", "LMG": "lmg", "BURST": "rifle", "DMR": "dmr"}
@@ -1094,7 +1110,7 @@ HELP_TEXT = {
         title="조작법",
         keys=[("W A S D", "이동"), ("Shift", "달리기 (W와 함께)"), ("C", "앉기 / 달리다가: 슬라이딩"),
               ("← → ↑ ↓", "시점 (마우스도 돼요)"), ("스페이스바", "점프"),
-              ("F", "사격 (꾹 누르면 연사)"), ("E", "정조준 / 저격총 조준경"), ("Z", "조준경 배율 3·6·12배"),
+              ("F,  왼쪽 클릭", "사격 (꾹 누르면 연사)"), ("E,  오른쪽 클릭", "정조준 / 저격총 조준경"), ("Z", "조준경 배율 3·6·12배"),
               ("G", "수류탄"), ("V", "칼"), ("X", "킬스트릭 쓰기"), ("1 ~ 9,  Q", "무기 바꾸기,  직전 무기"),
               ("R", "재장전"), ("H,  M", "도움말 (일시정지),  소리 끄기"), ("P,  Enter", "FPS 표시,  전체 화면"),
               ("ESC", "메뉴로")],
@@ -1111,7 +1127,7 @@ HELP_TEXT = {
         title="HOW TO PLAY",
         keys=[("W A S D", "move"), ("SHIFT", "sprint (with W)"), ("C", "crouch / slide while sprinting"),
               ("ARROWS", "look (or mouse)"), ("SPACE", "jump"),
-              ("F", "fire (hold for auto)"), ("E", "aim / sniper scope"), ("Z", "scope zoom 3/6/12x"),
+              ("F, LEFT CLICK", "fire (hold for auto)"), ("E, RIGHT CLICK", "aim / sniper scope"), ("Z", "scope zoom 3/6/12x"),
               ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1-9, Q", "weapons, last weapon"),
               ("R", "reload"), ("H, M", "help (pause), mute"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "menu")],
         tips=["Kill every enemy to clear the round. The map changes each round.",
@@ -1228,6 +1244,229 @@ def make_scope_overlay():
     for i in range(1, 5):
         pygame.draw.line(overlay, (0, 0, 0, 255), (cx - 8, cy + i * r // 6), (cx + 8, cy + i * r // 6), 2)
     return overlay
+
+
+# ---------------------------------------------------------------
+# 1인칭 총 화면: 위장복 소매와 장갑 낀 두 손이 총을 잡은 모습
+# ---------------------------------------------------------------
+SLEEVE = (78, 88, 64)            # 위장복 소매
+SLEEVE_DARK = (55, 63, 45)
+GLOVE = (40, 38, 36)             # 장갑
+GLOVE_LIGHT = (70, 66, 60)
+GUN_DARK = (28, 29, 32)
+
+# 총 생김새
+#   body / accent : 몸통 색 / 총열덮개·개머리판 색      length : 총 길이 비율    thick : 굵기 비율
+#   mag    : 탄창 모양 (curved 휜 탄창, straight 곧은 탄창, box 짧은 탄창, drum 드럼, tube 산탄총, grip 권총)
+#   optic  : 조준기 (reddot 도트사이트, scope 저격 조준경, scope_small 작은 조준경, iron 가늠쇠)
+#   tube   : 로켓처럼 굵은 통 모양인지
+GUN_LOOKS = {
+    "RIFLE":   dict(body=(48, 50, 54), accent=(70, 72, 76), length=1.0, thick=1.0, mag="curved", optic="reddot"),
+    "PISTOL":  dict(body=(42, 42, 46), accent=(80, 80, 86), length=0.5, thick=0.9, mag="grip", optic="iron"),
+    "SNIPER":  dict(body=(62, 68, 52), accent=(45, 48, 40), length=1.25, thick=0.95, mag="box", optic="scope"),
+    "SHOTGUN": dict(body=(40, 40, 44), accent=(125, 82, 45), length=1.05, thick=1.1, mag="tube", optic="iron"),
+    "SMG":     dict(body=(40, 40, 44), accent=(66, 66, 72), length=0.75, thick=0.95, mag="straight", optic="reddot"),
+    "ROCKET":  dict(body=(88, 98, 66), accent=(62, 68, 46), length=1.1, thick=1.9, mag=None, optic="iron", tube=True),
+    "LMG":     dict(body=(52, 54, 50), accent=(78, 80, 72), length=1.15, thick=1.25, mag="drum", optic="reddot"),
+    "BURST":   dict(body=(165, 145, 105), accent=(62, 62, 62), length=1.0, thick=1.0, mag="curved", optic="reddot"),
+    "DMR":     dict(body=(72, 60, 46), accent=(42, 42, 42), length=1.15, thick=0.95, mag="straight", optic="scope_small"),
+}
+
+
+def lighter(color, amount):
+    return tuple(max(0, min(255, int(c * amount))) for c in color)
+
+
+def draw_sleeve(surface, hand, elbow, width):
+    """손에서 화면 밖 팔꿈치까지 이어지는 위장복 소매"""
+    along = elbow - hand
+    if along.length() == 0:
+        return
+    side = pygame.Vector2(-along.y, along.x).normalize() * width / 2
+    pygame.draw.polygon(surface, SLEEVE, [hand + side, elbow + side * 1.3, elbow - side * 1.3, hand - side])
+    pygame.draw.polygon(surface, SLEEVE_DARK, [hand - side * 0.2, elbow - side * 0.3, elbow - side * 1.3, hand - side])
+    rng = random.Random(int(hand.x))
+    for _ in range(6):                                   # 위장 무늬
+        p = hand.lerp(elbow, rng.uniform(0.15, 0.9)) + side * rng.uniform(-0.6, 0.6)
+        pygame.draw.circle(surface, SLEEVE_DARK, p, width * rng.uniform(0.12, 0.25))
+    pygame.draw.circle(surface, SLEEVE_DARK, hand, width * 0.55)          # 소매 끝
+
+
+def draw_glove(surface, center, radius):
+    pygame.draw.circle(surface, GLOVE, center, radius)
+    pygame.draw.circle(surface, GLOVE_LIGHT, center - pygame.Vector2(radius * 0.3, radius * 0.35), radius * 0.35)
+
+
+def draw_hip_gun(surface, look):
+    """허리 높이로 든 총 (오른쪽 아래에서 화면 가운데를 향해요). 총구 위치를 돌려줘요."""
+    V = pygame.Vector2
+    rear = V(WIDTH * 0.84, HEIGHT * 1.0)
+    aim = V(WIDTH * 0.58, HEIGHT * 0.64)
+    axis = (aim - rear) * min(1.15, 0.7 + 0.3 * look["length"])
+    u = axis.normalize()
+    n = V(-u.y, u.x)
+    if n.y > 0:
+        n = -n                                           # n: 총의 '위쪽' 방향
+    base = 56 * UI * look["thick"]
+
+    def w(t):                                            # 멀수록 가늘게 (원근감)
+        return base * (1 - 0.5 * t)
+
+    def P(t, h):                                         # 총 위의 한 점: t 앞뒤(0~1), h 위아래(-1~1)
+        return rear + axis * t + n * h * w(t)
+
+    def band(color, t0, t1, h0, h1):
+        pygame.draw.polygon(surface, color, [P(t0, h0), P(t1, h0), P(t1, h1), P(t0, h1)])
+
+    body, accent = look["body"], look["accent"]
+    down = -n
+    left_hand, right_hand = P(0.62, -1.05), P(0.17, -1.75)
+    draw_sleeve(surface, left_hand, V(WIDTH * 0.42, HEIGHT * 1.25), 62 * UI)
+    draw_sleeve(surface, right_hand, V(WIDTH * 1.08, HEIGHT * 1.2), 80 * UI)
+
+    if look.get("tube"):                                 # 로켓 발사관
+        band(lighter(body, 0.6), -0.15, 1.0, -1.15, -0.85)
+        band(body, -0.15, 1.0, -0.9, 0.9)
+        band(lighter(body, 1.35), -0.15, 1.0, 0.5, 0.95)
+        band(accent, 0.86, 1.0, -1.08, 1.08)
+        band(accent, -0.15, -0.02, -1.05, 1.05)
+        band(GUN_DARK, 0.32, 0.38, 0.9, 1.6)             # 가늠쇠
+        band(GUN_DARK, 0.15, 0.22, -0.9, -2.2)           # 손잡이
+        draw_glove(surface, P(0.19, -2.0), w(0.19) * 0.9)
+        draw_glove(surface, left_hand, w(0.62) * 0.85)
+        return P(1.0, 0)
+
+    # 개머리판
+    stock = accent if look["mag"] == "tube" else lighter(body, 0.85)
+    if look["mag"] != "grip":
+        band(stock, -0.08, 0.12, -0.85, 0.65)
+    # 손잡이 (오른손)
+    grip = [P(0.12, -0.95), P(0.2, -0.95), P(0.2, -0.95) + down * w(0.2) * 1.8 - u * w(0.2) * 0.2,
+            P(0.12, -0.95) + down * w(0.12) * 1.8 - u * w(0.12) * 0.5]
+    pygame.draw.polygon(surface, GUN_DARK, grip)
+    # 탄창
+    mag = look["mag"]
+    a, b = P(0.30, -0.95), P(0.40, -0.95)
+    if mag == "curved":
+        pygame.draw.polygon(surface, GUN_DARK, [a, b, b + down * w(0.4) * 2.4 + u * w(0.4) * 0.9,
+                                                a + down * w(0.3) * 2.3 + u * w(0.3) * 0.5])
+    elif mag in ("straight", "box"):
+        depth = 2.3 if mag == "straight" else 1.3
+        pygame.draw.polygon(surface, GUN_DARK, [a, b, b + down * w(0.4) * depth, a + down * w(0.3) * depth])
+    elif mag == "drum":
+        center = P(0.36, -0.95) + down * w(0.36) * 1.3
+        pygame.draw.circle(surface, GUN_DARK, center, w(0.36) * 1.3)
+        pygame.draw.circle(surface, lighter(GUN_DARK, 1.8), center, w(0.36) * 0.5)
+    # 몸통
+    band(lighter(body, 0.6), 0.1, 0.46, -1.15, -0.85)    # 아래 그림자
+    band(body, 0.1, 0.46, -0.95, 0.95)
+    band(lighter(body, 1.45), 0.1, 0.46, 0.7, 1.0)       # 위쪽 빛 반사
+    # 총열덮개 + 레일 홈 (산탄총은 나무 펌프)
+    band(accent, 0.46, 0.78, -0.75, 0.75)
+    band(lighter(accent, 1.35), 0.46, 0.78, 0.5, 0.75)
+    for k in range(6):
+        t = 0.49 + k * 0.05
+        pygame.draw.line(surface, lighter(accent, 0.55), P(t, 0.72), P(t, -0.35), max(1, int(2 * UI)))
+    # 총열과 소염기
+    band(GUN_DARK, 0.78, 1.0, -0.28, 0.28)
+    band(lighter(GUN_DARK, 1.4), 0.94, 1.0, -0.4, 0.4)
+    if mag == "tube":
+        band(lighter(GUN_DARK, 1.2), 0.5, 0.95, -0.7, -0.35)   # 산탄총 아래 튜브
+    # 조준기
+    optic = look["optic"]
+    if optic == "reddot":
+        band(GUN_DARK, 0.22, 0.33, 1.0, 2.1)
+        pygame.draw.line(surface, (120, 175, 215), P(0.33, 1.2), P(0.33, 1.9), max(2, int(3 * UI)))
+    elif optic == "scope":
+        band(GUN_DARK, 0.08, 0.15, 1.0, 2.35)
+        band(GUN_DARK, 0.12, 0.5, 1.2, 2.1)
+        band(GUN_DARK, 0.46, 0.55, 1.0, 2.45)
+        pygame.draw.line(surface, (120, 175, 215), P(0.55, 1.15), P(0.55, 2.3), max(2, int(3 * UI)))
+    elif optic == "scope_small":
+        band(GUN_DARK, 0.18, 0.42, 1.15, 1.95)
+        pygame.draw.line(surface, (120, 175, 215), P(0.42, 1.25), P(0.42, 1.85), max(2, int(3 * UI)))
+    else:
+        band(GUN_DARK, 0.14, 0.18, 1.0, 1.55)           # 가늠자
+        band(GUN_DARK, 0.88, 0.91, 0.25, 1.0)           # 가늠쇠
+    # 장갑 낀 손: 오른손은 손잡이, 왼손은 총열덮개를 감싸요
+    draw_glove(surface, P(0.17, -1.75), w(0.17) * 0.95)
+    draw_glove(surface, left_hand, w(0.62) * 0.85)
+    band(GLOVE, 0.58, 0.67, 0.25, 0.8)                   # 총열덮개 위로 감싼 손가락
+    return P(1.0, 0)
+
+
+def draw_ads_gun(surface, look):
+    """정조준: 총을 눈앞에 들고 조준기로 화면 가운데를 봐요. 총구 위치를 돌려줘요."""
+    V = pygame.Vector2
+    cx, cy = WIDTH / 2, HEIGHT / 2
+    body, accent = look["body"], look["accent"]
+    draw_sleeve(surface, V(cx - WIDTH * 0.08, HEIGHT * 0.87), V(WIDTH * 0.28, HEIGHT * 1.15), 38 * UI)
+    draw_sleeve(surface, V(cx + WIDTH * 0.08, HEIGHT * 0.95), V(WIDTH * 0.75, HEIGHT * 1.15), 46 * UI)
+    if look.get("tube"):
+        pygame.draw.polygon(surface, body, [(cx - WIDTH * 0.2, HEIGHT), (cx - WIDTH * 0.02, HEIGHT),
+                                            (cx - WIDTH * 0.05, cy + HEIGHT * 0.1), (cx - WIDTH * 0.13, cy + HEIGHT * 0.1)])
+        pygame.draw.ellipse(surface, accent, (cx - WIDTH * 0.135, cy + HEIGHT * 0.06, WIDTH * 0.09, HEIGHT * 0.08))
+        pygame.draw.ellipse(surface, GUN_DARK, (cx - WIDTH * 0.12, cy + HEIGHT * 0.07, WIDTH * 0.06, HEIGHT * 0.055))
+    else:
+        bottom = HEIGHT * 1.02
+        top = cy + HEIGHT * 0.16
+        pygame.draw.polygon(surface, lighter(body, 0.7), [(cx - WIDTH * 0.115, bottom), (cx + WIDTH * 0.115, bottom),
+                                                          (cx + WIDTH * 0.048, top), (cx - WIDTH * 0.048, top)])
+        pygame.draw.polygon(surface, body, [(cx - WIDTH * 0.09, bottom), (cx + WIDTH * 0.09, bottom),
+                                            (cx + WIDTH * 0.04, top), (cx - WIDTH * 0.04, top)])
+        pygame.draw.polygon(surface, lighter(body, 1.45), [(cx - WIDTH * 0.025, bottom), (cx + WIDTH * 0.025, bottom),
+                                                           (cx + WIDTH * 0.01, top), (cx - WIDTH * 0.01, top)])
+        pygame.draw.polygon(surface, accent, [(cx - WIDTH * 0.04, top), (cx + WIDTH * 0.04, top),
+                                              (cx + WIDTH * 0.022, cy + HEIGHT * 0.08), (cx - WIDTH * 0.022, cy + HEIGHT * 0.08)])
+        pygame.draw.rect(surface, GUN_DARK, (cx - WIDTH * 0.008, cy + HEIGHT * 0.035, WIDTH * 0.016, HEIGHT * 0.05))
+    draw_glove(surface, V(cx - WIDTH * 0.075, HEIGHT * 0.88), HEIGHT * 0.055)
+    draw_glove(surface, V(cx + WIDTH * 0.075, HEIGHT * 0.96), HEIGHT * 0.065)
+
+    optic = look["optic"]
+    if optic in ("reddot", "scope_small", "scope"):
+        r = HEIGHT * (0.085 if optic == "reddot" else 0.14)
+        thick = max(4, int(HEIGHT * 0.018))
+        pygame.draw.rect(surface, GUN_DARK, (cx - WIDTH * 0.03, cy + r * 0.7, WIDTH * 0.06, HEIGHT * 0.16 - r * 0.7))
+        glass = pygame.Surface((int(r * 2), int(r * 2)), pygame.SRCALPHA)
+        pygame.draw.circle(glass, (140, 190, 230, 30), (r, r), r)
+        surface.blit(glass, (cx - r, cy - r))
+        pygame.draw.circle(surface, GUN_DARK, (cx, cy), r, thick)
+        pygame.draw.circle(surface, lighter(GUN_DARK, 2.0), (cx, cy), r - thick, max(1, int(UI)))
+        if optic == "reddot":
+            pygame.draw.circle(surface, (255, 60, 60), (cx, cy), 4 * UI)
+            pygame.draw.circle(surface, (255, 210, 210), (cx, cy), 1.5 * UI)
+        else:                                            # 조준경 십자선
+            pygame.draw.line(surface, BLACK, (cx - r, cy), (cx + r, cy), max(1, int(UI)))
+            pygame.draw.line(surface, BLACK, (cx, cy - r), (cx, cy + r), max(1, int(UI)))
+    else:                                                # 가늠자(아래 양쪽) + 가늠쇠(가운데 기둥)
+        for sx in (-1, 1):
+            pygame.draw.rect(surface, GUN_DARK, (cx + sx * WIDTH * 0.008 - (WIDTH * 0.03 if sx < 0 else 0),
+                                                 cy + HEIGHT * 0.012, WIDTH * 0.03, HEIGHT * 0.05))
+        pygame.draw.rect(surface, GUN_DARK, (cx - 3 * UI, cy, 6 * UI, HEIGHT * 0.06))
+        pygame.draw.circle(surface, (230, 230, 120), (cx, cy + 2 * UI), 2 * UI)   # 야광 점
+    return V(cx, cy + HEIGHT * 0.045)
+
+
+def make_viewmodel(name, ads):
+    """총 그림을 미리 그려 둬요. (그림, 화면 위치, 총구 위치)를 돌려줘요."""
+    canvas = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    muzzle = (draw_ads_gun if ads else draw_hip_gun)(canvas, GUN_LOOKS[name])
+    rect = canvas.get_bounding_rect()
+    return canvas.subsurface(rect).copy(), (rect.x, rect.y), (muzzle.x, muzzle.y)
+
+
+def draw_muzzle_flash(surface, pos, size):
+    """별 모양 총구 불꽃 (쏠 때마다 모양이 조금씩 달라요)"""
+    rot = random.uniform(0, math.tau)
+    outer, inner = [], []
+    for i in range(10):
+        r = size * (1.0 if i % 2 == 0 else 0.42) * random.uniform(0.8, 1.2)
+        angle = rot + i * math.pi / 5
+        outer.append((pos[0] + math.cos(angle) * r, pos[1] + math.sin(angle) * r))
+        inner.append((pos[0] + math.cos(angle) * r * 0.55, pos[1] + math.sin(angle) * r * 0.55))
+    pygame.draw.polygon(surface, (255, 190, 80), outer)
+    pygame.draw.polygon(surface, (255, 240, 190), inner)
+    pygame.draw.circle(surface, WHITE, pos, size * 0.22)
 
 
 # ---------------------------------------------------------------
@@ -1655,6 +1894,12 @@ class Game:
         self.scope_overlay = make_scope_overlay()
         self.sounds = get_sounds()
         self.was_reloading = False
+        # 총 그림: 무기마다 허리 자세 / 정조준 자세 두 가지를 미리 그려 둬요
+        self.viewmodels = {(spec["name"], ads): make_viewmodel(spec["name"], ads)
+                           for spec in WEAPONS for ads in (False, True)}
+        self.sway = 0.0            # 고개를 돌리면 총이 살짝 늦게 따라와요
+        self.step_timer = 0.0
+        self.was_airborne = False
         self.fonts = make_fonts()
         self.font, self.big_font, self.small_font = self.fonts["normal"], self.fonts["big"], self.fonts["small"]
         self.save = save
@@ -1662,6 +1907,7 @@ class Game:
         self.map_index = None
         self.set_col_w(START_COL_W)
         self.fire_was_down = False
+        self.click_queued = False
         self.aim_on = False        # E 키로 켠 정조준
         self.show_fps = False      # P 또는 F3
         self.show_help = False     # H
@@ -1886,6 +2132,12 @@ class Game:
         if self.game_over or self.show_help:
             return
         a = self.arsenal
+        # 마우스 클릭은 '눌렀다' 신호로도 받아요. 맥 트랙패드를 톡 치면 누름과 뗌이
+        # 한순간에 지나가서, 지금 눌려 있는지만 보면 클릭을 놓쳐요.
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self.click_queued = True
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:   # 오른쪽 클릭 = E (정조준 켜기/끄기)
+            self.aim_on = not self.aim_on
         if event.type == pygame.MOUSEWHEEL:
             if self.scoped:      # 조준경을 보고 있으면 휠로 확대/축소
                 a.zoom_index = max(0, min(len(SCOPE_ZOOMS) - 1, a.zoom_index + event.y))
@@ -1951,12 +2203,16 @@ class Game:
             self.burst_left = 0
         self.knife_timer = max(0.0, self.knife_timer - dt)
         self.knife_cooldown = max(0.0, self.knife_cooldown - dt)
-        fire_down = buttons[0] or keys[pygame.K_f]
-        self.aiming = (bool(buttons[2] or self.aim_on) and not arsenal.busy
+        fire_down = bool(buttons[0] or keys[pygame.K_f] or self.click_queued)   # 왼쪽 클릭 = F
+        self.click_queued = False
+        self.aiming = (self.aim_on and not arsenal.busy
                        and self.knife_timer == 0 and not self.player.sprinting)
         speed = (AIM_MOVE if self.aiming else 1.0) * spec.get("move", 1.0)
+        angle_before = self.player.angle
         self.player.update(dt, keys, mouse_dx, mouse_dy, min(1.0, 1.5 / self.zoom), speed,
                            allow_sprint=not self.aiming and not fire_down)
+        turn = self.player.angle - angle_before
+        self.sway = max(-50 * UI, min(50 * UI, self.sway * 0.85 - turn * 900 * UI))
         arsenal.update(dt)
         if arsenal.reload_left > 0 and not self.was_reloading:
             self.sounds.play("reload")
@@ -1994,7 +2250,15 @@ class Game:
                 self.burst_timer = spec["burst_delay"]
 
         for enemy in self.enemies:
+            before = pygame.Vector2(enemy.pos)
             damage = enemy.update(dt, self.player)
+            # 가까이서 걷는 적의 발소리 (멀수록 작게)
+            dist = enemy.pos.distance_to(self.player.pos)
+            if enemy.pos != before and dist < 10:
+                enemy.step_timer = getattr(enemy, "step_timer", random.uniform(0, 0.5)) - dt * enemy.t["speed"] / 1.4
+                if enemy.step_timer <= 0:
+                    enemy.step_timer = 0.5
+                    self.sounds.play(step_sound_at(enemy.pos), (1 - dist / 10) * 0.7)
             if enemy.flash_timer == 0.08:          # 방금 쐈어요: 멀수록 작게 들려요
                 self.sounds.play("enemy", 1 - enemy.pos.distance_to(self.player.pos) / 22)
             if damage:
@@ -2175,8 +2439,17 @@ class Game:
         return target
 
     def update_effects(self, dt):
-        """체력 회복, 튀는 피와 탄피, 쓰러지는 적, 심장 박동"""
+        """체력 회복, 튀는 피와 탄피, 쓰러지는 적, 심장 박동, 발소리"""
         p = self.player
+        # 발소리: 걸으면 일정한 간격으로, 달리면 빠르게, 앉으면 작고 느리게
+        if p.moving and p.z == 0 and p.slide_timer <= 0:
+            self.step_timer -= dt * (1.6 if p.sprinting else (0.65 if p.crouch else 1.0))
+            if self.step_timer <= 0:
+                self.step_timer = 0.42
+                self.sounds.play(step_sound_at(p.pos), random.uniform(0.35, 0.5) if p.crouch else random.uniform(0.75, 1.0))
+        if self.was_airborne and p.z == 0:              # 점프하고 착지
+            self.sounds.play(step_sound_at(p.pos), 1.0)
+        self.was_airborne = p.z > 0
         self.since_hurt += dt
         self.light_timer = max(0.0, self.light_timer - dt)
         if self.since_hurt > REGEN_DELAY and 0 < p.hp < 100:
@@ -2626,78 +2899,36 @@ class Game:
                 run_start = None
 
     def draw_gun(self, screen):
-        # 걸을 때 흔들리고, 쏠 때 뒤로 밀리고, 재장전/교체할 때 내려가요
-        # 정조준하면 화면 가운데로 올라와요
+        """미리 그려 둔 총 그림을 움직임에 맞춰 흔들어 그려요.
+        걸으면 8자로 흔들리고, 달리면 내려가고, 쏘면 뒤로 밀리고, 숨 쉬듯 살짝 움직여요."""
         a = self.arsenal
+        p = self.player
+        ads = self.aiming
+        image, (ox, oy), (mx, my) = self.viewmodels[(a.current.spec["name"], ads)]
         t = pygame.time.get_ticks() / 1000
-        bob = math.sin(t * 10) * 6 if self.player.moving and self.player.z == 0 else 0
-        if self.aiming:
-            bob *= 0.3
-        down = 0
-        if self.player.sprinting:
-            bob = math.sin(t * 14) * 12           # 달릴 땐 크게 흔들리고 총이 내려가요
-            down = 70
-        if a.reload_left > 0:
-            down = 120
-        elif a.switch_left > 0:
-            down = 200 * a.switch_left / a.SWITCH_TIME
-        if self.aiming:
-            x = WIDTH / 2 - 30 * UI + bob
-            y = HEIGHT - 175 * UI + (a.kick * 10 + down) * UI
+        calm = 0.3 if ads else 1.0
+        if p.sprinting:
+            bx, by = math.sin(t * 14) * 16 * UI + 30 * UI, abs(math.cos(t * 14)) * 12 * UI + 50 * UI
+        elif p.moving and p.z == 0:
+            bx, by = math.sin(t * 8) * 10 * UI * calm, abs(math.cos(t * 8)) * 8 * UI * calm
         else:
-            x = WIDTH / 2 + 110 * UI + bob
-            y = HEIGHT - 150 * UI + abs(bob) + (a.kick * 18 + down) * UI
-
-        def at(dx, dy):
-            """총 그림 기준점에서 (dx, dy)만큼 떨어진 화면 좌표 (화면 크기에 맞춰 키워요)"""
-            return (x + dx * UI, y + dy * UI)
-
-        def poly(color, points):
-            pygame.draw.polygon(screen, color, [at(px, py) for px, py in points])
-
-        name = a.current.spec["name"]
-        dark, mid, wood = (35, 35, 38), (60, 60, 66), (120, 80, 45)
-        if name == "RIFLE":
-            poly(dark, [(0, 40), (40, 0), (120, 70), (120, 160), (30, 160)])
-            poly(mid, [(10, 30), (40, 5), (60, 20), (30, 50)])
-            muzzle = at(22, 18)
-        elif name == "PISTOL":
-            poly(dark, [(20, 70), (50, 40), (100, 80), (90, 160), (45, 160)])
-            poly(mid, [(25, 68), (50, 45), (70, 60), (45, 82)])
-            muzzle = at(35, 58)
-        elif name == "SNIPER":
-            poly((50, 55, 45), [(-30, 10), (-10, -15), (130, 90), (130, 160), (40, 160)])
-            poly(BLACK, [(10, 5), (30, -15), (90, 30), (70, 50)])         # 조준경
-            muzzle = at(-22, 0)
-        elif name == "SHOTGUN":
-            poly(dark, [(-10, 40), (30, 0), (70, 30), (30, 70)])
-            poly(wood, [(30, 70), (70, 30), (130, 90), (130, 160), (60, 160)])
-            muzzle = at(8, 28)
-        elif name == "SMG":
-            poly(dark, [(10, 40), (45, 10), (110, 65), (110, 160), (40, 160)])
-            poly(mid, [(55, 70), (75, 55), (95, 120), (75, 135)])          # 탄창
-            muzzle = at(28, 26)
-        elif name == "LMG":
-            poly(dark, [(-10, 30), (40, -5), (140, 80), (140, 160), (30, 160)])
-            poly((70, 75, 60), [(40, 60), (80, 40), (110, 90), (70, 110)])       # 탄통
-            muzzle = at(10, 10)
-        elif name == "BURST":
-            poly((150, 130, 95), [(0, 40), (40, 0), (120, 70), (120, 160), (30, 160)])   # 사막색 소총
-            poly(dark, [(10, 30), (40, 5), (60, 20), (30, 50)])
-            muzzle = at(22, 18)
-        elif name == "DMR":
-            poly((60, 50, 40), [(-20, 20), (5, -5), (130, 90), (130, 160), (40, 160)])
-            poly(BLACK, [(20, 10), (35, -5), (75, 25), (60, 40)])           # 작은 조준경
-            muzzle = at(-12, 8)
-        else:  # ROCKET
-            poly((85, 95, 65), [(-40, 20), (0, -20), (140, 100), (100, 140)])   # 발사관
-            poly((60, 65, 45), [(-40, 20), (0, -20), (10, -10), (-30, 30)])
-            poly(dark, [(60, 90), (80, 75), (110, 160), (80, 160)])            # 손잡이
-            muzzle = at(-20, 0)
-
+            bx, by = 0.0, math.sin(t * 2) * 3 * UI * calm      # 숨쉬기
+        down = 0
+        if a.reload_left > 0:
+            down = 140
+        elif a.switch_left > 0:
+            down = 220 * a.switch_left / a.SWITCH_TIME
+        if ads:
+            kx, ky = 0, a.kick * 12 * UI
+        else:
+            kx, ky = a.kick * 12 * UI, a.kick * 20 * UI
+        dx = bx + kx + self.sway * calm
+        dy = by + ky + down * UI + p.crouch_amt * 10 * UI
+        screen.blit(image, (ox + dx, oy + dy))
         if a.kick > 0.6:
-            pygame.draw.circle(screen, YELLOW, muzzle, 18 * UI)
-            pygame.draw.circle(screen, WHITE, muzzle, 8 * UI)
+            big = a.current.spec["name"] in ("SHOTGUN", "ROCKET", "SNIPER")
+            size = (22 if ads else 34) * UI * (1.4 if big else 1.0)
+            draw_muzzle_flash(screen, (mx + dx, my + dy), size)
 
     def draw_knife(self, screen):
         """칼 휘두르기: 오른쪽 아래에서 가운데 위쪽으로 베는 모양"""
@@ -2706,9 +2937,11 @@ class Game:
         d = pygame.Vector2(-0.3 - 0.6 * p, -1).normalize()   # 칼날 방향: 점점 왼쪽으로 기울어요
         side = pygame.Vector2(-d.y, d.x)
         tip = base + d * 200 * UI
+        draw_sleeve(screen, base - d * 60 * UI, pygame.Vector2(WIDTH * 1.05, HEIGHT * 1.15), 44 * UI)
         pygame.draw.polygon(screen, (210, 215, 225), [base + side * 10 * UI, tip, base - side * 10 * UI])
         pygame.draw.line(screen, (150, 155, 165), base, tip, 2)
         pygame.draw.line(screen, (30, 30, 30), base, base - d * 70 * UI, int(20 * UI))
+        draw_glove(screen, base - d * 40 * UI, 26 * UI)
 
     def draw_hud(self, screen):
         font, big_font = self.font, self.big_font
@@ -2722,8 +2955,8 @@ class Game:
         # 조준선 (화면 가운데). 총알이 퍼지는 만큼 벌어져요. 정조준 중엔 빨간 점
         cx, cy = WIDTH / 2, HEIGHT / 2
         spec = self.arsenal.current.spec
-        if self.aiming and not self.scoped:
-            pygame.draw.circle(screen, (255, 40, 40), (cx, cy), max(2, 3 * UI))
+        if self.aiming:
+            pass                                   # 정조준: 총의 조준기(도트사이트/가늠쇠)로 조준해요
         elif not self.scoped and not self.player.sprinting:
             gap = 5 * UI + self.current_spread(spec) * 0.6
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
