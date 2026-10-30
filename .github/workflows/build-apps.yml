@@ -1,0 +1,69 @@
+# main 브랜치에 코드가 올라오면 Windows용 Games.exe와 맥용 Games.app(ZIP)을 만들어서
+# Releases(다운로드 페이지)의 "latest"에 함께 올려요.
+# 받는 곳: https://github.com/sungkyusky-design/gege2ya/releases/latest
+name: Build apps
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apps
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build Games.exe
+        run: |
+          pip install pygame pyinstaller
+          pyinstaller --onefile --windowed --name Games main.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/Games.exe
+
+  mac:
+    # Apple Silicon(M1 이후) 맥용이에요
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build Games.app
+        run: |
+          pip install pygame pyinstaller
+          pyinstaller --windowed --name Games main.py
+          # ditto: 맥 앱 안의 링크와 서명을 깨뜨리지 않고 ZIP으로 묶어요
+          ditto -c -k --keepParent dist/Games.app Games-mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: Games-mac.zip
+
+  publish:
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Publish to the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release delete latest --yes --cleanup-tag --repo "$REPO" || true
+          gh release create latest out/windows/Games.exe out/mac/Games-mac.zip --repo "$REPO" \
+            --title "게임 모음 (Windows / Mac)" \
+            --notes "Windows: Games.exe 더블클릭 / Mac: Games-mac.zip 압축을 풀고 Games 앱 실행. Python 설치가 필요 없어요. (빌드: ${GITHUB_SHA::7})"
