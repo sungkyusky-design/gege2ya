@@ -1,13 +1,15 @@
 """
-스트라이크 존: 네온 비치 - 1인칭 총게임 (레이캐스팅 FPS)
+스트라이크 존 - 1인칭 총게임 (레이캐스팅 FPS)
 
-노을 지는 80년대 해변 도시. 네온사인이 켜진 건물, 분수가 있는 호텔 안뜰,
-오피스 타워 골목, 주차장, 공원, 상자 미로가 된 공사장, 좁은 시장 골목 곳곳에
-숨어 있는 적을 모두 쓰러뜨리세요.
+80년대 해변 도시를 무대로 라운드마다 맵이 바뀌어요.
+    네온 비치 (노을) : 해변, 호텔 안뜰, 오피스 골목, 주차장, 공원, 공사장, 시장 골목
+    다운타운 (밤)    : 마천루, 네온 간판이 빛나는 광장, 주차장, 좁은 골목
+    하버 (새벽)      : 컨테이너 미로, 크레인, 창고, 바다로 뻗은 부두
 
 규칙:
     - 적을 모두 쓰러뜨리면 라운드 승리. 라운드가 올라갈수록 적이 많아지고 종류도 늘어나요.
-    - 체력이 0이 되면 게임 오버.
+    - 체력이 0이 되면 R: 그 라운드부터 다시 / N: 처음부터.
+    - 진행한 라운드는 저장돼요. 다음에 켜면 C로 이어할 수 있어요.
     - 쓰러진 적은 탄약/체력/수류탄 상자를 떨어뜨려요. 맵 곳곳에도 상자가 있어요.
 
 적 종류:
@@ -15,6 +17,9 @@
     돌격병    : 빨간 모자. 빠르게 달려들어요. 체력은 낮지만 가까이서 아파요
     저격수    : 2라운드부터. 멀리서 쏴요. 쏘기 전에 빨간 불빛이 반짝여요
     중장갑병  : 3라운드부터. 체력 300. 느리지만 총알을 쉴 새 없이 쏴요
+    폭탄병    : 4라운드부터. 수류탄을 던져요. GRENADE! 경고가 뜨면 피하세요
+    방패병    : 6라운드부터. 앞에서 쏘면 방패에 막혀요. 머리를 노리거나 옆으로 돌아가세요
+    보스      : 5라운드마다. 흰 정장. 체력 900, 연사와 수류탄
 
 조작 (키보드만으로 다 할 수 있어요):
     W A S D          : 이동
@@ -28,16 +33,13 @@
     1 ~ 6            : 무기 바꾸기 (소총/권총/저격총/산탄총/기관단총/로켓) = 휠
     Q                : 방금 쓰던 무기로
     R                : 재장전
+    H                : 도움말 (보는 동안 일시정지)
     P 또는 F3        : FPS와 화면 선명도 표시
     Enter 또는 F11   : 전체 화면 (컴퓨터에서 실행할 때)
     ESC              : 종료 (메뉴로)
 
-팁:
-    - 머리를 맞히면 큰 피해(HEADSHOT)! 적의 머리는 내 눈높이보다 조금 위에 있어요.
-    - 쏘면 반동으로 시점이 위로 튀어요. 살짝 내리면서 쏘면 잘 맞아요.
-    - 정조준하면 잘 맞지만 느리게 움직여요.
-    - 수류탄과 로켓은 벽 뒤 적은 못 맞혀요. 너무 가까이서 터지면 나도 다쳐요.
-    - 길가의 자동차 뒤에 숨으면 총알을 막을 수 있어요 (적도 마찬가지).
+시작 화면:
+    Enter : 새 게임    C : 이어하기    T : 해상도 바꾸기 (컴퓨터에서)
 
 실행 방법:
     pip install pygame
@@ -57,7 +59,7 @@ import time
 
 import pygame
 
-from browser import prepare_window
+from browser import load_save, prepare_window, write_save
 
 # ---------------------------------------------------------------
 # 화면 / 게임 설정값
@@ -86,6 +88,19 @@ MAX_PITCH = 260 * UI              # 위아래로 볼 수 있는 한계(px)
 JUMP_SPEED = 4.2                  # 점프 힘
 GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
+# 고를 수 있는 해상도. 화면보다 큰 해상도는 전체 화면으로 열어요
+RESOLUTIONS = [(1280, 720), (1600, 900), (1920, 1080)]
+
+
+def set_resolution(width, height):
+    """해상도를 바꿔요. 화면 크기에 따라 정해지는 값들도 같이 다시 계산해요."""
+    global WIDTH, HEIGHT, UI, LOOK_SPEED, MAX_PITCH
+    WIDTH, HEIGHT = width, height
+    UI = HEIGHT / 600
+    LOOK_SPEED = 420 * UI
+    MAX_PITCH = 260 * UI
+
+
 SAFE_SPAWN = 8                    # 시작할 때 이 거리 안에는 적이 안 나와요
 
 GRENADES_START, GRENADES_MAX = 3, 6
@@ -95,6 +110,8 @@ GRENADE_BLAST = (3.2, 160)        # (폭발 반경, 가운데 피해)
 ROCKET_SPEED = 16.0
 ROCKET_BLAST = (2.8, 300)
 SELF_DAMAGE = 0.35                # 내 폭발에 내가 받는 피해 비율
+ENEMY_GRENADE_FUSE = 1.5          # 적이 던진 수류탄
+ENEMY_GRENADE_BLAST = (2.8, 70)
 
 KNIFE_RANGE = 1.5
 KNIFE_DAMAGE = 150
@@ -158,54 +175,142 @@ ENEMY_TYPES = {
                   height=1.0, width=0.62,
                   look=dict(uniform=(50, 55, 75), vest=(30, 32, 45), pants=(35, 35, 45),
                             head="heavy", gun=34)),
+    # 아래 셋은 수류탄을 던져요: throw = 던지는 간격(초) 범위, throw_range = 던지는 거리 범위
+    "BOMBER": dict(hp=90, speed=1.3, sight=14, reaction=1.0, keep=7, range=0,
+                   fire=(1, 1), damage=(0, 0), accuracy=0, falloff=0,
+                   height=0.9, width=0.45, throw=(2.2, 3.2), throw_range=(3, 11),
+                   look=dict(uniform=(110, 90, 60), vest=(70, 95, 55), pants=(60, 55, 45),
+                             head="beret", gun=18, belt=True)),
+    # shield=True: 앞에서 맞은 몸통 총알은 방패에 막혀요 (머리, 옆, 뒤, 폭발, 칼은 그대로)
+    "SHIELD": dict(hp=150, speed=1.1, sight=14, reaction=0.8, keep=2.5, range=10,
+                   fire=(0.8, 1.3), damage=(8, 12), accuracy=0.6, falloff=0.04,
+                   height=0.92, width=0.6, shield=True,
+                   look=dict(uniform=(35, 45, 80), vest=(25, 30, 55), pants=(30, 35, 50),
+                             head="riot", gun=20, shield=True)),
+    "BOSS": dict(hp=900, speed=1.0, sight=18, reaction=0.6, keep=5, range=16,
+                 fire=(0.09, 0.15), damage=(4, 7), accuracy=0.33, falloff=0.02,
+                 height=1.15, width=0.72, throw=(4, 6), throw_range=(3, 12),
+                 look=dict(uniform=(240, 240, 235), vest=(240, 120, 170), pants=(235, 235, 230),
+                           head="slick", gun=36)),
 }
 
 # ---------------------------------------------------------------
-# 맵: 네온 비치 (왼쪽이 바다, 오른쪽으로 도시)
+# 맵 3개: 라운드마다 바뀌어요 (1 → 2 → 3 → 1 ...)
 # ---------------------------------------------------------------
 #   바닥   '~' 바다(못 들어가요)  '.' 모래사장  '_' 보드워크  ':' 인도  '=' 차도
-#          'g' 잔디 공원  'x' 호텔 안뜰 타일
+#          'g' 잔디  'x' 광장 타일  ',' 부두 콘크리트  'p' 나무 부두
 #   건물   'A' 분홍 호텔  'B' 민트 건물  'C' 노란 가게  'D' 하얀 아르데코 호텔
-#          'R' 붉은 벽돌  'N' 나이트클럽  'G' 유리 오피스 타워
-#          'K' 나무 상자  'Q' 쓰레기통  'F' 분수/동상  (K Q F는 엄폐물)
-#   장식   'T' 야자수  'c' 자동차(총알을 막아요)  'L' 가로등
+#          'R' 붉은 벽돌  'N' 나이트클럽  'G' 유리 오피스 타워  'S' 마천루
+#          'W' 창고  'r' 'u' 'o' 빨강/파랑/주황 컨테이너  'Y' 두 층으로 쌓인 컨테이너
+#          'K' 나무 상자  'Q' 쓰레기통  'F' 분수/동상  (K Q F 와 컨테이너는 엄폐물)
+#   장식   'T' 야자수  'c' 자동차(총알을 막아요)  'L' 가로등  'b' 네온 광고판  'X' 크레인
 #   상자   'a' 탄약  'h' 체력  'n' 수류탄
 #   위치   'P' 플레이어 시작  'E' 적이 나타날 수 있는 곳
 #
-#   구역   위-서쪽: 분수가 있는 호텔 안뜰      위-동쪽: 오피스 타워 골목
-#          가운데-서쪽: 주차장                 가운데-동쪽: 동상이 있는 공원
-#          아래-서쪽: 상자 미로가 된 공사장    아래-동쪽: 좁은 시장 골목
-GAME_MAP = [
-    "~~~.T_:==:DDDDDxRRR:==:GGGG:CCCCC:GG",
-    "~~~.._L==:DxxxxxRRR:==:GGGG:CCCCC:GG",
-    "~~~.E_:=c:DxFFxxxaR:==:GGGG:::K:::GG",
-    "~~~.._:==:DxFFxExxR:==:GGGGE:NNNN:GG",
-    "~~~.T_:==:DxxxxxxxR:c=:::::::NNNN:GG",
-    "~~~.._:==:DDDxDDQxR:==:AAAA:hNNNN:GG",
-    "~~~..h:==LDDDxDDDxR:==:AAAA:KNNNN:GG",
-    "~~~.._:==:::::::::::==::::::::::::GG",
-    "~~~.T_======c==============c========",
-    "~~~.._==========c=============c=====",
-    "~~~..E:==:::::::::::==::::::::::::GG",
-    "~~~.._L==:BBBBc:c:c:==:ggTgggg:NN:GG",
-    "~~~.P_:==:BBBB:::E::==:gggFFgg:NN:GG",
-    "~~~.._:c=:BBBB:Ka:::==:gEgFFgh:NN:GG",
-    "~~~.T_:==:BBBB:c:c::==LggTggTg:NN:GG",
-    "~~~.._:==:CCCCCCCC::==:ggggggEgNN:GG",
-    "~~~.n_:==:::::::::::==::::::::::::GG",
-    "~~~.._========c=========c===========",
-    "~~~.T_=============c============c===",
-    "~~~.._:==:::::::::::==::::::::::::GG",
-    "~~~.._:==:KK:K:KK:R:==:CC:AA:BB:D:GG",
-    "~~~.E_L==::::K:::KR:==:CC:AA:BB:D:GG",
-    "~~~.._:==:K:E:K:K:R:=c:::::E::::::GG",
-    "~~~.T_:==:K:KKK:n:R:==:CC:AA:BB:D:GG",
-    "~~~.._:==::::::K::R:==:CCh:A:BB:D:GG",
-    "~~~.T_:=c:RRRRRRRRR:==:CCCAAABBBD:GG",
+# 분위기(theme):
+#   sky    : 하늘 색 (위에서 아래로)   haze : 멀리 있는 것이 묻히는 안개 색
+#   sun    : 해의 방향 (None이면 해 없음)   stars : 밤하늘 별
+#   ground : 지평선 아래 기본 바닥        lit  : 창문 몇 개 중 하나에 불이 켜지는지
+MAPS = [
+    dict(
+        name="NEON BEACH",
+        sky=[(0.0, (40, 30, 90)), (0.55, (150, 70, 140)), (0.85, (245, 120, 120)), (1.0, (250, 170, 140))],
+        haze=(250, 170, 140), sun=math.pi, stars=False, ground=".", lit=4,
+        rows=[
+            "~~~.T_:==:DDDDDxRRR:==:GGGG:CCCCC:GG",
+            "~~~.._L==:DxxxxxRRR:==:GGGG:CCCCC:GG",
+            "~~~.E_:=c:DxFFxxxaR:==:GGGG:::K:::GG",
+            "~~~.._:==:DxFFxExxR:==:GGGGE:NNNN:GG",
+            "~~~.T_:==:DxxxxxxxR:c=:::::::NNNN:GG",
+            "~~~.._:==:DDDxDDQxR:==:AAAA:hNNNN:GG",
+            "~~~..h:==LDDDxDDDxR:==:AAAA:KNNNN:GG",
+            "~~~.._:==:::::::::::==::::::::::::GG",
+            "~~~.T_======c==============c========",
+            "~~~.._==========c=============c=====",
+            "~~~..E:==:::::::::::==::::::::::::GG",
+            "~~~.._L==:BBBBc:c:c:==:ggTgggg:NN:GG",
+            "~~~.P_:==:BBBB:::E::==:gggFFgg:NN:GG",
+            "~~~.._:c=:BBBB:Ka:::==:gEgFFgh:NN:GG",
+            "~~~.T_:==:BBBB:c:c::==LggTggTg:NN:GG",
+            "~~~.._:==:CCCCCCCC::==:ggggggEgNN:GG",
+            "~~~.n_:==:::::::::::==::::::::::::GG",
+            "~~~.._========c=========c===========",
+            "~~~.T_=============c============c===",
+            "~~~.._:==:::::::::::==::::::::::::GG",
+            "~~~.._:==:KK:K:KK:R:==:CC:AA:BB:D:GG",
+            "~~~.E_L==::::K:::KR:==:CC:AA:BB:D:GG",
+            "~~~.._:==:K:E:K:K:R:=c:::::E::::::GG",
+            "~~~.T_:==:K:KKK:n:R:==:CC:AA:BB:D:GG",
+            "~~~.._:==::::::K::R:==:CCh:A:BB:D:GG",
+            "~~~.T_:=c:RRRRRRRRR:==:CCCAAABBBD:GG",
+        ],
+    ),
+    dict(
+        name="DOWNTOWN",
+        sky=[(0.0, (8, 8, 30)), (0.6, (30, 20, 70)), (0.9, (90, 40, 110)), (1.0, (130, 60, 130))],
+        haze=(70, 40, 95), sun=None, stars=True, ground=":", lit=2,
+        rows=[
+            "SSSSS:==:GGGGGG:==:NNNEAA:==:SSS",
+            "SSSSSL==:Gxxxx::==:NNNhAA:==:SSS",
+            "SS::::==:GxFFx::==T::E::::==:SSS",
+            "SS:a::==:GxbxxE:==:AAA:NN:==:::E",
+            "SSSSST==:GGG:GG:==:AAA:NN:==:SSS",
+            "SSSSS:==:GGG:GG:==LAAA:NN:==:SSS",
+            "::::::==::::::::==::::::::==::E:",
+            "===========c=========c==========",
+            "==P==========================c==",
+            "::::::==::::::::==::::::::==::::",
+            "c:c:c:==:gggggg:==:xxxxxx:==:BBB",
+            "::::E:==TgTggbg:==:xbxxbxL==:BBB",
+            ":c:c::==:ggFFgg:==:xxKKxx:==::a:",
+            "::::n:==:gEFFgg:==:xxKKxE:==:BBB",
+            "c:c:c:==LgggTgg:==:xbxxbxT==:BBB",
+            "RRRRR:==:gggggg:==:xxxxxx:==:BBB",
+            "::::::==::::E:::==::::::::==::::",
+            "=======c================c=======",
+            "=============c================c=",
+            "::::::==::::::::==::::E:::==::::",
+            "CCCCC:==:DDD:DD:==:RR:RRR:==LSSS",
+            ":::E:L==:DDD:DD:==:RR:RRR:==:SSS",
+            "CCCCC:==:DDDEDD:==:RRnRRR:==:SSS",
+            "CCCCC:==:DDDDDD:==:RRRRRR:==TSSS",
+        ],
+    ),
+    dict(
+        name="HARBOR",
+        sky=[(0.0, (60, 100, 165)), (0.6, (140, 165, 200)), (0.9, (250, 190, 140)), (1.0, (255, 215, 170))],
+        haze=(225, 205, 185), sun=0.0, stars=False, ground=",", lit=6,
+        rows=[
+            "~~~~~~pp~~~~~~~~pp~~~~~~~~pp~~~~",
+            "~~~~~~pp~~~~~~~~pp~~~~~~~~pp~~~~",
+            "~~~~~~pE~~~~~~~~pp~~~~~~~~Ep~~~~",
+            "~~~~~~pp~~~~~~~~pa~~~~~~~~pp~~~~",
+            "~~~,,,,,,,,,,,,,,,,,,,,,,,,,E,,,",
+            "~~~,X,,,,,,,X,,,,,,,,,X,,,,,,,L,",
+            "~~~,,rrr,uuu,,ooo,rrr,,uuu,YY,,,",
+            "~~~,,rrr,uuu,,ooo,rrr,,uuu,YY,a,",
+            "~~~,,,,,,,,,,E,,,,,,,,,,,,,,,,,,",
+            "~~~,,YYY,ooo,,uuu,,K,,rrr,ooo,,,",
+            "~~~,,YYY,ooo,,uuu,,KE,rrr,ooo,,,",
+            "~~~,,,,,,,,,,,,,,,,,E,,,,,,,,,n,",
+            "~~~,,uu,rr,oo,,YY,,,,uu,rr,,E,,,",
+            "~~~=============================",
+            "~~~=======E=====c========c======",
+            "~~~,,,L,,,,,,L,,,,,,L,,,,,,L,,,,",
+            "~~~,WWWWW,,WWWWW,,BBBB,,c,c,c,,,",
+            "~~~,WWWWW,,WWWWW,,BBBB,,,,,,,E,,",
+            "~~~,WWWWW,,WWWWW,,BBBB,,c,c,c,,,",
+            "~~~,,,,,,,E,,,,,,,,,,,,,,,,,,,E,",
+            "~~~,,,QQ,KK,K,,QQ,,,h,,,,KK,,,,,",
+            "~~~,P,,,,,,,,,,,,,,,,,,E,,,,,,,,",
+            "~~~WWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+            "~~~WWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+        ],
+    ),
 ]
-MAP_W, MAP_H = len(GAME_MAP[0]), len(GAME_MAP)
 
-# 건물 종류: 글자 -> (색, 높이, 창문이 있는지, 네온사인 색 또는 None)
+# 건물 종류: 글자 -> (색, 높이, 무늬, 네온사인 색 또는 None)
+#   무늬: True = 창문, "ribs" = 컨테이너/창고 세로 골, False = 무늬 없음
 WALLS = {
     "A": ((235, 150, 170), 2.0, True, (255, 80, 200)),
     "B": ((100, 195, 185), 1.6, True, (80, 240, 255)),
@@ -214,11 +319,16 @@ WALLS = {
     "R": ((190, 95, 75), 2.5, True, None),
     "N": ((70, 40, 90), 1.4, False, (120, 255, 140)),
     "G": ((110, 140, 175), 3.0, True, (80, 240, 255)),
+    "S": ((70, 90, 130), 4.0, True, (255, 80, 200)),
+    "W": ((150, 150, 155), 2.0, "ribs", None),
+    "r": ((190, 60, 50), 1.3, "ribs", None),
+    "u": ((50, 90, 170), 1.3, "ribs", None),
+    "o": ((230, 130, 40), 1.3, "ribs", None),
+    "Y": ((215, 185, 60), 2.6, "ribs", None),
     "K": ((150, 110, 70), 1.0, False, None),
     "Q": ((40, 110, 70), 0.9, False, None),
     "F": ((200, 220, 235), 0.8, False, None),
 }
-MAX_WALL = max(spec[1] for spec in WALLS.values())
 
 # 바닥 종류: 글자 -> 색
 FLOORS = {
@@ -229,6 +339,8 @@ FLOORS = {
     "=": (65, 65, 75),
     "g": (95, 160, 80),
     "x": (215, 190, 200),
+    ",": (160, 160, 150),
+    "p": (125, 90, 60),
 }
 CAR_COLORS = [(255, 90, 170), (60, 210, 230), (245, 245, 245), (220, 40, 50), (255, 210, 60)]
 PICKUP_TILES = {"a": "ammo", "h": "health", "n": "grenade"}
@@ -238,8 +350,6 @@ RED = (230, 50, 50)
 YELLOW = (255, 220, 90)
 GREEN = (90, 220, 120)
 BLACK = (0, 0, 0)
-HAZE = (250, 170, 140)            # 노을 빛 안개 색
-SUN_ANGLE = math.pi               # 해는 서쪽(바다 쪽)에 있어요
 
 
 # ---------------------------------------------------------------
@@ -248,7 +358,7 @@ SUN_ANGLE = math.pi               # 해는 서쪽(바다 쪽)에 있어요
 def floor_of(col, row):
     """그 칸의 바닥 종류. 자동차는 차도, 가로등은 인도 위에 있어요.
     'P', 'E', 'T', 상자 같은 칸은 왼쪽 칸의 바닥을 따라가요."""
-    special = {"c": "=", "L": ":"}
+    special = {"c": "=", "L": ":", "b": ":", "X": ","}
     while col >= 0:
         ch = GAME_MAP[row][col]
         if ch in FLOORS:
@@ -259,9 +369,20 @@ def floor_of(col, row):
     return "."
 
 
-# 매번 계산하지 않도록 칸마다 바닥/건물 정보를 미리 만들어 둬요
-FLOOR_GRID = [[floor_of(col, row) for col in range(MAP_W)] for row in range(MAP_H)]
-WALL_GRID = [[WALLS.get(ch) for ch in line] for line in GAME_MAP]
+def load_map(index):
+    """index번째 맵으로 바꿔요. 다른 함수들이 쓰는 맵 정보(전역 변수)를 새로 채워요."""
+    global GAME_MAP, MAP_W, MAP_H, FLOOR_GRID, WALL_GRID, MAX_WALL, HAZE, LIT
+    theme = MAPS[index]
+    GAME_MAP = theme["rows"]
+    MAP_W, MAP_H = len(GAME_MAP[0]), len(GAME_MAP)
+    # 매번 계산하지 않도록 칸마다 바닥/건물 정보를 미리 만들어 둬요
+    FLOOR_GRID = [[floor_of(col, row) for col in range(MAP_W)] for row in range(MAP_H)]
+    WALL_GRID = [[WALLS.get(ch) for ch in line] for line in GAME_MAP]
+    # 이 맵에서 가장 높은 건물 (광선이 여기에 닿으면 더 멀리 안 봐도 돼요)
+    MAX_WALL = max((spec[1] for line in WALL_GRID for spec in line if spec), default=1.0)
+    HAZE = theme["haze"]
+    LIT = theme["lit"]
+    _fog_cache.clear()           # 안개 색이 바뀌었으니 기억해 둔 색을 지워요
 
 
 def in_map(col, row):
@@ -269,12 +390,12 @@ def in_map(col, row):
 
 
 def is_blocked(x, y):
-    """그 위치로 걸어갈 수 없으면 True (건물, 바다, 야자수, 자동차, 맵 바깥)"""
+    """그 위치로 걸어갈 수 없으면 True (건물, 바다, 야자수, 자동차, 크레인, 맵 바깥)"""
     col, row = int(x), int(y)
     if not in_map(col, row):
         return True
     ch = GAME_MAP[row][col]
-    return ch in WALLS or ch in "~Tc"
+    return ch in WALLS or ch in "~TcX"
 
 
 def is_opaque(x, y):
@@ -407,6 +528,9 @@ def shade(color, amount):
     return tuple(int(c * amount) for c in color)
 
 
+load_map(0)       # 처음엔 첫 번째 맵
+
+
 # ---------------------------------------------------------------
 # 그림 만들기 (이미지 파일 없이 도형으로 그려요)
 # ---------------------------------------------------------------
@@ -428,7 +552,12 @@ def make_enemy_image(look, state="normal"):
         pygame.draw.rect(img, vest, (10, 34, 40, 36), border_radius=6)
     else:
         pygame.draw.rect(img, uniform, (12, 32, 36, 52), border_radius=6)  # 몸통
-        pygame.draw.rect(img, vest, (16, 38, 28, 30), border_radius=4)     # 조끼
+        pygame.draw.rect(img, vest, (16, 38, 28, 30), border_radius=4)     # 조끼/셔츠
+    if look["head"] == "slick" and not hurt:
+        pygame.draw.lines(img, (240, 200, 60), False, [(22, 40), (30, 54), (38, 40)], 2)   # 금목걸이
+    if look.get("belt"):
+        for x in (18, 26, 34, 42):
+            pygame.draw.circle(img, (60, 90, 50), (x, 72), 4)              # 허리의 수류탄
 
     head = look["head"]
     if head == "helmet":
@@ -444,14 +573,33 @@ def make_enemy_image(look, state="normal"):
         pygame.draw.circle(img, look["vest"] if not hurt else pale, (30, 19), 14)   # 위장 두건
         pygame.draw.rect(img, skin, (22, 16, 16, 9))
         pygame.draw.rect(img, BLACK, (24, 18, 12, 3))
+    elif head == "beret":
+        pygame.draw.circle(img, skin, (30, 20), 12)
+        pygame.draw.ellipse(img, (150, 40, 40), (14, 3, 32, 13))                 # 베레모
+        pygame.draw.rect(img, BLACK, (24, 19, 4, 3))
+        pygame.draw.rect(img, BLACK, (33, 19, 4, 3))
+    elif head == "riot":
+        pygame.draw.circle(img, (30, 35, 60) if not hurt else pale, (30, 18), 15)   # 진압 헬멧
+        pygame.draw.rect(img, (150, 200, 230), (18, 12, 24, 12), border_radius=3)    # 투명 가리개
+    elif head == "slick":
+        pygame.draw.circle(img, skin, (30, 20), 12)
+        pygame.draw.rect(img, (40, 30, 25), (17, 5, 26, 9), border_radius=4)        # 넘긴 머리
+        pygame.draw.rect(img, BLACK, (21, 17, 18, 5), border_radius=2)              # 선글라스
     else:  # heavy
         pygame.draw.circle(img, (40, 42, 55) if not hurt else pale, (30, 17), 15)   # 통 헬멧
         pygame.draw.rect(img, (120, 200, 230), (20, 14, 20, 6))                     # 바이저
 
     gun = look["gun"]
-    pygame.draw.rect(img, (25, 25, 25), (26, 52, gun, 8 if heavy else 7))         # 총
+    gun_x = 26
+    if look.get("shield"):
+        # 방패: 몸 앞을 크게 가려요. 총은 방패 옆으로 내밀어요
+        pygame.draw.rect(img, pale if hurt else (45, 55, 75), (0, 32, 46, 82), border_radius=6)
+        pygame.draw.rect(img, (110, 120, 140), (0, 32, 46, 82), 3, border_radius=6)
+        pygame.draw.rect(img, (150, 200, 230), (10, 44, 26, 6), border_radius=2)     # 들여다보는 창
+        gun_x = 40
+    pygame.draw.rect(img, (25, 25, 25), (gun_x, 52, min(gun, 60 - gun_x), 8 if heavy else 7))   # 총
     if state == "flash":
-        pygame.draw.circle(img, YELLOW, (min(59, 26 + gun), 55), 8)               # 총구 불꽃
+        pygame.draw.circle(img, YELLOW, (min(59, gun_x + gun), 55), 8)            # 총구 불꽃
     if state == "aim":
         pygame.draw.circle(img, (255, 40, 40), (34, 50), 6)                       # 조준경 반짝임
         pygame.draw.circle(img, WHITE, (34, 50), 2)
@@ -554,11 +702,39 @@ def make_explosion_frames(count=8):
     return frames
 
 
-def make_sky():
-    """노을 하늘. 아래쪽 끝이 지평선에 오도록 그려요."""
+def make_crane_image():
+    """부두의 노란 크레인 (격자 기둥 + 위로 뻗은 팔)"""
+    img = pygame.Surface((160, 300), pygame.SRCALPHA)
+    yellow, dark = (235, 190, 40), (150, 120, 30)
+    for x in (40, 80):                                             # 기둥 두 개
+        pygame.draw.rect(img, yellow, (x, 60, 10, 240))
+    for y in range(70, 300, 30):                                   # 격자
+        pygame.draw.line(img, dark, (45, y), (85, y + 30), 3)
+        pygame.draw.line(img, dark, (85, y), (45, y + 30), 3)
+    pygame.draw.rect(img, yellow, (0, 50, 160, 14))                # 팔
+    pygame.draw.rect(img, (60, 70, 90), (70, 64, 30, 26))          # 운전실
+    pygame.draw.line(img, dark, (140, 64), (140, 150), 2)          # 매달린 줄
+    pygame.draw.rect(img, dark, (130, 150, 20, 10))
+    return img
+
+
+def make_billboard_image():
+    """기둥 위의 네온 광고판"""
+    img = pygame.Surface((160, 220), pygame.SRCALPHA)
+    pygame.draw.rect(img, (60, 60, 70), (74, 90, 12, 130))         # 기둥
+    pygame.draw.rect(img, (30, 20, 50), (0, 0, 160, 96), border_radius=6)
+    pygame.draw.rect(img, (255, 80, 200), (0, 0, 160, 96), 6, border_radius=6)   # 분홍 네온 테두리
+    pygame.draw.circle(img, (255, 220, 90), (36, 48), 22)          # 노을 해
+    for i, y in enumerate((38, 52, 66)):                           # 글자처럼 보이는 하늘색 줄
+        pygame.draw.rect(img, (80, 240, 255), (70, y, 70 - i * 15, 7), border_radius=3)
+    return img
+
+
+def make_sky(theme):
+    """하늘. 아래쪽 끝이 지평선에 오도록 그려요. 밤이면 별도 뿌려요."""
     h = int(HEIGHT + MAX_PITCH * 2 + 200)
     sky = pygame.Surface((WIDTH, h))
-    stops = [(0.0, (40, 30, 90)), (0.55, (150, 70, 140)), (0.85, (245, 120, 120)), (1.0, HAZE)]
+    stops = theme["sky"]
     for y in range(h):
         t = y / (h - 1)
         for (t0, c0), (t1, c1) in zip(stops, stops[1:]):
@@ -567,7 +743,114 @@ def make_sky():
                 color = tuple(int(a + (b - a) * k) for a, b in zip(c0, c1))
                 pygame.draw.line(sky, color, (0, y), (WIDTH, y))
                 break
+    if theme["stars"]:
+        rng = random.Random(7)                 # 별 위치는 매번 똑같이
+        for _ in range(int(160 * UI)):
+            x, y = rng.randrange(WIDTH), rng.randrange(int(h * 0.7))
+            sky.set_at((x, y), (255, 255, 230) if rng.random() < 0.7 else (180, 200, 255))
     return sky
+
+
+# ---------------------------------------------------------------
+# 글자 / 도움말
+# ---------------------------------------------------------------
+# 한글 글꼴 후보 (맥 / 윈도우 / 리눅스). 없으면 영어로 보여줘요
+KOREAN_FONTS = ["applesdgothicneo", "applegothic", "malgungothic", "nanumgothic",
+                "notosanscjkkr", "notosanskr", "notosanscjk"]
+
+HELP_TEXT = {
+    "ko": dict(
+        title="조작법",
+        keys=[("W A S D", "이동"), ("← → ↑ ↓", "시점 (마우스도 돼요)"), ("스페이스바", "점프"),
+              ("F", "사격 (꾹 누르면 연사)"), ("E", "정조준 / 저격총 조준경"), ("Z", "조준경 배율 3·6·12배"),
+              ("G", "수류탄"), ("V", "칼"), ("1 ~ 6,  Q", "무기 바꾸기,  직전 무기"), ("R", "재장전"),
+              ("H", "도움말 (일시정지)"), ("P,  Enter", "FPS 표시,  전체 화면"), ("ESC", "메뉴로")],
+        tips=["적을 모두 쓰러뜨리면 다음 라운드! 라운드마다 맵이 바뀌어요.",
+              "머리를 맞히면 큰 피해. 차·상자 뒤에 숨으면 총알을 막아요.",
+              "쓰러진 적이 떨어뜨리는 상자: 탄약 / 체력 / 수류탄",
+              "GRENADE! 경고가 뜨면 빨리 그 자리를 피하세요.",
+              "방패병은 머리를 노리거나 옆으로 돌아가세요.",
+              "5라운드마다 보스가 나와요.",
+              "죽으면 R: 그 라운드부터 다시,  N: 처음부터"],
+        resume="H 를 누르면 계속해요",
+    ),
+    "en": dict(
+        title="HOW TO PLAY",
+        keys=[("W A S D", "move"), ("ARROWS", "look (or mouse)"), ("SPACE", "jump"),
+              ("F", "fire (hold for auto)"), ("E", "aim / sniper scope"), ("Z", "scope zoom 3/6/12x"),
+              ("G", "grenade"), ("V", "knife"), ("1-6, Q", "weapons, last weapon"), ("R", "reload"),
+              ("H", "help (pause)"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "menu")],
+        tips=["Kill every enemy to clear the round. The map changes each round.",
+              "Headshots hit hard. Cars and crates stop bullets.",
+              "Enemies drop boxes: ammo / health / grenade.",
+              "GRENADE! warning: move away fast.",
+              "Shield guys: aim for the head or flank them.",
+              "A boss shows up every 5 rounds.",
+              "When you die: R retry the round, N new game."],
+        resume="Press H to resume",
+    ),
+}
+
+
+def make_fonts():
+    """화면 크기에 맞춘 글꼴들. 한글 글꼴이 있으면 도움말을 한글로 보여줘요."""
+    ko_path = None if IN_BROWSER else pygame.font.match_font(KOREAN_FONTS)
+    fonts = {
+        "small": pygame.font.Font(None, int(22 * UI)),
+        "normal": pygame.font.Font(None, int(30 * UI)),
+        "big": pygame.font.Font(None, int(56 * UI)),
+        "title": pygame.font.Font(None, int(100 * UI)),
+        "lang": "ko" if ko_path else "en",
+    }
+    if ko_path:
+        fonts["help"] = pygame.font.Font(ko_path, int(17 * UI))
+        fonts["help_big"] = pygame.font.Font(ko_path, int(26 * UI))
+    else:
+        fonts["help"] = pygame.font.Font(None, int(24 * UI))
+        fonts["help_big"] = pygame.font.Font(None, int(38 * UI))
+    return fonts
+
+
+def wrap_text(font, text, max_width):
+    """글자가 max_width보다 길면 띄어쓰기 기준으로 여러 줄로 나눠요."""
+    lines, line = [], ""
+    for word in text.split(" "):
+        test = (line + " " + word).strip()
+        if line and font.size(test)[0] > max_width:
+            lines.append(line)
+            line = word
+        else:
+            line = test
+    return lines + [line]
+
+
+def draw_help(screen, fonts, footer):
+    """조작법과 팁을 보여주는 판. footer: 맨 아래에 보여줄 안내 문구"""
+    text = HELP_TEXT[fonts["lang"]]
+    panel = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    panel.fill((10, 8, 25, 215))
+    screen.blit(panel, (0, 0))
+    big, small = fonts["help_big"], fonts["help"]
+    title = big.render(text["title"], True, (255, 80, 200))
+    screen.blit(title, title.get_rect(center=(WIDTH / 2, HEIGHT * 0.25)))
+
+    line_h = small.get_linesize() * 1.15
+    top = HEIGHT * 0.32
+    left = WIDTH * 0.12
+    for i, (key, desc) in enumerate(text["keys"]):
+        y = top + i * line_h
+        screen.blit(small.render(key, True, YELLOW), (left, y))
+        screen.blit(small.render(desc, True, WHITE), (left + WIDTH * 0.13, y))
+    tip_left = WIDTH * 0.52
+    y = top
+    for tip in text["tips"]:
+        for j, line in enumerate(wrap_text(small, tip, WIDTH * 0.42)):
+            screen.blit(small.render(("-  " if j == 0 else "   ") + line, True, (200, 230, 255)), (tip_left, y))
+            y += line_h
+        y += line_h * 0.4
+
+    image = small.render(footer, True, YELLOW)
+    screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.94)))
 
 
 def make_scope_overlay():
@@ -594,17 +877,28 @@ class Enemy:
         self.pos = pygame.Vector2(x, y)
         self.hp = self.t["hp"]
         self.dir = pygame.Vector2(1, 0).rotate(random.uniform(0, 360))
+        self.facing = pygame.Vector2(self.dir)   # 바라보는 방향 (방패가 향하는 쪽)
         self.sees = False
         self.los_timer = random.uniform(0, 0.2)   # 시야 검사는 0.2초마다 (계산 아끼기)
         self.spotted = 0.0        # 플레이어를 보고 있던 시간
         self.shoot_timer = 0.0
         self.flash_timer = 0.0    # 총구 불꽃 표시 시간
         self.hurt_timer = 0.0     # 맞았을 때 하얗게 번쩍이는 시간
+        throw = self.t.get("throw")
+        self.throw_timer = random.uniform(*throw) if throw else 0.0
+        self.throw_at = None      # 수류탄을 던질 곳 (Game이 보고 수류탄을 만들어요)
 
     @property
     def aiming(self):
         """저격수가 곧 쏠 때 True (빨간 불빛으로 미리 알려줘요)"""
         return self.kind == "SNIPER" and self.sees and self.spotted > 0.4 and self.shoot_timer < 0.8
+
+    def shield_blocks(self, from_pos):
+        """from_pos 쪽에서 날아온 총알을 방패가 막는지 (방패병이 그쪽을 보고 있으면 막아요)"""
+        to_shooter = from_pos - self.pos
+        if not self.t.get("shield") or to_shooter.length() == 0:
+            return False
+        return to_shooter.normalize().dot(self.facing) > 0.4
 
     def update(self, dt, player):
         """적 행동. 플레이어에게 준 피해량을 돌려줘요."""
@@ -624,15 +918,28 @@ class Enemy:
             move_with_collision(self.pos, self.dir * t["speed"] * 0.6 * dt)
             if self.pos == before or random.random() < 0.005:
                 self.dir = pygame.Vector2(1, 0).rotate(random.uniform(0, 360))
+            self.facing = pygame.Vector2(self.dir)
             return 0
 
-        # 봤을 때: 너무 멀면 다가오고, 반응 시간이 지나면 쏘기
+        # 봤을 때: 플레이어 쪽을 보고, 너무 멀면 다가오고, 반응 시간이 지나면 공격
         self.spotted += dt
+        if dist > 0:
+            self.facing = (player.pos - self.pos).normalize()
         if dist > t["keep"]:
-            move_with_collision(self.pos, (player.pos - self.pos).normalize() * t["speed"] * dt)
-        if self.spotted < t["reaction"] or dist > t["range"]:
+            move_with_collision(self.pos, self.facing * t["speed"] * dt)
+        if self.spotted < t["reaction"]:
             return 0
 
+        # 수류탄 던지기 (폭탄병, 보스)
+        throw = t.get("throw")
+        if throw and t["throw_range"][0] <= dist <= t["throw_range"][1]:
+            self.throw_timer -= dt
+            if self.throw_timer <= 0:
+                self.throw_timer = random.uniform(*throw)
+                self.throw_at = pygame.Vector2(player.pos)
+
+        if dist > t["range"]:
+            return 0
         self.shoot_timer -= dt
         if self.shoot_timer > 0:
             return 0
@@ -812,13 +1119,17 @@ class Pickup:
 class Projectile:
     """날아가는 수류탄 / 로켓"""
 
-    def __init__(self, kind, pos, z, vel, vz):
+    def __init__(self, kind, pos, z, vel, vz, owner="player"):
         self.kind = kind                      # "grenade" 또는 "rocket"
+        self.owner = owner                    # "player" 또는 "enemy" (누가 던졌는지)
         self.pos = pygame.Vector2(pos)
         self.z = z
         self.vel = pygame.Vector2(vel)
         self.vz = vz
-        self.timer = GRENADE_FUSE if kind == "grenade" else 4.0
+        if kind == "rocket":
+            self.timer = 4.0
+        else:
+            self.timer = GRENADE_FUSE if owner == "player" else ENEMY_GRENADE_FUSE
 
     def update(self, dt, enemies):
         """움직이기. 터져야 하면 True"""
@@ -890,9 +1201,8 @@ class Effect:
 # 게임 전체
 # ---------------------------------------------------------------
 class Game:
-    MINIMAP_CELL = int(4 * UI)
-
-    def __init__(self):
+    def __init__(self, save, start_round=1):
+        """save: 저장 정보(dict). 라운드를 깨거나 죽을 때마다 고쳐서 파일에 써요."""
         # 적 그림: (종류, 상태)마다 하나씩 미리 만들어 둬요
         self.enemy_images = {
             (kind, state): make_enemy_image(t["look"], state)
@@ -900,29 +1210,26 @@ class Game:
             for state in ("normal", "flash", "hurt", "aim")
         }
         self.pickup_images = {kind: make_pickup_image(kind) for kind in DROP_WEIGHTS}
+        self.decor_images = {
+            "T": make_palm_image(), "L": make_lamp_image(),
+            "X": make_crane_image(), "b": make_billboard_image(),
+        }
+        self.car_images = [make_car_image(color) for color in CAR_COLORS]
         self.grenade_image = make_grenade_image()
         self.rocket_image = make_rocket_image()
         self.explosion_frames = make_explosion_frames()
-        self.sky = make_sky()
         self.scope_overlay = make_scope_overlay()
-        self.font = pygame.font.Font(None, int(30 * UI))
-        self.big_font = pygame.font.Font(None, int(56 * UI))
-        self.small_font = pygame.font.Font(None, int(22 * UI))
-        palm, lamp = make_palm_image(), make_lamp_image()
-        cars = [make_car_image(color) for color in CAR_COLORS]
-        self.decor = [Decor(x, y, palm, 2.4, 1.2) for x, y in find_cells("T")]
-        self.decor += [Decor(x, y, lamp, 1.9, 0.3) for x, y in find_cells("L")]
-        # 자동차 색은 위치에 따라 정해져요 (매번 똑같이)
-        self.decor += [Decor(x, y, cars[int(x * 7 + y * 3) % len(cars)], 0.6, 1.1, cover=True)
-                       for x, y in find_cells("c")]
-        self.spawn_points = find_cells("E")
-        self.minimap = self.make_minimap()
+        self.fonts = make_fonts()
+        self.font, self.big_font, self.small_font = self.fonts["normal"], self.fonts["big"], self.fonts["small"]
+        self.save = save
+        self.map_index = None
         self.set_col_w(START_COL_W)
         self.fire_was_down = False
         self.aim_on = False        # E 키로 켠 정조준
         self.show_fps = False      # P 또는 F3
+        self.show_help = False     # H
         self.fps = 0.0
-        self.reset()
+        self.reset(start_round)
 
     def set_col_w(self, col_w):
         """세로 줄 폭 바꾸기 (작을수록 선명, 클수록 빠름)"""
@@ -938,11 +1245,34 @@ class Game:
               and frame_time * self.col_w / (self.col_w - 1) < FRAME_BUDGET * 0.75):
             self.set_col_w(self.col_w - 1)
 
-    def reset(self):
-        self.round = 1
+    def setup_map(self, index):
+        """맵 바꾸기: 맵 정보, 장식물, 적 출현 위치, 미니맵, 하늘을 새로 만들어요."""
+        load_map(index)
+        self.map_index = index
+        self.theme = MAPS[index]
+        self.decor = []
+        sizes = {"T": (2.4, 1.2), "L": (1.9, 0.3), "X": (5.5, 3.0), "b": (2.6, 1.8)}
+        for letter, (height, width) in sizes.items():
+            self.decor += [Decor(x, y, self.decor_images[letter], height, width) for x, y in find_cells(letter)]
+        # 자동차 색은 위치에 따라 정해져요 (매번 똑같이)
+        cars = self.car_images
+        self.decor += [Decor(x, y, cars[int(x * 7 + y * 3) % len(cars)], 0.6, 1.1, cover=True)
+                       for x, y in find_cells("c")]
+        self.spawn_points = find_cells("E")
+        self.minimap = self.make_minimap()
+        self.sky = make_sky(self.theme)
+
+    def reset(self, start_round=1):
+        """새 게임 (또는 저장된 라운드부터 시작)"""
+        self.round = start_round
         self.kills = 0
         self.game_over = False
-        self.hint_timer = 12.0     # 처음 12초 동안 조작법 안내
+        self.hint_timer = 8.0      # 처음 8초 동안 화면 아래에 조작법 안내
+        self.start_round()
+
+    def retry_round(self):
+        """죽은 라운드부터 다시 (처치 수는 그대로)"""
+        self.game_over = False
         self.start_round()
 
     def pick_enemy_kind(self):
@@ -952,29 +1282,40 @@ class Game:
             pool += ["SNIPER"] * 2
         if self.round >= 3:
             pool += ["HEAVY"] * 2
+        if self.round >= 4:
+            pool += ["BOMBER"] * 2
+        if self.round >= 6:
+            pool += ["SHIELD"] * 2
         return random.choice(pool)
 
     def start_round(self):
+        index = (self.round - 1) % len(MAPS)
+        if index != self.map_index:
+            self.setup_map(index)
         start = find_cells("P")[0]
         self.player = Player(*start)
         self.arsenal = Arsenal()
         far = [p for p in self.spawn_points if self.player.pos.distance_to(p) > SAFE_SPAWN]
         count = min(len(far), 2 + self.round)
         self.enemies = [Enemy(*p, self.pick_enemy_kind()) for p in random.sample(far, count)]
-        # 새로운 적이 처음 나오는 라운드에는 그 적이 꼭 한 명은 있게
-        news = {2: "SNIPER", 3: "HEAVY"}
-        new_kind = news.get(self.round)
-        if new_kind:
+        # 새로운 적이 처음 나오는 라운드에는 그 적이 꼭 한 명은 있게. 5라운드마다 보스
+        news = {2: "SNIPER", 3: "HEAVY", 4: "BOMBER", 6: "SHIELD"}
+        special = "BOSS" if self.round % 5 == 0 else news.get(self.round)
+        if special:
             first = self.enemies[0]
-            self.enemies[0] = Enemy(first.pos.x, first.pos.y, new_kind)
+            self.enemies[0] = Enemy(first.pos.x, first.pos.y, special)
         # 맵에 놓인 상자는 라운드마다 다시 채워져요
         self.pickups = [Pickup(x, y, kind) for letter, kind in PICKUP_TILES.items()
                         for x, y in find_cells(letter)]
         self.projectiles = []
         self.effects = []
         self.banner = f"ROUND {self.round}"
-        self.sub_banner = f"NEW ENEMY: {new_kind}" if new_kind else ""
-        self.banner_timer = 2.5
+        self.sub_banners = [(self.theme["name"], WHITE)]
+        if special == "BOSS":
+            self.sub_banners.append(("BOSS ROUND!", RED))
+        elif special:
+            self.sub_banners.append((f"NEW ENEMY: {special}", RED))
+        self.banner_timer = 2.8
         self.round_clear_timer = 0.0
         self.damage_flash = 0.0
         self.hitmarker = 0.0
@@ -986,6 +1327,12 @@ class Game:
         self.knife_cooldown = 0.0
         self.feed = []             # 킬 로그: [글자, 남은 시간]
         self.seen_index = self.arsenal.index
+
+    def record_progress(self, next_round):
+        """저장: 다음에 이어할 라운드와 최고 기록"""
+        self.save["continue"] = next_round
+        self.save["best"] = max(self.save.get("best", 1), self.round)
+        write_save(self.save)
 
     # ----- 시점 계산 -----
     @property
@@ -1034,7 +1381,9 @@ class Game:
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN and event.key in (pygame.K_p, pygame.K_F3):
             self.show_fps = not self.show_fps
-        if self.game_over:
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_h and not self.game_over:
+            self.show_help = not self.show_help
+        if self.game_over or self.show_help:
             return
         a = self.arsenal
         if event.type == pygame.MOUSEWHEEL:
@@ -1060,6 +1409,8 @@ class Game:
 
     # ----- 게임 진행 -----
     def update(self, dt, keys, mouse_dx, mouse_dy, buttons):
+        if self.show_help:          # 도움말을 보는 동안은 멈춰요
+            return
         self.banner_timer -= dt
         self.hint_timer -= dt
         self.damage_flash = max(0.0, self.damage_flash - dt * 2)
@@ -1109,6 +1460,9 @@ class Game:
             damage = enemy.update(dt, self.player)
             if damage:
                 self.hurt_player(damage)
+            if enemy.throw_at is not None:
+                self.enemy_throw(enemy, enemy.throw_at)
+                enemy.throw_at = None
 
         self.update_projectiles(dt)
         self.collect_pickups()
@@ -1116,11 +1470,13 @@ class Game:
         if self.player.hp <= 0:
             self.player.hp = 0
             self.game_over = True
+            self.record_progress(self.round)          # 다음에 이 라운드부터 이어할 수 있게
         elif not self.enemies:
             self.round_clear_timer = 2.5
             self.banner = "ROUND CLEAR"
-            self.sub_banner = ""
+            self.sub_banners = []
             self.banner_timer = 2.5
+            self.record_progress(self.round + 1)
 
     def hurt_player(self, damage):
         self.player.hp -= int(damage)
@@ -1151,7 +1507,11 @@ class Game:
             self.enemies.remove(enemy)
             self.kills += 1
             self.feed.append([f"{enemy.kind} {how}", 2.5])
-            if random.random() < DROP_CHANCE:
+            if enemy.kind == "BOSS":               # 보스는 상자를 잔뜩 떨어뜨려요
+                for i, kind in enumerate(("ammo", "health", "grenade", "health")):
+                    offset = pygame.Vector2(0.5, 0).rotate(i * 90)
+                    self.pickups.append(Pickup(enemy.pos.x + offset.x, enemy.pos.y + offset.y, kind))
+            elif random.random() < DROP_CHANCE:
                 kind = random.choices(list(DROP_WEIGHTS), weights=list(DROP_WEIGHTS.values()))[0]
                 self.pickups.append(Pickup(enemy.pos.x, enemy.pos.y, kind))
 
@@ -1180,7 +1540,10 @@ class Game:
             if target and self.blocked_by_cover(ax, ay, target_dist):
                 target = None                     # 자동차에 막힘
             if target:
-                damage[target] = damage.get(target, 0) + (spec["head"] if head else spec["body"])
+                amount = spec["head"] if head else spec["body"]
+                if not head and target.shield_blocks(self.player.pos):
+                    amount *= 0.15                # 방패에 막힘
+                damage[target] = damage.get(target, 0) + amount
                 if head:
                     headshots.add(target)
 
@@ -1199,6 +1562,17 @@ class Game:
         vz = 3.0 + slope * GRENADE_THROW
         self.projectiles.append(Projectile("grenade", p.pos + forward * 0.3, self.eye - 0.1, vel, vz))
 
+    def enemy_throw(self, enemy, target):
+        """적이 target 위치에 떨어지도록 수류탄을 던져요 (포물선 계산)"""
+        offset = target - enemy.pos
+        dist = offset.length()
+        if dist == 0:
+            return
+        flight = max(0.6, min(1.3, dist / 7))          # 날아가는 시간(초)
+        start_z = 0.7
+        vz = (0.5 * GRAVITY * flight * flight - start_z) / flight
+        self.projectiles.append(Projectile("grenade", enemy.pos, start_z, offset / flight, vz, owner="enemy"))
+
     def launch_rocket(self):
         p = self.player
         forward = pygame.Vector2(math.cos(p.angle), math.sin(p.angle))
@@ -1211,26 +1585,33 @@ class Game:
         alive = []
         for proj in self.projectiles:
             if proj.update(dt, self.enemies):
-                radius, damage = GRENADE_BLAST if proj.kind == "grenade" else ROCKET_BLAST
-                self.explode(proj.pos, radius, damage)
+                if proj.kind == "rocket":
+                    radius, damage = ROCKET_BLAST
+                elif proj.owner == "enemy":
+                    radius, damage = ENEMY_GRENADE_BLAST
+                else:
+                    radius, damage = GRENADE_BLAST
+                self.explode(proj.pos, radius, damage, proj.owner)
             else:
                 alive.append(proj)
         self.projectiles = alive
 
-    def explode(self, pos, radius, damage):
-        """폭발: 반경 안에서 건물에 가리지 않은 적(과 나)에게 피해.
-        가운데 가까이(반경의 20% 안)는 최대 피해, 멀어질수록 약해져요."""
+    def explode(self, pos, radius, damage, owner="player"):
+        """폭발: 반경 안에서 건물에 가리지 않은 대상에게 피해.
+        가운데 가까이(반경의 20% 안)는 최대 피해, 멀어질수록 약해져요.
+        내 폭발은 적(과 가까이 있는 나)에게, 적의 폭발은 나에게만 피해를 줘요."""
         def power(d):
             return min(1.0, 1.25 * (1 - d / radius))
 
         self.effects.append(Effect(pos, self.explosion_frames, 0.5, radius * 0.9))
-        for enemy in list(self.enemies):
-            d = enemy.pos.distance_to(pos)
-            if d < radius and can_see(pos, enemy.pos):
-                self.damage_enemy(enemy, damage * power(d), "BOOM!")
+        if owner == "player":
+            for enemy in list(self.enemies):
+                d = enemy.pos.distance_to(pos)
+                if d < radius and can_see(pos, enemy.pos):
+                    self.damage_enemy(enemy, damage * power(d), "BOOM!")
         d = self.player.pos.distance_to(pos)
         if d < radius and can_see(pos, self.player.pos):
-            self.hurt_player(damage * SELF_DAMAGE * power(d))
+            self.hurt_player(damage * power(d) * (SELF_DAMAGE if owner == "player" else 1.0))
         if d < 12:
             self.shake = max(self.shake, 0.4 * (1 - d / 12))
 
@@ -1314,12 +1695,15 @@ class Game:
         else:
             self.draw_gun(screen)
         self.draw_hud(screen)
+        if self.show_help:
+            draw_help(screen, self.fonts, HELP_TEXT[self.fonts["lang"]]["resume"])
 
     def draw_sky(self, screen):
         horizon = self.horizon
         screen.blit(self.sky, (0, horizon - self.sky.get_height()))
-        # 서쪽 바다 위로 지는 해
-        rel = angle_diff(SUN_ANGLE, self.player.angle)
+        # 해 (노을 맵은 서쪽 바다 위, 하버는 동쪽에서 떠올라요)
+        sun = self.theme["sun"]
+        rel = angle_diff(sun, self.player.angle) if sun is not None else math.pi
         if abs(rel) < self.fov / 2 + 0.3:
             z = min(2, self.zoom)            # 조준경으로 봐도 해가 화면을 다 가리지 않게
             x = WIDTH / 2 + math.tan(rel) * self.proj
@@ -1327,7 +1711,7 @@ class Game:
             pygame.draw.circle(screen, (255, 200, 140), (x, y), 70 * UI * z)
             pygame.draw.circle(screen, (255, 225, 160), (x, y), 48 * UI * z)
             pygame.draw.circle(screen, (255, 245, 210), (x, y), 34 * UI * z)
-        pygame.draw.rect(screen, FLOORS["."], (0, horizon, WIDTH, max(0, HEIGHT - horizon)))
+        pygame.draw.rect(screen, FLOORS[self.theme["ground"]], (0, horizon, WIDTH, max(0, HEIGHT - horizon)))
 
     def draw_world(self, screen):
         p = self.player
@@ -1350,7 +1734,7 @@ class Game:
 
             # 2) 건물: 먼 것부터 그려야 가까운 것이 앞에 보여요
             self.zbuffer[i] = walls[0][0] * fix if walls else math.inf
-            for dist, vertical, wall_x, (color, height, windows, neon), cx, cy in reversed(walls):
+            for dist, vertical, wall_x, (color, height, pattern, neon), cx, cy in reversed(walls):
                 perp = max(0.05, dist * fix)
                 size = proj / perp
                 bottom = horizon + eye * size
@@ -1360,9 +1744,11 @@ class Game:
                 base = shade(color, 0.82 if vertical else 1.0)
                 if wall_x < 0.03 or wall_x > 0.97:      # 건물 모서리 선
                     base = shade(base, 0.6)
+                elif pattern == "ribs" and (wall_x * 6) % 1 < 0.2:   # 컨테이너/창고의 세로 골
+                    base = shade(base, 0.75)
                 pygame.draw.rect(screen, fog(base, perp, fog_dist), (x, top, col_w, bottom - top + 1))
                 # 창문: 층마다 두 칸씩. 몇몇 창문은 불이 켜져 있어요
-                if windows and (0.18 < wall_x < 0.42 or 0.58 < wall_x < 0.82):
+                if pattern is True and (0.18 < wall_x < 0.42 or 0.58 < wall_x < 0.82):
                     dark_glass = fog((60, 80, 120) if vertical else (90, 110, 150), perp, fog_dist)
                     lit_glass = fog((255, 215, 140), perp * 0.5, fog_dist)
                     half = 0 if wall_x < 0.5 else 1
@@ -1370,7 +1756,7 @@ class Game:
                         y0 = bottom - (k * 0.5 + 0.42) * size
                         y1 = bottom - (k * 0.5 + 0.17) * size
                         if y1 > 0 and y0 < HEIGHT:
-                            lit = (cx * 7 + cy * 13 + k * 5 + half * 3 + vertical) % 4 == 0
+                            lit = (cx * 7 + cy * 13 + k * 5 + half * 3 + vertical) % LIT == 0
                             pygame.draw.rect(screen, lit_glass if lit else dark_glass, (x, y0, col_w, y1 - y0))
                 # 네온사인: 건물 꼭대기에 빛나는 띠 (안개를 덜 타서 멀리서도 잘 보여요)
                 if neon:
@@ -1565,6 +1951,11 @@ class Game:
                 pygame.draw.line(screen, color, (cx + dx * 5 * UI, cy + dy * 5 * UI),
                                  (cx + dx * 12 * UI, cy + dy * 12 * UI), 2)
 
+        # 적 수류탄이 가까이 있으면 경고 (깜빡여요)
+        danger = any(p.owner == "enemy" and p.pos.distance_to(self.player.pos) < 4.5 for p in self.projectiles)
+        if danger and pygame.time.get_ticks() // 150 % 2 == 0:
+            self.center_text(screen, big_font, "GRENADE!", RED, HEIGHT * 0.38)
+
         # 왼쪽 아래 체력, 오른쪽 아래 총알과 수류탄
         hp_color = GREEN if self.player.hp > 40 else RED
         screen.blit(big_font.render(f"+ {self.player.hp}", True, hp_color), (24, HEIGHT - 70 * UI))
@@ -1588,10 +1979,10 @@ class Game:
             screen.blit(label, label.get_rect(center=rect.center))
 
         # 위쪽 정보
-        info = f"ROUND {self.round}   ENEMIES {len(self.enemies)}   KILLS {self.kills}"
+        info = f"ROUND {self.round}   {self.theme['name']}   ENEMIES {len(self.enemies)}   KILLS {self.kills}"
         screen.blit(font.render(info, True, WHITE), (16, 12))
         if self.show_fps:
-            text = f"FPS {self.fps:.0f}   RES {self.col_w}px"
+            text = f"FPS {self.fps:.0f}   RES {self.col_w}px   {WIDTH}x{HEIGHT}"
             screen.blit(self.small_font.render(text, True, YELLOW), (16, 12 + 30 * UI))
         map_bottom = self.draw_minimap(screen)
         for i, (text, _) in enumerate(self.feed[-4:]):
@@ -1599,23 +1990,23 @@ class Game:
             screen.blit(image, image.get_rect(topright=(WIDTH - 12, map_bottom + 8 + i * 30 * UI)))
 
         if self.hint_timer > 0 and not self.game_over:
-            hints = ["WASD move   ARROWS look   SPACE jump   F fire   E aim   Z zoom   R reload",
-                     "G grenade   V knife   1-6 weapon   Q last weapon   P fps   ENTER fullscreen"]
+            hints = ["WASD move   ARROWS look   SPACE jump   F fire   E aim   G grenade   V knife",
+                     "1-6 weapon   R reload   H help (pause)   P fps   ENTER fullscreen"]
             for i, hint in enumerate(hints):
                 self.center_text(screen, self.small_font, hint, WHITE, HEIGHT - (82 - i * 20) * UI)
         if self.banner_timer > 0:
             self.center_text(screen, big_font, self.banner, YELLOW, HEIGHT / 3)
-            if self.sub_banner:
-                self.center_text(screen, font, self.sub_banner, RED, HEIGHT / 3 + 45 * UI)
+            for i, (text, color) in enumerate(self.sub_banners):
+                self.center_text(screen, font, text, color, HEIGHT / 3 + (45 + i * 32) * UI)
         if self.game_over:
             self.center_text(screen, big_font, "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
             self.center_text(screen, font, f"Round {self.round}  /  Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
-            self.center_text(screen, font, "R: retry   ESC: quit", WHITE, HEIGHT / 2 + 40 * UI)
+            self.center_text(screen, font, f"R: retry round {self.round}    N: new game    ESC: menu",
+                             YELLOW, HEIGHT / 2 + 45 * UI)
 
-    @classmethod
-    def make_minimap(cls):
-        """미니맵 그림은 바뀌지 않으니 처음에 한 번만 그려 둬요."""
-        cell = cls.MINIMAP_CELL
+    def make_minimap(self):
+        """미니맵 그림은 바뀌지 않으니 맵마다 한 번만 그려 둬요."""
+        cell = self.minimap_cell
         mini = pygame.Surface((MAP_W * cell, MAP_H * cell), pygame.SRCALPHA)
         for row in range(MAP_H):
             for col in range(MAP_W):
@@ -1624,9 +2015,13 @@ class Game:
                 pygame.draw.rect(mini, (*color, 190), (col * cell, row * cell, cell, cell))
         return mini
 
+    @property
+    def minimap_cell(self):
+        return max(3, int(4 * UI))
+
     def draw_minimap(self, screen):
         """오른쪽 위 작은 지도. 지도 아래쪽 y좌표를 돌려줘요."""
-        cell = self.MINIMAP_CELL
+        cell = self.minimap_cell
         ox, oy = WIDTH - MAP_W * cell - 12, 12
         screen.blit(self.minimap, (ox, oy))
         p = self.player.pos * cell + (ox, oy)
@@ -1641,19 +2036,107 @@ class Game:
         screen.blit(image, image.get_rect(center=(WIDTH / 2, y)))
 
 
+# ---------------------------------------------------------------
+# 창 / 시작 화면 / 실행
+# ---------------------------------------------------------------
+def available_resolutions():
+    """고를 수 있는 해상도 목록 (브라우저에서는 기본 해상도만)"""
+    return RESOLUTIONS if not IN_BROWSER else RESOLUTIONS[:1]
+
+
+def fits_desktop(width, height):
+    """이 해상도 창이 모니터 안에 들어가는지 (안 들어가면 전체 화면으로 열어요)"""
+    try:
+        desk_w, desk_h = pygame.display.get_desktop_sizes()[0]
+    except (pygame.error, IndexError, AttributeError):
+        return True
+    return width <= desk_w and height <= desk_h - 60      # 메뉴 막대 자리를 조금 남겨요
+
+
+def open_window():
+    """현재 해상도로 게임 창을 열어요."""
+    flags = 0
+    if not IN_BROWSER:
+        # SCALED: 전체 화면에서 화면 크기에 맞춰 늘리거나 줄여줘요
+        flags = pygame.SCALED | (0 if fits_desktop(WIDTH, HEIGHT) else pygame.FULLSCREEN)
+    try:
+        screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
+    except pygame.error:
+        set_resolution(*RESOLUTIONS[0])            # 안 되면 기본 해상도의 보통 창으로
+        screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    if screen.get_size() != (WIDTH, HEIGHT):
+        set_resolution(*screen.get_size())         # 창이 다른 크기로 열렸으면 그 크기에 맞춰 그려요
+    pygame.display.set_caption("Strike Zone")
+    prepare_window()
+    return screen
+
+
+async def intro_screen(save):
+    """시작 화면: 조작법을 보여주고 새 게임 / 이어하기 / 해상도를 골라요.
+    고른 시작 라운드를 돌려줘요. ESC나 창 닫기면 None (닫기는 "closed")."""
+    options = available_resolutions()
+    res_index = min(save.get("res", 0), len(options) - 1)
+    set_resolution(*options[res_index])
+    screen = open_window()
+    fonts = make_fonts()
+    clock = pygame.time.Clock()
+    continue_round = save.get("continue", 1)
+    while True:
+        clock.tick(30)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key == pygame.K_ESCAPE:
+                return None
+            if event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                return 1
+            if event.key == pygame.K_c and continue_round > 1:
+                return continue_round
+            if event.key == pygame.K_t and len(options) > 1:
+                res_index = (res_index + 1) % len(options)
+                save["res"] = res_index
+                write_save(save)
+                set_resolution(*options[res_index])
+                screen = open_window()
+                fonts = make_fonts()
+
+        ko = fonts["lang"] == "ko"
+        parts = ["Enter 새 게임" if ko else "ENTER new game"]
+        if continue_round > 1:
+            parts.append(f"C 이어하기 (라운드 {continue_round})" if ko else f"C continue (round {continue_round})")
+        if len(options) > 1:
+            w, h = options[res_index]
+            note = "" if fits_desktop(w, h) else (" 전체 화면" if ko else " fullscreen")
+            parts.append(f"T 해상도 {w}x{h}{note}" if ko else f"T resolution {w}x{h}{note}")
+        parts.append("ESC 메뉴" if ko else "ESC menu")
+        screen.fill((15, 10, 35))
+        draw_help(screen, fonts, "     ".join(parts))
+        # 조작법 판 위에 제목과 네온 줄무늬
+        for i in range(6):
+            y = HEIGHT * (0.15 + i * 0.012)
+            pygame.draw.line(screen, (255, 80, 200) if i % 2 else (80, 240, 255), (0, y), (WIDTH, y), 2)
+        title = fonts["title"].render("STRIKE ZONE", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(center=(WIDTH / 2, HEIGHT * 0.09)))
+        best = save.get("best", 0)
+        if best:
+            label = fonts["help"].render(f"최고 기록: 라운드 {best}" if ko else f"Best: round {best}", True, WHITE)
+            screen.blit(label, label.get_rect(center=(WIDTH / 2, HEIGHT * 0.88)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
 async def run():
     """게임 한 판 실행. ESC를 누르면 끝나요.
 
     창을 닫으면 False, ESC로 끝내면 True를 돌려줘요 (메뉴로 돌아갈지 판단용).
     """
-    # 컴퓨터에서는 SCALED: Enter(또는 F11)로 전체 화면을 켜면 화면 크기에 맞춰 늘려줘요
-    # (지원하지 않는 컴퓨터면 보통 창으로 열어요)
-    try:
-        screen = pygame.display.set_mode((WIDTH, HEIGHT), 0 if IN_BROWSER else pygame.SCALED)
-    except pygame.error:
-        screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Strike Zone: Neon Beach")
-    prepare_window()
+    save = load_save()
+    start_round = await intro_screen(save)
+    if start_round is None or start_round == "closed":
+        return start_round is None
+    screen = pygame.display.get_surface()
     clock = pygame.time.Clock()
 
     # 마우스를 창 안에 가두고 커서 숨기기 (FPS 게임처럼)
@@ -1661,7 +2144,7 @@ async def run():
     pygame.mouse.set_visible(False)
     pygame.mouse.get_rel()
 
-    game = Game()
+    game = Game(save, start_round)
     running = True
     closed = False             # 창을 닫았는지 여부
     work_time, frames, check_timer = 0.0, 0, 0.0   # 자동 해상도 조절용 기록
@@ -1672,8 +2155,10 @@ async def run():
                 running, closed = False, True
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 running = False
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_r and game.game_over:
-                game.reset()
+            elif event.type == pygame.KEYDOWN and game.game_over and event.key == pygame.K_r:
+                game.retry_round()
+            elif event.type == pygame.KEYDOWN and game.game_over and event.key == pygame.K_n:
+                game.reset(1)
             elif (event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_F11)
                   and not IN_BROWSER):
                 try:
