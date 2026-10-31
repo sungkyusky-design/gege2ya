@@ -3885,22 +3885,76 @@ class Game:
         if k % 10 < 6:                                                  # 깜빡이는 다시보기 표시
             pygame.draw.circle(screen, RED, (rect.right - 14 * UI, rect.y + 14 * UI), 6 * UI)
 
+    def draw_banner(self, screen, big_font, font):
+        """라운드 시작/클리어 알림: 가로 띠가 펼쳐지고, 제목 → 설명 줄 → 임무 글이 차례로 나와요"""
+        length = getattr(self, "banner_len", self.banner_timer) or 1.0
+        age = max(0.0, length - self.banner_timer)
+        fade = min(1.0, self.banner_timer / 0.5, age / 0.2)                 # 처음과 끝에 부드럽게
+        lines = list(self.sub_banners)
+        brief = ""
+        if self.round_clear_timer <= 0 and self.theme.get("brief"):
+            brief = self.theme["brief"][:int(self.brief_age * 40)]
+        brief_lines = wrap_text(self.small_font, brief, WIDTH * 0.7) if brief else []
+        title_h, line_h, brief_h = 56 * UI, 30 * UI, 22 * UI
+        band_h = title_h + len(lines) * line_h + len(brief_lines) * brief_h + 26 * UI
+        top = max(HEIGHT * 0.24, 12 + 165 * UI)                        # HQ 무전 상자 아래
+        grow = min(1.0, age / 0.25)                                        # 띠가 가운데서 양옆으로
+        band = pygame.Rect(0, top, WIDTH * grow, band_h)
+        band.centerx = WIDTH / 2
+        shade_img = pygame.Surface(band.size, pygame.SRCALPHA)
+        shade_img.fill((8, 6, 20, int(150 * fade)))
+        screen.blit(shade_img, band)
+        for y in (band.top, band.bottom - 2):
+            pygame.draw.line(screen, UI_ACCENT if y == band.top else UI_CYAN, (band.left, y), (band.right, y), 2)
+        title = big_font.render(self.banner, True, YELLOW).copy()
+        pop = 1 + 0.25 * max(0.0, 1 - age / 0.25)                          # 처음엔 살짝 크게 나타나요
+        if pop > 1.001:
+            title = pygame.transform.smoothscale(title, (int(title.get_width() * pop), int(title.get_height() * pop)))
+        title.set_alpha(int(255 * fade))
+        screen.blit(title, title.get_rect(center=(WIDTH / 2, top + title_h / 2 + 8 * UI)))
+        y = top + title_h + 8 * UI
+        for i, (text, color) in enumerate(lines):
+            show = min(1.0, (age - 0.25 - 0.18 * i) / 0.25) * fade             # 한 줄씩 차례로
+            if show > 0:
+                image = font.render(text, True, color).copy()
+                image.set_alpha(int(255 * show))
+                screen.blit(image, image.get_rect(center=(WIDTH / 2, y + line_h / 2)))
+            y += line_h
+        for line in brief_lines:
+            image = self.small_font.render(line, True, (200, 230, 255)).copy()
+            image.set_alpha(int(255 * fade))
+            screen.blit(image, image.get_rect(center=(WIDTH / 2, y + brief_h / 2)))
+            y += brief_h
+
     def draw_radio(self, screen):
-        """본부 무전: 왼쪽 가운데에 'HQ' 상자와 한 글자씩 나오는 말"""
+        """본부 무전: 왼쪽 위 정보 아래에 'HQ' 상자와 한 글자씩 나오는 말 (길면 두 줄)"""
         text, age = self.radio_msg
+        if text.startswith("HQ:"):                                 # 'HQ' 는 상자 이름표로 보여줘요
+            text = text[3:].strip()
         typed = text[:int(age * 45)]
         font = self.fonts["help"]
-        label = font.render(typed, True, (200, 255, 200))
-        box = pygame.Rect(16 * UI, HEIGHT * 0.6, max(label.get_width(), font.size(text)[0]) + 70 * UI, label.get_height() + 16 * UI)
+        width = WIDTH * 0.42
+        lines = wrap_text(font, text, width)
+        shown, left = [], len(typed)
+        for line in lines:                                        # 친 글자만큼만 줄마다 나눠서
+            shown.append(line[:max(0, left)])
+            left -= len(line) + 1
+        line_h = font.get_linesize()
+        box = pygame.Rect(16, 12 + 112 * UI, max(font.size(line)[0] for line in lines) + 70 * UI,
+                          line_h * len(lines) + 14 * UI)
+        alpha = min(1.0, (5.0 - age) * 2, age * 6)
         panel = pygame.Surface(box.size, pygame.SRCALPHA)
-        panel.fill((0, 30, 10, int(170 * min(1.0, (5.0 - age) * 2))))
+        panel.fill((0, 30, 10, int(170 * alpha)))
         screen.blit(panel, box)
-        pygame.draw.rect(screen, (80, 200, 120), box, 1)
+        pygame.draw.rect(screen, (80, 200, 120), box, 1, border_radius=int(6 * UI))
+        pygame.draw.rect(screen, (80, 255, 120), (box.x, box.y, 4 * UI, box.h))        # 왼쪽 초록 띠
         tag = self.small_font.render("HQ", True, (80, 255, 120))
-        screen.blit(tag, tag.get_rect(midleft=(box.x + 8 * UI, box.centery)))
+        screen.blit(tag, (box.x + 10 * UI, box.y + 8 * UI))
         if int(age * 6) % 2 == 0 and age < 1.5:                  # 무전 신호 깜빡임
-            pygame.draw.circle(screen, (80, 255, 120), (box.x + 44 * UI, box.centery), 4 * UI)
-        screen.blit(label, label.get_rect(midleft=(box.x + 56 * UI, box.centery)))
+            pygame.draw.circle(screen, (80, 255, 120), (box.x + 46 * UI, box.y + 16 * UI), 4 * UI)
+        for i, line in enumerate(shown):
+            label = font.render(line, True, (200, 255, 200))
+            screen.blit(label, (box.x + 58 * UI, box.y + 7 * UI + i * line_h))
 
     def draw_briefing(self, screen):
         """세트 브리핑: 작전 이름과 이야기를 한 줄씩 보여줘요"""
@@ -5133,7 +5187,10 @@ class Game:
         if self.slowmo > 0:         # 마지막 적: 잠깐 슬로모션
             self.slowmo -= dt
             dt *= 0.35
+        if self.banner_timer > getattr(self, "banner_prev", 0.0) + 0.01:    # 새 배너가 시작됐어요
+            self.banner_len = self.banner_timer
         self.banner_timer -= dt
+        self.banner_prev = self.banner_timer
         self.brief_age += dt
         self.hint_timer -= dt
         self.damage_flash = max(0.0, self.damage_flash - dt * 2)
@@ -7265,13 +7322,7 @@ class Game:
         if self.round_clear_timer > 0 or self.game_over:
             self.draw_summary(screen, HEIGHT * (0.66 if self.game_over else 0.5))
         if self.banner_timer > 0:
-            self.center_text(screen, big_font, self.banner, YELLOW, HEIGHT / 3)
-            for i, (text, color) in enumerate(self.sub_banners):
-                self.center_text(screen, font, text, color, HEIGHT / 3 + (45 + i * 32) * UI)
-            if self.round_clear_timer <= 0:
-                typed = self.theme["brief"][:int(self.brief_age * 40)]
-                y = HEIGHT / 3 + (45 + len(self.sub_banners) * 32) * UI
-                self.center_text(screen, self.small_font, typed, (200, 230, 255), y)
+            self.draw_banner(screen, big_font, font)
         if self.game_over and getattr(self, "run_recorded", False):
             self.draw_run_result(screen, font, HEIGHT / 2 - 95 * UI)
         if self.game_over and self.mission_complete:
