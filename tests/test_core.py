@@ -139,6 +139,26 @@ class GameTest(unittest.TestCase):
         game.update_doors(5.0)
         self.assertTrue(shooter.is_blocked(cx + 0.5, cy + 0.5))
 
+    def test_squadmates_follow_setting_and_skip_training(self):
+        old = shooter.SETTINGS.get("squad", 2)
+        try:
+            shooter.SETTINGS["squad"] = 1
+            self.assertEqual(len(shooter.Game({}, 3, loadout=LOADOUT).allies), 1)
+            shooter.SETTINGS["squad"] = 2
+            self.assertEqual(len(shooter.Game({}, 3, loadout=LOADOUT).allies), 2)
+            self.assertEqual(len(shooter.Game({}, 1, mode="training", loadout=LOADOUT).allies), 0)
+            self.assertEqual(len(shooter.Game({}, 1, loadout=LOADOUT, challenge="PISTOL").allies), 0)
+        finally:
+            shooter.SETTINGS["squad"] = old
+
+    def test_ally_kills_give_half_xp_and_no_lifetime_kills(self):
+        save = dict(xp=0)
+        game = shooter.Game(save, 3, loadout=LOADOUT)
+        game.on_kill(game.enemies[0], "ALLY")
+        self.assertEqual(save["xp"], shooter.XP["kill"] // 2)
+        self.assertNotIn("kills", save.get("lifetime", {}))
+        self.assertEqual(game.streak, 0)
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
