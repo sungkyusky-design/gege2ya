@@ -13,6 +13,7 @@ MODE_KEY="${1:-Enter}"
 OUT=/tmp/strike_web
 rm -rf "$OUT" && mkdir -p "$OUT/app"
 cp browser.py build_info.py game.py main.py shooter.py "$OUT/app/"
+cp -r strike "$OUT/app/"
 # 빈 포트를 골라요 (앞에서 띄운 서버가 8000번을 잡고 있으면 옛 화면을 검사하게 돼요)
 PORT=$(python -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1])')
 cd "$OUT/app"

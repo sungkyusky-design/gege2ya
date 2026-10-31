@@ -592,7 +592,18 @@ Claude에게 무기·적·맵 추가나 테스트를 부탁하면 자동으로 �
 | `scripts/release_check.sh` | 병합 뒤 새 exe/맥 앱이 다 만들어졌는지 확인 |
 | `scripts/balance.py` | 무기별 처치 시간, 적별 초당 피해 표 (밸런스 확인) |
 
-PR을 만들면 GitHub가 자동으로 맵 검사와 자동 플레이 테스트를 돌려요 (`.github/workflows/test.yml`).
+PR을 만들면 GitHub가 자동으로 코드 검사, 단위 테스트, 맵 검사, 자동 플레이 테스트를 돌려요 (`.github/workflows/test.yml`).
+
+**코드가 어디 있나요?**
+
+| 파일 | 내용 |
+| --- | --- |
+| `shooter.py` | 총게임의 동작 (그리기, 적 AI, 무기, 메뉴 화면) |
+| `strike/maps.py` | 손으로 그린 맵과 벽·바닥 종류 |
+| `strike/units.py` | 무기와 적의 능력치 (밸런스 숫자는 여기서 바꿔요) |
+| `strike/sounds.py` | 소리 재료표 |
+| `strike/story.py` | 캠페인 이야기, 본부 무전, 도전 모드 설명, 도움말 |
+| `tests/test_core.py` | 단위 테스트 (`python -m unittest discover -s tests -v`) |
 
 ## 🧪 Strike Zone 3D (Godot, 만드는 중)
 

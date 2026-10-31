@@ -22,7 +22,9 @@ jobs:
       - name: Install
         run: pip install pygame pyflakes
       - name: Check code (pyflakes)
-        run: python -m pyflakes shooter.py main.py browser.py
+        run: python -m pyflakes shooter.py main.py browser.py strike tests
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
       - name: Check every map
         run: python .claude/skills/strike-zone-dev/scripts/check_maps.py
       - name: Auto-play every mode
