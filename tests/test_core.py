@@ -658,6 +658,13 @@ class GameTest(unittest.TestCase):
             game._acoustics = None
             self.assertEqual(game.acoustics()[2], "indoor")
 
+    def test_hud_icons(self):
+        kinds = {shooter.weapon_class(w["name"]) for w in shooter.WEAPONS}
+        kinds |= {"GRENADE"} | {t[0] for t in shooter.TACTICALS} | {name for _, name in shooter.STREAKS}
+        for kind in kinds:
+            icon = shooter.make_icon(kind, 20)
+            self.assertGreater(icon.get_bounding_rect().width, 4, kind)   # 무언가 그려졌어요
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
