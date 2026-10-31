@@ -79,6 +79,7 @@ README 무기 표 / 얻는 조건 표. 포물선 유탄은 `lobbed=True`, 로켓
 **손으로 그린 맵**: `strike/maps.py` 의 `MAPS` 에 테마 dict (name, sky, haze, sun, stars, ground, lit, fog, snow, camo, op, brief, rows).
 `P` 하나, 먼 `E` 6개 이상. 다 그리면 반드시 `check_maps.py`. 캠페인 맵은 `CAMPAIGN_MAPS` 순서대로 22개
 (늘리면 `SET_SIZE` 와 README 표도 확인). 메아리는 `ECHOES` 에 맵 이름으로.
+사진 모드: `photo_mode` (일시정지 메뉴), `Game.draw(screen, hud=False)`, 저장은 browser.py `save_picture`. 하이라이트: `capture_clip`, `score_highlight`, `draw_highlight`.
 고정 기관총: `MOUNTED_MG`, `find_turrets`, `toggle_mount`(B), `update_mounted`, 과열 `heat_up`. 헬기: 킬스트릭 `CHOPPER`, `update_chopper` (궤적에 높이 `world_tracers[...][3]`).
 좀비 2탄: 맵 글자 q(바리케이드) y(벽 무기) m(상자) z(함정 바닥), `find_buyables`, `buy_item`, `give_weapon`, `update_trap`, `TITAN`.
 전술 장비: `TACTICALS` (strike/units.py), `throw_tactical`, `tactical_hit`, 연막 `SMOKES`/`smoke_blocks`, 쿠킹 `update_cooking`.
