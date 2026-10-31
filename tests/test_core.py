@@ -308,6 +308,32 @@ class GameTest(unittest.TestCase):
         game.retry_round()                                                # 다시 하면 새 판
         self.assertEqual(game.run_score, 0)
 
+    def test_weapon_wheel_reaches_every_weapon(self):
+        game = shooter.Game({}, 45)                                       # 무기 14개 모두
+        a = game.arsenal
+        self.assertGreater(len(a.weapons), 10)
+        tab = Keys({pygame.K_TAB: True})
+        down = lambda key: game.handle_event(pygame.event.Event(pygame.KEYDOWN, key=key, mod=0, unicode=""))
+        down(pygame.K_TAB)                                                # 짧게 누르면 다음 무기
+        game.update(1 / 60, Keys(), 0, 0, (False, False, False))
+        self.assertEqual(a.index, 1)
+        down(pygame.K_TAB)                                                # 꾹 누르면 휠
+        for _ in range(30):
+            game.update(1 / 60, tab, 0, 0, (False, False, False))
+        self.assertTrue(game.wheel["open"])
+        for _ in range(len(a.weapons) - 2):
+            down(pygame.K_RIGHT)
+        game.update(1 / 60, Keys(), 0, 0, (False, False, False))         # 떼면 고른 무기로
+        self.assertIsNone(game.wheel)
+        self.assertEqual(a.index, len(a.weapons) - 1)
+
+    def test_fit_text(self):
+        font = shooter.make_fonts()["small"]
+        text = shooter.fit_text(font, "MACHINE PISTOL EXTRA LONG NAME", 80)
+        self.assertLessEqual(font.size(text)[0], 80)
+        self.assertTrue(text.endswith(".."))
+        self.assertEqual(shooter.fit_text(font, "SMG", 80), "SMG")
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
