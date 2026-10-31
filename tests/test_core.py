@@ -212,6 +212,25 @@ class GameTest(unittest.TestCase):
         game.knife_attack()
         self.assertNotIn(enemy, game.enemies)
 
+    def test_gunsmith_keeps_old_saves_and_changes_stats(self):
+        save = {"wkills": {"RIFLE": 40}}
+        old = shooter.current_weapon_spec(save, "RIFLE")               # 총기 개조 전: 예전처럼 자동 부착물
+        same = shooter.current_weapon_spec(save, "RIFLE", shooter.gunsmith_default(save, "RIFLE"))
+        self.assertEqual(old["mag"], same["mag"])
+        fast = shooter.current_weapon_spec(save, "RIFLE", dict(shooter.gunsmith_default(save, "RIFLE"),
+                                                                MAGAZINE="FAST MAG"))
+        self.assertLess(fast["reload"], old["reload"])
+        self.assertFalse(shooter.attachment_unlocked({"wkills": {}}, "RIFLE", "OPTIC", "4X SCOPE"))
+
+    def test_smoke_blocks_enemy_view(self):
+        a, b = pygame.Vector2(0, 0), pygame.Vector2(10, 0)
+        shooter.SMOKES[:] = [[pygame.Vector2(5, 0.3), shooter.SMOKE_TIME / 2]]
+        try:
+            self.assertTrue(shooter.smoke_blocks(a, b))
+            self.assertFalse(shooter.smoke_blocks(a, pygame.Vector2(0, 10)))
+        finally:
+            shooter.SMOKES.clear()
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

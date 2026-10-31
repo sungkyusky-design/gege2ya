@@ -20,7 +20,7 @@ description: Develop, test and ship the Strike Zone pygame FPS (shooter.py) in t
 - **웹(pygbag)에서도 돌아야 해요**: 반복문은 `async` + `await asyncio.sleep(0)`, 파일 대신 `browser.py` 의 저장 함수.
 - 저장 정보(`save` dict)의 키를 바꾸거나 지우지 말고 추가만 해요 (사용자의 기존 진행이 이어져야 해요).
   쓰는 키: xp, best, continue, res, settings, loadout, wkills, unlocked, skills, zbest, mission, missions_done,
-  keys, lifetime, achievements, camo, challenges, daily.
+  keys, lifetime, achievements, camo, challenges, daily, gunsmith (loadout 에 tactical 추가).
 - 특정 실제 게임(콜오브듀티 등)의 맵·이름을 그대로 베끼지 않아요. 장르 느낌은 OK, 고유 이름/맵 복제는 X.
 
 ## 데이터 파일 (strike/)
@@ -78,6 +78,8 @@ README 무기 표 / 얻는 조건 표. 포물선 유탄은 `lobbed=True`, 로켓
 **손으로 그린 맵**: `strike/maps.py` 의 `MAPS` 에 테마 dict (name, sky, haze, sun, stars, ground, lit, fog, snow, camo, op, brief, rows).
 `P` 하나, 먼 `E` 6개 이상. 다 그리면 반드시 `check_maps.py`. 캠페인 맵은 `CAMPAIGN_MAPS` 순서대로 22개
 (늘리면 `SET_SIZE` 와 README 표도 확인). 메아리는 `ECHOES` 에 맵 이름으로.
+전술 장비: `TACTICALS` (strike/units.py), `throw_tactical`, `tactical_hit`, 연막 `SMOKES`/`smoke_blocks`, 쿠킹 `update_cooking`.
+총기 개조: `ATTACHMENTS` (strike/units.py), `save["gunsmith"]`, `apply_gunsmith`, `current_weapon_spec`, `gunsmith_screen`.
 잠입: 적의 `aware`(0~1, `in_view` 앞쪽 시야), `Player.visibility`, 몰래 처치 how=`"TAKEDOWN!"`, `check_bodies`. 손전등 `Game.flashlight`, `draw_darkness`.
 길찾기: 적/동료를 움직일 땐 `steer(agent, 목표, dt)` 로 방향을 받아요 (막히면 `Navigator` 의 길찾기 지도로 돌아감). 맵 모양이 바뀌면 `self.navigator.clear()`.
 동료: `Ally`, `Game.spawn_allies` (라운드마다), `update_allies`, `hurt_ally`, 명령 `SQUAD_ORDERS` (K). 동료 처치는 how=`"ALLY"`.
