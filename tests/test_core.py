@@ -493,6 +493,43 @@ class GameTest(unittest.TestCase):
         self.assertEqual(game.boss_marks, [])
         self.assertLess(game.player.hp, 1000)                             # 내 자리에 떨어진 공습
 
+    def test_deeprun_boons_and_depth(self):
+        save = {}
+        game = shooter.Game(save, 1, deeprun=True)
+        game.briefing = None
+        self.assertEqual(game.banner, "DEPTH 1")
+        game.enemies = []
+        game.objective = None
+        game.update(1 / 60, Keys(), 0, 0, (False, False, False))         # 라운드 클리어 → 강화 고르기
+        self.assertIsNotNone(game.boon_choice)
+        self.assertEqual(len(game.boon_choice), 3)
+        first = game.boon_choice[0]
+        game.handle_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_1, mod=0, unicode=""))
+        self.assertEqual(game.boons.get(first), 1)
+        for _ in range(400):
+            game.update(1 / 60, Keys(), 0, 0, (False, False, False))
+            if game.depth == 2:
+                break
+        self.assertEqual((game.depth, game.round), (2, 1 + shooter.DEEP_STEP))
+        self.assertNotIn("continue", save)                                # 캠페인 진행은 그대로
+        game.player.hp = 0
+        game.update(1 / 60, Keys(), 0, 0, (False, False, False))
+        self.assertEqual(save["deeprun"]["best"], 2)
+        game.retry_round()                                                # 처음부터, 강화 없음
+        self.assertEqual((game.depth, game.boons), (1, {}))
+
+    def test_boon_effects(self):
+        game = shooter.Game({}, 1, deeprun=True)
+        game.boon_choice = ["thick", "glass", "wind"]
+        game.pick_boon(0)
+        self.assertEqual(game.max_hp, game.base_max_hp + 30)
+        game.boons["wind"] = 1
+        game.player.hp = 10
+        game.hurt_player(500)
+        self.assertEqual(game.player.hp, 30)                              # 두 번째 바람
+        self.assertTrue(len(shooter.unlocked_boons({})) < len(shooter.BOONS))
+        self.assertEqual(len(shooter.unlocked_boons({"deeprun": {"total": 999}})), len(shooter.BOONS))
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
