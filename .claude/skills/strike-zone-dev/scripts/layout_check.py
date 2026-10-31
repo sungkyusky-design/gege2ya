@@ -180,6 +180,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--all", action="store_true", help="여러 해상도와 UI SIZE")
     parser.add_argument("--shots", help="화면 사진을 저장할 폴더")
+    parser.add_argument("--lang", choices=["ko", "en", "both"], default="both",
+                        help="메뉴 언어 (ko 는 한글 글꼴이 있는 컴퓨터에서만, 없으면 건너뛰어요)")
     args = parser.parse_args()
     pygame.init()
     pygame.display.set_mode((320, 200))
@@ -188,18 +190,24 @@ def main():
     if args.all:
         sizes = [(1280, 720), (1600, 900), (1920, 1080), (1024, 768)]
         huds = [75, 100, 125]
+    langs = ["en", "ko"] if args.lang == "both" else [args.lang]
+    if "ko" in langs and not shooter.korean_font_path():
+        print("한글 글꼴이 없어서 한글 메뉴 검사는 건너뛰어요")
+        langs.remove("ko")
     total = 0
-    for width, height in sizes:
-        for hud in huds:
-            bad = check(width, height, hud, args.shots)
-            count = sum(len(v) for v in bad.values())
-            total += count
-            print(f"{width}x{height} UI {hud}%: {'OK' if not count else f'{count} problems'}")
-            for name, found in bad.items():
-                for line in found[:6]:
-                    print(f"    {name}: {line}")
-                if len(found) > 6:
-                    print(f"    {name}: ... {len(found) - 6} more")
+    for lang in langs:
+        shooter.SETTINGS["lang"] = 0 if lang == "ko" else 1
+        for width, height in sizes:
+            for hud in huds:
+                bad = check(width, height, hud, args.shots and os.path.join(args.shots, lang))
+                count = sum(len(v) for v in bad.values())
+                total += count
+                print(f"[{lang}] {width}x{height} UI {hud}%: {'OK' if not count else f'{count} problems'}")
+                for name, found in bad.items():
+                    for line in found[:6]:
+                        print(f"    {name}: {line}")
+                    if len(found) > 6:
+                        print(f"    {name}: ... {len(found) - 6} more")
     print("결과: 겹침 없음" if total == 0 else f"결과: 문제 {total}개")
     sys.exit(1 if total else 0)
 

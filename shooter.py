@@ -140,7 +140,7 @@ GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
 # 설정 (시작 화면에서 S): 저장돼서 다음에도 그대로예요
 SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=2, v2=True, music=40,
-                hud=100, shake=1, soundviz=0, colorblind=0, squad=2, fullscreen=0)
+                hud=100, shake=1, soundviz=0, colorblind=0, squad=2, fullscreen=0, lang=0)
 ASSIST_LEVELS = ["OFF", "LOW", "NORMAL", "HIGH"]
 ASSIST_PAD = [0.0, 0.6, 1.0, 1.5]          # 아깝게 빗나간 총알을 몸통에 맞혀 주는 정도
 ASSIST_STICKY = [1.0, 0.75, 0.55, 0.4]     # 조준점이 적 위에 있을 때 시점이 느려지는 정도
@@ -2018,24 +2018,65 @@ class ShadowFont:
         return self.font.get_linesize()
 
 
-def make_fonts():
-    """화면 크기에 맞춘 글꼴들. 한글 글꼴이 있으면 도움말을 한글로 보여줘요."""
-    ko_path = None if IN_BROWSER else pygame.font.match_font(KOREAN_FONTS)
-    fonts = {
-        "tiny": pygame.font.Font(None, int(18 * UI)),
-        "small": pygame.font.Font(None, int(22 * UI)),
-        "normal": pygame.font.Font(None, int(30 * UI)),
-        "big": pygame.font.Font(None, int(56 * UI)),
-        "title": pygame.font.Font(None, int(100 * UI)),
-        "lang": "ko" if ko_path else "en",
-    }
-    if ko_path:
+def korean_font_path():
+    """컴퓨터에 있는 한글 글꼴 파일 (웹이나 없으면 None)"""
+    return None if IN_BROWSER else pygame.font.match_font(KOREAN_FONTS)
+
+
+KO_FONT_SCALE = 0.78       # 한글 글꼴은 같은 크기 숫자에서 더 커서 줄여 써요
+
+
+def make_fonts(korean_ui=True):
+    """화면 크기에 맞춘 글꼴들. 한글 글꼴이 있고 설정 LANGUAGE 가 KOREAN 이면 메뉴를 한글로 보여줘요.
+    korean_ui=False: 게임 화면(HUD)용 - 숫자와 영어는 원래 글꼴, 도움말만 한글"""
+    ko_path = korean_font_path()
+    use_ko = bool(ko_path) and SETTINGS.get("lang", 0) == 0
+    sizes = dict(tiny=18, small=22, normal=30, big=56, title=100)
+    if use_ko and korean_ui:
+        fonts = {name: pygame.font.Font(ko_path, int(size * KO_FONT_SCALE * UI)) for name, size in sizes.items()}
+        for name in ("normal", "big", "title"):
+            fonts[name].set_bold(True)             # 제목과 메뉴 이름은 굵게 (원래 글꼴처럼 또렷하게)
+    else:
+        fonts = {name: pygame.font.Font(None, int(size * UI)) for name, size in sizes.items()}
+    if use_ko:
         fonts["help"] = pygame.font.Font(ko_path, int(17 * UI))
         fonts["help_big"] = pygame.font.Font(ko_path, int(26 * UI))
     else:
         fonts["help"] = pygame.font.Font(None, int(24 * UI))
         fonts["help_big"] = pygame.font.Font(None, int(38 * UI))
-    return {key: ShadowFont(f) if key != "lang" else f for key, f in fonts.items()}
+    fonts = {key: ShadowFont(f) for key, f in fonts.items()}
+    fonts["lang"] = "ko" if use_ko else "en"
+    fonts["ko_ui"] = use_ko and korean_ui
+    return fonts
+
+
+# 메뉴 글자 한글 이름 (설정 LANGUAGE = KOREAN 일 때). 없는 글자는 영어 그대로
+KO_TEXT = {
+    "SETTINGS": "설정", "CONTROLS": "키 설정", "MY MAPS": "내 맵", "LEADERBOARD": "랭킹", "STATS": "기록",
+    "CHALLENGES": "도전", "MISSIONS": "미션", "SKILLS": "스킬", "LOADOUT": "로드아웃", "ACHIEVEMENTS": "업적",
+    "GUNSMITH": "총기 개조", "PAUSED": "일시정지", "CAMPAIGN": "캠페인", "CONTINUE": "이어하기", "ZOMBIES": "좀비",
+    "TRAINING": "사격장", "DIFFICULTY": "난이도", "RESOLUTION": "해상도", "HOW TO PLAY": "조작법",
+    "PLAY": "플레이", "PROFILE": "내 정보", "RESUME": "계속하기", "HELP": "도움말", "PHOTO MODE": "사진 모드",
+    "QUIT TO MENU": "메뉴로 나가기", "START WEAPON": "시작 무기", "SECOND WEAPON (Q)": "두 번째 무기 (Q)",
+    "PERK": "퍼크", "TACTICAL (N)": "전술 장비 (N)", "INVENTORY": "무기 목록", "SCORE": "점수", "WAVE": "웨이브",
+    "ROUND": "라운드", "STAGE": "단계", "KILLS": "처치", "MAP": "맵", "DATE": "날짜",
+    "LOOK SPEED": "시점 속도", "MOUSE SPEED": "마우스 속도", "AIM ASSIST": "조준 보정", "FIELD OF VIEW": "시야각",
+    "VOLUME": "소리", "MUSIC": "음악", "FULLSCREEN": "전체 화면", "SQUADMATES": "동료", "UI SIZE": "글자 크기",
+    "SCREEN SHAKE": "화면 흔들림", "SOUND MARKS": "소리 표시", "COLORBLIND": "색약 모드", "LANGUAGE": "언어",
+    "WEAPONS": "무기", "RECENT GAMES": "최근 판",
+}
+
+
+def tr(fonts, text):
+    """한글 메뉴면 KO_TEXT 로 바꿔요. 'ACHIEVEMENTS  3 / 16' 처럼 뒤에 숫자가 붙어도 앞 이름만 바꿔요"""
+    if not fonts.get("ko_ui"):
+        return text
+    if text in KO_TEXT:
+        return KO_TEXT[text]
+    for key in sorted(KO_TEXT, key=len, reverse=True):
+        if text.startswith(key + " "):
+            return KO_TEXT[key] + text[len(key):]
+    return text
 
 
 # ----- 메뉴 화면 공통 부품 -----
@@ -2074,7 +2115,7 @@ def draw_backdrop(screen):
 
 def draw_title(screen, fonts, text, pos, anchor="midleft"):
     """메뉴 제목 + 아래 분홍 밑줄"""
-    image = fonts["big"].render(text, True, UI_ACCENT)
+    image = fonts["big"].render(tr(fonts, text), True, UI_ACCENT)
     rect = image.get_rect(**{anchor: pos})
     screen.blit(image, rect)
     line = pygame.Rect(rect.x + 2, rect.bottom - 2 * UI, min(rect.width, 160 * UI), 3 * UI)
@@ -3362,7 +3403,7 @@ class Game:
         self.sway = 0.0            # 고개를 돌리면 총이 살짝 늦게 따라와요
         self.step_timer = 0.0
         self.was_airborne = False
-        self.fonts = make_fonts()
+        self.fonts = make_fonts(korean_ui=False)     # 게임 화면은 원래 글꼴 (도움말만 한글)
         self.font, self.big_font, self.small_font = self.fonts["normal"], self.fonts["big"], self.fonts["small"]
         self.save = save
         self.xp = save.get("xp", 0)
@@ -7803,6 +7844,7 @@ SETTING_ROWS = [
     ("shake", "SCREEN SHAKE", "쏘거나 맞을 때 화면 흔들림", "Camera shake when shooting or hit"),
     ("soundviz", "SOUND MARKS", "발소리·총소리 방향을 조준점 둘레에 표시", "Show footstep/gunshot directions"),
     ("colorblind", "COLORBLIND", "빨강/초록 대신 주황/파랑", "Orange/blue instead of red/green"),
+    ("lang", "LANGUAGE", "메뉴 글자: 한국어 / 영어", "Menu language: Korean / English"),
     ("controls", "CONTROLS", "키 바꾸기 (Enter 로 열기)", "Rebind keys (press Enter)"),
 ]
 
@@ -7828,6 +7870,8 @@ def change_setting(key, step):
         open_window()                                   # 바로 전체 화면 / 창으로
     elif key == "difficulty":
         SETTINGS[key] = (SETTINGS[key] + step) % len(DIFFICULTIES)
+    elif key == "lang":
+        SETTINGS[key] = 1 - SETTINGS[key]
     apply_settings({})
 
 
@@ -7849,6 +7893,10 @@ def setting_text(key):
         return "BROWSER" if IN_BROWSER else ("ON" if value else "OFF")
     if key == "squad":
         return str(value)
+    if key == "lang":
+        if value == 1:
+            return "ENGLISH"
+        return "KOREAN" if korean_font_path() else "KOREAN (NO FONT)"
     return f"{value}%"
 
 
@@ -7887,13 +7935,14 @@ async def settings_screen(save):
         draw_backdrop(screen)
         draw_title(screen, fonts, "SETTINGS", (WIDTH * 0.06, HEIGHT * 0.08))
         for i, (key, name, desc_ko, desc_en) in enumerate(SETTING_ROWS):
-            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.13 + i * 0.057), WIDTH * 0.88, HEIGHT * 0.052)
+            step = min(0.057, 0.77 / len(SETTING_ROWS))                  # 줄이 많아도 아래 안내 띠 위까지
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.13 + i * step), WIDTH * 0.88, HEIGHT * step * 0.9)
             selected = i == row
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
             screen.blit(panel, rect)
             pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1)
-            label = fonts["normal"].render(name, True, WHITE)
+            label = fonts["normal"].render(tr(fonts, name), True, WHITE)
             screen.blit(label, label.get_rect(midleft=(rect.x + 14, rect.centery)))
             desc = fonts["help"].render(desc_ko if ko else desc_en, True, (200, 230, 255))
             screen.blit(desc, desc.get_rect(midleft=(rect.x + rect.w * 0.27, rect.centery)))
@@ -8240,13 +8289,13 @@ async def ranking_screen(save, mode_index=0):
             rect = pygame.Rect(WIDTH * (0.06 + i * 0.2), HEIGHT * 0.17, WIDTH * 0.18, HEIGHT * 0.06)
             selected = i == mode_index
             draw_panel(screen, rect, selected)
-            image = fonts["normal"].render(name, True, WHITE if selected else (150, 150, 170))
+            image = fonts["normal"].render(tr(fonts, name), True, WHITE if selected else (150, 150, 170))
             screen.blit(image, image.get_rect(center=rect.center))
         # 표 머리
         cols = [0.06, 0.12, 0.26, 0.38, 0.48, 0.74]
         heads = ["#", "SCORE", reached_name, "KILLS", "MAP", "DATE"]
         for x, head in zip(cols, heads):
-            screen.blit(fonts["small"].render(head, True, (80, 240, 255)), (WIDTH * x, HEIGHT * 0.27))
+            screen.blit(fonts["small"].render(tr(fonts, head), True, (80, 240, 255)), (WIDTH * x, HEIGHT * 0.27))
         table = save.get("rankings", {}).get(mode, [])
         medal = {0: (255, 200, 60), 1: (210, 210, 225), 2: (220, 140, 80)}     # 금, 은, 동
         for i, e in enumerate(table):
@@ -8323,7 +8372,7 @@ async def stats_screen(save):
             screen.blit(font.render(fit_text(font, line, WIDTH * 0.9), True, (80, 240, 255)),
                         (WIDTH * 0.05, HEIGHT * (0.15 + i * 0.04)))
         # 왼쪽: 무기별 처치와 레벨 (많이 쓴 순서)
-        screen.blit(fonts["normal"].render("WEAPONS", True, WHITE), (WIDTH * 0.05, HEIGHT * 0.26))
+        screen.blit(fonts["normal"].render(tr(fonts, "WEAPONS"), True, WHITE), (WIDTH * 0.05, HEIGHT * 0.26))
         kills = save.get("wkills", {})
         ranked = sorted(kills.items(), key=lambda kv: -kv[1])[:12]
         top = max([k for _, k in ranked] + [1])
@@ -8338,7 +8387,7 @@ async def stats_screen(save):
             screen.blit(fonts["help"].render("아직 기록이 없어요" if ko else "No kills yet", True, (150, 150, 170)),
                         (WIDTH * 0.05, HEIGHT * 0.32))
         # 오른쪽: 최근 판
-        screen.blit(fonts["normal"].render("RECENT GAMES", True, WHITE), (WIDTH * 0.52, HEIGHT * 0.26))
+        screen.blit(fonts["normal"].render(tr(fonts, "RECENT GAMES"), True, WHITE), (WIDTH * 0.52, HEIGHT * 0.26))
         for i, game in enumerate(reversed(save.get("history", []))):
             y = HEIGHT * (0.32 + i * 0.045)
             text = (f"{game['date']}  {game['mode']}  R{game['round']}  KILLS {game['kills']}  "
@@ -8649,7 +8698,7 @@ async def intro_screen(save):
         rects = []
         rows = [0, 0]
         for col in (0, 1):
-            screen.blit(fonts["small"].render(heads[col], True, UI_CYAN), (col_x[col], HEIGHT * 0.215))
+            screen.blit(fonts["small"].render(tr(fonts, heads[col]), True, UI_CYAN), (col_x[col], HEIGHT * 0.215))
         for item in items:
             col = item[5]
             rects.append(pygame.Rect(col_x[col], HEIGHT * 0.25 + rows[col] * gap, col_w, row_h))
@@ -8664,7 +8713,7 @@ async def intro_screen(save):
         for i, (item, rect) in enumerate(zip(items, rects)):
             key, cap, name, _, _, _ = item
             selected = i == sel
-            label = fonts["normal"].render(name, True, YELLOW if selected else WHITE)
+            label = fonts["normal"].render(tr(fonts, name), True, YELLOW if selected else WHITE)
             screen.blit(label, label.get_rect(midleft=(rect.x + 14 * UI, rect.centery)))
             value = ""
             if key == pygame.K_RETURN:
@@ -9020,12 +9069,13 @@ async def loadout_screen(save, choice):
         screen.blit(label, label.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.165)))
 
         # 왼쪽: 네 칸 (시작 무기 / 두 번째 무기 / 퍼크 / 전술 장비)
-        card_w, card_h = WIDTH * 0.44, HEIGHT * 0.112
+        label_h, name_h, desc_h = (fonts[k].get_linesize() for k in ("tiny", "normal", "help"))
+        card_w, card_h = WIDTH * 0.44, max(HEIGHT * 0.112, label_h + name_h + desc_h + 8 * UI)   # 글자가 커도 안 겹치게
         for i in range(4):
-            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.2 + i * 0.125), card_w, card_h)
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * 0.2 + i * (card_h + HEIGHT * 0.013), card_w, card_h)
             selected = i == row
             draw_panel(screen, rect, selected)
-            screen.blit(fonts["tiny"].render(labels[i], True, UI_DIM), (rect.x + 14 * UI, rect.y + 7 * UI))
+            screen.blit(fonts["tiny"].render(tr(fonts, labels[i]), True, UI_DIM), (rect.x + 14 * UI, rect.y + 7 * UI))
             name = options[i][picks[i]]
             if i < 2:                                           # 무기 칸: 종류 이름표 + 몇 번째인지
                 tag = f"{weapon_class(name)}   {picks[i] + 1}/{len(owned)}"
@@ -9033,7 +9083,7 @@ async def loadout_screen(save, choice):
                 screen.blit(image, image.get_rect(topright=(rect.right - 14 * UI, rect.y + 7 * UI)))
             arrows = f"<  {name}  >" if selected else name
             image = fonts["normal"].render(arrows, True, YELLOW if selected else WHITE)
-            screen.blit(image, (rect.x + 14 * UI, rect.y + rect.h * 0.3))
+            screen.blit(image, (rect.x + 14 * UI, rect.y + 4 * UI + label_h * 0.9))
             if i < 2:
                 desc = WEAPON_INFO[name][0 if ko else 1]
             elif i == 2:
@@ -9041,23 +9091,34 @@ async def loadout_screen(save, choice):
             else:
                 desc = TACTICALS[picks[3]][1 if ko else 2]
             desc = fit_text(fonts["help"], desc, rect.w - 28 * UI)
-            screen.blit(fonts["help"].render(desc, True, (200, 230, 255)), (rect.x + 14 * UI, rect.y + rect.h * 0.68))
+            screen.blit(fonts["help"].render(desc, True, (200, 230, 255)), (rect.x + 14 * UI, rect.bottom - desc_h - 3 * UI))
 
         # 왼쪽 아래: 무기 인벤토리를 종류별로 (가진 무기는 레벨, 없는 무기는 자물쇠)
-        top = HEIGHT * 0.71
-        title = fonts["small"].render(f"INVENTORY  {len(owned)} / {len(WEAPONS)}", True, WHITE)
+        top = rect.bottom + 10 * UI                       # 마지막 칸 바로 아래부터
+        title = fonts["small"].render(tr(fonts, f"INVENTORY  {len(owned)} / {len(WEAPONS)}"), True, WHITE)
         screen.blit(title, (WIDTH * 0.06, top))
         kills_all = save.get("wkills", {})
         chosen = (options[0][picks[0]], options[1][picks[1]])
-        font = fonts["help"] if ko else fonts["tiny"]
+        rows_needed = (len(WEAPONS) + 1) // 2
+        room = HEIGHT - 44 * UI - (top + title.get_height() + 4 * UI)      # 아래 키 안내 띠 위까지
+        font = next((f for f in ([fonts["help"]] if ko else []) + [fonts["tiny"]]
+                     if f.get_linesize() * rows_needed <= room), fonts["tiny"])
+        line_h = font.get_linesize()
         col_w = WIDTH * 0.22
         k = 0
-        for cls, names in WEAPON_CLASSES:
+        if line_h * rows_needed > room:                     # 자리가 모자라면 (큰 글자) 잠긴 무기만 짧게
+            locked = [spec["name"] for spec in WEAPONS if spec["name"] not in owned]
+            text = ("LOCKED: " + ", ".join(locked)) if locked else "ALL WEAPONS UNLOCKED"
+            y = top + title.get_height() + 4 * UI
+            for line in wrap_text(font, text, WIDTH * 0.44)[:int(room // line_h)]:
+                screen.blit(font.render(line, True, UI_DIM), (WIDTH * 0.06, y))
+                y += line_h
+        for cls, names in ([] if line_h * rows_needed > room else WEAPON_CLASSES):
             for name in names:
                 if name not in WEAPON_BY_NAME:
                     continue
                 x = WIDTH * 0.06 + (k % 2) * (col_w + WIDTH * 0.005)
-                y = top + title.get_height() + 4 * UI + (k // 2) * font.get_linesize()
+                y = top + title.get_height() + 4 * UI + (k // 2) * line_h
                 if name in owned:
                     text = f"{name}  LV {weapon_level(kills_all.get(name, 0))}"
                     color = (255, 200, 60) if name in chosen else WHITE
@@ -9238,7 +9299,7 @@ def draw_pause(screen, fonts, row, age=1.0, blur=True):
     _pause_cursor[0] = cur
     draw_panel(screen, pygame.Rect(cur.x, cur.y, rects[0].w, rects[0].h), True)
     for i, (item, rect) in enumerate(zip(PAUSE_ITEMS, rects)):
-        label = fonts["normal"].render(item, True, YELLOW if i == row else WHITE)
+        label = fonts["normal"].render(tr(fonts, item), True, YELLOW if i == row else WHITE)
         screen.blit(label, label.get_rect(center=rect.center))
     ko = fonts["lang"] == "ko"
     hint = "↑↓ 고르기   Enter 확인   ESC 계속하기" if ko else "UP/DOWN choose   ENTER select   ESC resume"
@@ -9317,6 +9378,7 @@ async def run():
     paused, pause_row = False, 0       # ESC: 일시정지 메뉴 (실수로 눌러도 진행이 날아가지 않아요)
     pause_started = 0.0                # 일시정지 메뉴가 나타나는 움직임용
     pause_bg = None                    # 일시정지 뒤에 깔 흐린 게임 화면
+    pause_fonts = None
     while running:
         dt = min(0.05, clock.tick(FPS) / 1000)
         events = [remap_event(event) for event in pygame.event.get()]   # 바꾼 키를 기본 키로
@@ -9367,7 +9429,9 @@ async def run():
                 blur_screen(screen)
                 pause_bg = screen.copy()
             screen.blit(pause_bg, (0, 0))
-            draw_pause(screen, game.fonts, pause_row, time.time() - pause_started, blur=False)
+            if pause_fonts is None:
+                pause_fonts = make_fonts()             # 메뉴 글꼴 (한글 메뉴면 한글)
+            draw_pause(screen, pause_fonts, pause_row, time.time() - pause_started, blur=False)
             present("pause")
             await asyncio.sleep(0)
             continue
@@ -9378,7 +9442,7 @@ async def run():
                 running, closed = False, True
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 paused, pause_row = True, 0
-                pause_started, pause_bg = time.time(), None
+                pause_started, pause_bg, pause_fonts = time.time(), None, None
                 grab_mouse(False)
             elif event.type == pygame.KEYDOWN and game.game_over and event.key == pygame.K_r:
                 game.retry_round()
