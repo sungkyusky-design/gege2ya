@@ -81,6 +81,7 @@ import random
 import sys
 import time
 from collections import deque
+import datetime
 
 import pygame
 
@@ -197,6 +198,22 @@ def remap_event(event):
     return event
 
 
+# ----- 도전 모드 -----
+# (이름, 라운드, 한국어 설명, 영어 설명). DAILY 의 라운드와 적은 날짜로 정해져요
+CHALLENGES = [
+    ("DAILY", 0, "오늘의 도전: 날짜마다 바뀌는 맵과 적. 빨리 깰수록 좋아요", "Daily: map and enemies change every day"),
+    ("HEADSHOTS", 12, "머리를 맞혀야만 피해가 들어가요", "Only headshots do damage"),
+    ("PISTOL", 9, "권총 하나로만 싸워요", "Pistol only"),
+    ("HARDCORE", 15, "한 방 맞으면 끝! 대신 내 총알 피해 2배", "One hit kills you, your bullets do double damage"),
+    ("BLITZ", 7, "60초 안에 모든 적을 쓰러뜨리세요", "Clear the round in 60 seconds"),
+]
+BLITZ_TIME = 60
+
+
+def daily_seed():
+    return datetime.date.today().toordinal()
+
+
 # ----- 업적과 위장 무늬 -----
 # 누적 기록 save["lifetime"]: kills, heads, knife, explosive, rounds, streak
 ACHIEVEMENTS = [
@@ -215,6 +232,7 @@ ACHIEVEMENTS = [
     ("SURVIVOR", "좀비 10웨이브 도착", "Reach zombie wave 10", lambda s, l: s.get("zbest", 0) >= 10),
     ("OPERATOR", "미션 하나 끝내기", "Complete a mission", lambda s, l: len(s.get("missions_done", [])) >= 1),
     ("ARSENAL", "무기 10종 얻기", "Own 10 weapons", lambda s, l: len(unlocked_weapons(s)) >= 10),
+    ("CHALLENGER", "도전 모드 하나 깨기", "Complete a challenge", lambda s, l: bool(s.get("challenges"))),
 ]
 # 위장 무늬: (이름, 필요한 업적 수, 몸통 색, 무늬 색)
 CAMOS = [("NONE", 0, None, None), ("ARCTIC", 2, (225, 230, 235), (150, 160, 175)),
@@ -573,6 +591,16 @@ ENEMY_TYPES = {
                    height=0.78, width=0.7,
                    look=dict(uniform=(70, 85, 60), vest=(45, 50, 40), pants=(40, 40, 45),
                              head="helmet", gun=40, sandbags=True)),
+    # 정찰 드론: 머리 위(lift)에 떠서 빠르게 날아다니며 약한 총을 자주 쏴요. 작아서 맞히기 어려워요
+    "DRONE": dict(hp=45, speed=2.6, sight=16, reaction=0.5, keep=5, range=12,
+                  fire=(0.25, 0.45), damage=(3, 6), accuracy=0.5, falloff=0.03,
+                  height=0.32, width=0.55, lift=1.15,
+                  look=dict(uniform=(70, 75, 85), vest=(40, 42, 50), pants=(40, 42, 50), head="drone", gun=0)),
+    # 레이저 저격수: 쏘기 전에 빨간 레이저가 나를 향해 좁혀 와요 (레이저가 보이면 숨으세요!)
+    "LASER": dict(hp=90, speed=0.7, sight=32, reaction=1.6, keep=99, range=32,
+                  fire=(2.6, 3.4), damage=(38, 48), accuracy=0.7, falloff=0.006,
+                  height=0.9, width=0.45,
+                  look=dict(uniform=(45, 50, 60), vest=(30, 32, 40), pants=(35, 38, 45), head="mask", gun=42)),
     # 좀비 모드: 총 대신 가까이 와서 할퀴어요. melee = (피해, 할퀴는 간격 초)
     "ZOMBIE": dict(hp=80, speed=1.25, sight=99, reaction=0, keep=0, range=0,
                    fire=(1, 1), damage=(0, 0), accuracy=0, falloff=0,
@@ -608,7 +636,7 @@ ARMORED = ("HEAVY", "BOSS", "BRUTE", "GUNNER")     # 맞으면 '깡' 장갑 소�
 ENEMY_MAGS = {"GRUNT": (12, 2.2), "RUSHER": (8, 1.8), "SNIPER": (4, 2.6), "HEAVY": (45, 3.5), "SHIELD": (10, 2.2),
               "BOSS": (60, 3.0), "FLANKER": (6, 2.0), "MEDIC": (12, 2.2), "GUNNER": (50, 3.8)}
 # 엄폐물을 쓰는 적: 다치거나 재장전하거나 제압당하면 숨었다가 고개를 내밀어 쏴요
-COVER_USERS = ("GRUNT", "SNIPER", "MEDIC", "BOMBER", "SHIELD")
+COVER_USERS = ("GRUNT", "SNIPER", "MEDIC", "BOMBER", "SHIELD", "LASER")
 ZOMBIE_POINTS = dict(hit=10, kill=60, headshot=100, knife=130, wave=250)
 ZOMBIE_SHOP = dict(ammo=500, upgrade=2500)     # B: 탄약 가득, U: 들고 있는 총 강화
 
@@ -1693,10 +1721,28 @@ def make_glow(size, color):
     return img
 
 
+def make_drone_image(state="normal"):
+    """정찰 드론: 납작한 몸통, 프로펠러 4개, 빨간 눈 (flash = 아래 총구 불꽃)"""
+    img = pygame.Surface((60, 36), pygame.SRCALPHA)
+    body = (230, 140, 140) if state == "hurt" else (70, 75, 85)
+    for x in (4, 40):                                           # 프로펠러 팔과 날개
+        pygame.draw.rect(img, (40, 42, 50), (x + 4, 12, 12, 4))
+        pygame.draw.ellipse(img, (160, 170, 185), (x - 2, 6, 22, 6))
+    pygame.draw.rect(img, body, (14, 12, 32, 16), border_radius=6)
+    pygame.draw.rect(img, (40, 42, 50), (14, 12, 32, 16), 2, border_radius=6)
+    pygame.draw.circle(img, (255, 50, 50) if state != "aim" else WHITE, (30, 21), 4)   # 카메라 눈
+    pygame.draw.rect(img, (25, 25, 25), (27, 28, 6, 6))                           # 총
+    if state == "flash":
+        pygame.draw.circle(img, YELLOW, (30, 33), 4)
+    return img
+
+
 def make_enemy_image(look, state="normal"):
     """적 그림. state: normal(평소) / flash(총구 불꽃) / hurt(맞음) / aim(저격 조준 불빛)"""
     if look["head"] == "zombie":
         return make_zombie_image(look, state)
+    if look["head"] == "drone":
+        return make_drone_image(state)
     if state == "hurt":
         # 맞으면 붉게 물들고 몸에 핏자국이 생겨요
         img = make_enemy_image(look, "normal")
@@ -2809,7 +2855,7 @@ class Enemy:
     @property
     def aiming(self):
         """저격수가 곧 쏠 때 True (빨간 불빛으로 미리 알려줘요)"""
-        return self.kind == "SNIPER" and self.sees and self.spotted > 0.4 and self.shoot_timer < 0.8
+        return self.kind in ("SNIPER", "LASER") and self.sees and self.spotted > 0.4 and self.shoot_timer < 0.8
 
     def shield_blocks(self, from_pos):
         """from_pos 쪽에서 날아온 총알을 방패가 막는지 (방패병이 그쪽을 보고 있으면 막아요)"""
@@ -2871,7 +2917,7 @@ class Enemy:
         elif dist > t["keep"] * (1.4 if self.role == "suppress" else 1.0):
             move_with_collision(self.pos, self.facing * t["speed"] * dt)
         # 옆으로 왔다 갔다 피해요 (실력이 좋을수록 많이). 저격수와 무거운 적은 안 피해요
-        if self.kind not in ("SNIPER", "HEAVY", "BOSS", "GUNNER"):
+        if self.kind not in ("SNIPER", "HEAVY", "BOSS", "GUNNER", "LASER"):
             self.strafe_timer -= dt
             if self.strafe_timer <= 0:
                 self.strafe_timer = random.uniform(0.5, 1.4)
@@ -3465,11 +3511,14 @@ class Effect:
 # 게임 전체
 # ---------------------------------------------------------------
 class Game:
-    def __init__(self, save, start_round=1, mode="campaign", loadout=None, mission=0, stage=0):
+    def __init__(self, save, start_round=1, mode="campaign", loadout=None, mission=0, stage=0, challenge=None):
         """save: 저장 정보(dict). 라운드를 깨거나 죽을 때마다 고쳐서 파일에 써요.
         mode: "campaign"(라운드마다 맵이 바뀌는 전투) 또는 "zombies"(좀비 웨이브 버티기)
         loadout: 고른 주무기/보조무기/퍼크 (없으면 모든 무기를 들고 시작)"""
         self.mode = mode
+        self.challenge = challenge  # 도전 모드 이름 (없으면 None)
+        self.challenge_time = 0.0
+        self.challenge_done = False
         self.loadout = loadout
         self.mission = mission     # 미션 모드: 몇 번째 미션인지
         self.stage = stage         # 미션 모드: 지금 단계 (0부터)
@@ -3596,7 +3645,7 @@ class Game:
             for state in ("normal", "flash", "hurt", "aim"):
                 self.enemy_images[(kind, state)] = make_enemy_image(look, state)
             # 걷는 모습 2장, 뒷모습 (+ 걷는 뒷모습). 모래주머니 진지와 방패병은 그대로
-            if not look.get("sandbags") and not look.get("shield"):
+            if not look.get("sandbags") and not look.get("shield") and look["head"] != "drone":
                 bases = [("", self.enemy_images[(kind, "normal")])]
                 if look["head"] != "zombie":
                     back = make_back_image(look)
@@ -3685,6 +3734,7 @@ class Game:
                 self.respawn_checkpoint()
             return
         self.game_over = False
+        self.challenge_done = False
         self.reset_streak()
         self.start_round()
 
@@ -3704,7 +3754,10 @@ class Game:
     def make_arsenal(self):
         """가진 무기를 모두 챙겨요 (인벤토리). 로드아웃의 시작 무기를 들고, 퍼크와 스킬도 적용해요."""
         specs, start, second = None, 0, 1
-        if self.loadout:
+        if self.challenge == "PISTOL":
+            specs = [self.weapon_spec("PISTOL")]
+            start, second = 0, 0
+        elif self.loadout:
             names = unlocked_weapons(self.save)
             specs = [self.weapon_spec(name) for name in names]
             start = names.index(self.loadout["primary"]) if self.loadout["primary"] in names else 0
@@ -3796,6 +3849,10 @@ class Game:
             pool += ["MEDIC"]
         if self.round >= 9:
             pool += ["GUNNER"]
+        if self.round >= 12:
+            pool += ["DRONE"] * 2
+        if self.round >= 14:
+            pool += ["LASER"]
         return random.choice(pool)
 
     def start_round(self):
@@ -3805,11 +3862,50 @@ class Game:
             self.start_wave()
         elif self.mode == "mission":
             self.start_mission()
+        elif self.challenge:
+            self.start_challenge()
         else:
             self.start_battle()
         self.reset_round_state()
         if self.mode == "mission":
             self.banner_timer = 5.0
+
+    def start_challenge(self):
+        """도전 모드: 정해진 라운드 하나를 규칙대로 (목표 없이 적 모두 처치)"""
+        name, round_no = next((c[0], c[1]) for c in CHALLENGES if c[0] == self.challenge)
+        if name == "DAILY":
+            seed = daily_seed()
+            self.round = 6 + seed % 40
+            random.seed(seed)                       # 오늘은 누구나 같은 맵, 같은 적
+            self.start_battle()
+            random.seed()
+        else:
+            self.round = round_no
+            self.start_battle()
+        self.objective = None
+        self.challenge_time = 0.0
+        self.challenge_done = False
+        self.banner = f"CHALLENGE: {name}"
+        info = next(c for c in CHALLENGES if c[0] == name)
+        self.sub_banners = [(info[3], YELLOW), (f"{self.theme['name']}   ENEMIES {len(self.enemies)}", WHITE)]
+
+    def finish_challenge(self):
+        """도전 성공: 기록 저장 (오늘의 도전은 날짜별)"""
+        self.challenge_done = True
+        self.game_over = True
+        t = round(self.challenge_time, 1)
+        records = self.save.setdefault("challenges", {})
+        if self.challenge == "DAILY":
+            today = str(datetime.date.today())
+            daily = self.save.get("daily", {})
+            best = daily.get("best") if daily.get("date") == today else None
+            self.challenge_best = min(t, best) if best else t
+            self.save["daily"] = dict(date=today, best=self.challenge_best)
+        else:
+            self.challenge_best = min(t, records.get(self.challenge, t))
+        records[self.challenge] = min(t, records.get(self.challenge, t))
+        self.check_achievements()
+        write_save(self.save)
 
     def start_training(self):
         """사격장: 움직이지 않는 과녁, 경험치/저장 없음, 단계별 연습 (화면 위 안내)"""
@@ -3980,7 +4076,7 @@ class Game:
     @staticmethod
     def mission_enemy_kind(rng):
         kinds = ["GRUNT"] * 4 + ["RUSHER", "RUSHER", "SNIPER", "SNIPER", "HEAVY", "BOMBER", "SHIELD",
-                                 "FLANKER", "MEDIC", "GUNNER"]
+                                 "FLANKER", "MEDIC", "GUNNER", "DRONE", "LASER"]
         return rng.choice(kinds)
 
     def mission_points(self):
@@ -4096,7 +4192,8 @@ class Game:
         count = min(len(far), 3 + in_set // 4 + set_no - 1)
         self.enemies = [Enemy(*p, self.pick_enemy_kind(), self.skill) for p in random.sample(far, count)]
         # 새로운 적이 처음 나오는 라운드에는 그 적이 꼭 한 명은 있게. 5라운드마다 보스
-        news = {2: "SNIPER", 3: "HEAVY", 4: "BOMBER", 6: "SHIELD", 7: "FLANKER", 8: "MEDIC", 9: "GUNNER"}
+        news = {2: "SNIPER", 3: "HEAVY", 4: "BOMBER", 6: "SHIELD", 7: "FLANKER", 8: "MEDIC", 9: "GUNNER",
+                12: "DRONE", 14: "LASER"}
         special = "BOSS" if self.round % 10 == 0 else news.get(self.round)
         if special:
             first = self.enemies[0]
@@ -4283,6 +4380,40 @@ class Game:
             self.sounds.play("streak")
             if self.mode == "mission":
                 self.advance_stage()
+
+    def update_boss(self, boss, dt):
+        """보스 패턴: 체력 60% 아래 → 화가 나서 빨라지고 돌진, 30% 아래 → 부하를 부르고 연막"""
+        ratio = boss.hp / boss.t["hp"]
+        phase = getattr(boss, "phase", 1)
+        if phase == 1 and ratio < 0.6:
+            boss.phase = 2
+            boss.t = dict(boss.t, speed=boss.t["speed"] * 1.5, fire=(boss.t["fire"][0] * 0.8, boss.t["fire"][1] * 0.8))
+            boss.charge_timer = 2.0
+            self.popups.append(["BOSS ENRAGED!", RED, 2.0])
+            self.shout(boss, "YOU'RE MINE!")
+            self.sounds.play("streak")
+        elif phase == 2 and ratio < 0.3:
+            boss.phase = 3
+            self.popups.append(["BOSS CALLS BACKUP!", RED, 2.0])
+            self.callout_cooldown = 0.0
+            self.shout(boss, "BACKUP! NOW!")
+            spots = [pygame.Vector2(boss.pos.x + dx, boss.pos.y + dy) for dx in (-2, -1, 1, 2) for dy in (-2, -1, 1, 2)]
+            spots = [q for q in spots if not is_blocked(q.x, q.y) and can_see(boss.pos, q)]
+            for q in random.sample(spots, min(3, len(spots))):
+                guard = Enemy(q.x, q.y, "GRUNT", self.skill)
+                guard.search = pygame.Vector2(self.player.pos)
+                self.enemies.append(guard)
+            for k in range(5):                                   # 연막: 보스 둘레에 빨간 연기
+                spot = boss.pos + pygame.Vector2(1.2, 0).rotate(k * 72)
+                self.effects.append(Effect(spot, self.flare_frames, 4.0, 1.6))
+        if getattr(boss, "phase", 1) >= 2 and boss.sees:        # 돌진: 6초마다 1.2초 동안 나에게 달려와요
+            boss.charge_timer = getattr(boss, "charge_timer", 2.0) - dt
+            if -1.2 < boss.charge_timer <= 0:
+                offset = self.player.pos - boss.pos
+                if offset.length() > 1.5:
+                    move_with_collision(boss.pos, offset.normalize() * boss.t["speed"] * 1.8 * dt)
+            elif boss.charge_timer <= -1.2:
+                boss.charge_timer = 6.0
 
     def update_squad(self, dt):
         """분대 AI: 한 명이 나를 보면 무전으로 동료에게 알리고, 여럿이면 제압조와 측면조로 나눠요"""
@@ -4643,6 +4774,12 @@ class Game:
             self.mission_time += dt
         if self.game_over:
             return
+        if self.challenge and self.banner_timer <= 0:
+            self.challenge_time += dt
+            if self.challenge == "BLITZ" and self.challenge_time > BLITZ_TIME:
+                self.fail_reason = "TIME UP"
+                self.game_over = True
+                return
 
         if self.round_clear_timer > 0:
             self.round_clear_timer -= dt
@@ -4755,6 +4892,8 @@ class Game:
                 continue                            # 큰 맵: 멀리 있는 적은 가만히 (계산 아끼기)
             before = pygame.Vector2(enemy.pos)
             damage = enemy.update(edt, self.player)
+            if enemy.kind == "BOSS":
+                self.update_boss(enemy, edt)
             moved = enemy.pos.distance_to(before)
             enemy.walk += moved
             enemy.moving = 0.15 if moved > 0.0005 else max(0.0, enemy.moving - dt)
@@ -4820,7 +4959,7 @@ class Game:
             if self.mode == "zombies":
                 self.save["zbest"] = max(self.save.get("zbest", 0), self.round)
                 write_save(self.save)
-            else:
+            elif not self.challenge:
                 self.record_progress(self.round)      # 다음에 이 라운드부터 이어할 수 있게
         elif self.mode == "zombies" and not self.enemies and self.zombies_left == 0 and self.round_clear_timer <= 0:
             self.slowmo = 0.8
@@ -4833,6 +4972,11 @@ class Game:
             self.count_round()
             self.save["zbest"] = max(self.save.get("zbest", 0), self.round + 1)
             write_save(self.save)
+        elif self.challenge and not self.enemies:
+            self.slowmo = 0.8
+            self.add_xp(XP["round"], f"CHALLENGE CLEAR  +{XP['round']}")
+            self.count_round()
+            self.finish_challenge()
         elif self.mode == "campaign" and (self.objective["done"] if self.objective else not self.enemies):
             self.slowmo = 0.8                         # 마지막 한 명(또는 목표 완료): 슬로모션
             self.round_clear_timer = 4.0
@@ -4991,7 +5135,7 @@ class Game:
 
     def chunks(self, enemy, count, color, size, upward=False):
         """적 몸에서 조각이 튀어요 (헤드샷이면 헬멧, 폭발이면 살점)"""
-        box = self.project(enemy.pos, enemy.t["height"], enemy.t["width"])
+        box = self.enemy_box(enemy)
         if not box:
             return
         sx, top, bottom, w, perp = box
@@ -5012,6 +5156,8 @@ class Game:
     def hurt_player(self, damage, source=None):
         """나에게 피해. source(때린 위치)가 있으면 화면에 맞은 방향을 표시해요."""
         damage *= DIFFICULTIES[SETTINGS["difficulty"]][2]
+        if self.challenge == "HARDCORE" and damage > 0:
+            damage = max(damage, self.player.hp + 1)      # 한 방에 끝
         if source is not None:
             self.last_source = pygame.Vector2(source)
         self.player.hp -= int(damage)
@@ -5328,8 +5474,12 @@ class Game:
                 self.tracers.append([*self.muzzle_screen, ax, ay, 0.05])
             if not target:
                 self.add_impact(ax, ay, spec["body"])     # 벽이나 바닥에 맞으면 먼지와 불똥 (+ 자국, 부서짐)
+            if target and self.challenge == "HEADSHOTS" and not head:
+                continue                          # 헤드샷 도전: 몸에 맞으면 피해 없음
             if target:
                 amount = spec["head"] * (1 + 0.15 * self.rank_of("MARKSMAN")) if head else spec["body"]
+                if self.challenge == "HARDCORE":
+                    amount *= 2
                 if self.perk == "HEAVY ROUNDS":
                     amount *= 1.25
                 if found[5]:                      # 관통: 피해가 줄어요
@@ -5358,7 +5508,7 @@ class Game:
         돌려주는 값: (적, 거리, 머리인지, 맞은 x, 맞은 y, 관통했는지) 또는 None"""
         best = None
         for enemy in self.enemies:
-            box = self.project(enemy.pos, enemy.t["height"], enemy.t["width"])
+            box = self.enemy_box(enemy)
             if not box:
                 continue
             sx, top, bottom, w, perp = box
@@ -5545,6 +5695,9 @@ class Game:
                 return True
         return False
 
+    def enemy_box(self, enemy):
+        return self.project(enemy.pos, enemy.t["height"], enemy.t["width"], enemy.t.get("lift", 0.0))
+
     def project(self, pos, height, width, lift=0.0):
         """월드 위치 → 화면 위치/크기. 시야 밖이면 None
         lift: 바닥에서 떠 있는 높이 (날아가는 수류탄 등)
@@ -5607,7 +5760,7 @@ class Game:
         for enemy, life, off in self.enemy_tracers:
             if enemy not in self.enemies:
                 continue
-            box = self.project(enemy.pos, enemy.t["height"], enemy.t["width"])
+            box = self.enemy_box(enemy)
             if not box:
                 continue
             sx, top, bottom, w, perp = box
@@ -5795,7 +5948,7 @@ class Game:
     def draw_sprites(self, screen):
         items = []     # (화면 위치, 그림, 적 또는 None)
         for enemy in self.enemies:
-            box = self.project(enemy.pos, enemy.t["height"], enemy.t["width"])
+            box = self.enemy_box(enemy)
             if box:
                 if enemy.flinch > 0:
                     state = enemy.flinch_pose
@@ -5892,6 +6045,23 @@ class Game:
                 pygame.draw.rect(screen, (80, 255, 120), (sx - size / 6, top - 3.6 * size, size / 3, size * 1.1))
         if lights:
             self.draw_lights(screen, lights)
+        # 레이저 저격수: 총구에서 내 쪽으로 빨간 선. 쏠 때가 다가올수록 조준점에 가까워져요
+        for enemy in self.enemies:
+            if enemy.kind != "LASER" or not enemy.sees or enemy.spotted < 0.3 or enemy.reload_left > 0:
+                continue
+            box = self.enemy_box(enemy)
+            if not box:
+                continue
+            sx, top, bottom, w, perp = box
+            col = int(sx // self.col_w)
+            if not (0 <= col < self.num_rays) or perp > self.zbuffer[col] + 0.3:
+                continue
+            start = (sx + w * 0.3, top + (bottom - top) * 0.45)
+            spread = min(1.0, enemy.shoot_timer / 2.0) * 160 * UI
+            t = pygame.time.get_ticks() / 300 + id(enemy) % 7
+            end = (WIDTH / 2 + math.sin(t) * spread, HEIGHT / 2 + 40 * UI + math.cos(t * 1.3) * spread * 0.6)
+            pygame.draw.line(screen, (255, 40, 40), start, end, max(1, int(2 * UI)))
+            pygame.draw.circle(screen, (255, 120, 120), end, max(2, int(4 * UI)))
 
     def draw_lights(self, screen, lights):
         for sx, top, bottom, w, perp in lights:
@@ -6136,7 +6306,7 @@ class Game:
             screen.blit(tint, (0, 0))
         if self.scan > 0:
             for enemy in self.enemies:
-                box = self.project(enemy.pos, enemy.t["height"], enemy.t["width"])
+                box = self.enemy_box(enemy)
                 if box:
                     sx, top = box[0], box[1]
                     size = 7 * UI
@@ -6209,6 +6379,18 @@ class Game:
             screen.blit(label, label.get_rect(center=(WIDTH / 2, HEIGHT - 54 * UI)))
 
         self.draw_compass(screen)
+        boss = next((e for e in self.enemies if e.kind == "BOSS"), None)
+        if boss:
+            bar = pygame.Rect(WIDTH * 0.3, HEIGHT * 0.075 + 28 * UI, WIDTH * 0.4, 10 * UI)
+            pygame.draw.rect(screen, (40, 20, 25), bar)
+            fill_rect = pygame.Rect(bar.x, bar.y, int(bar.w * max(0.0, boss.hp) / boss.t["hp"]), bar.h)
+            pygame.draw.rect(screen, (220, 40, 60) if getattr(boss, "phase", 1) < 3 else (255, 120, 40), fill_rect)
+            pygame.draw.rect(screen, WHITE, bar, 1)
+            for mark in (0.6, 0.3):                                     # 단계가 바뀌는 곳
+                x = bar.x + bar.w * mark
+                pygame.draw.line(screen, WHITE, (x, bar.y), (x, bar.bottom), 1)
+            label = self.small_font.render(f"BOSS  PHASE {getattr(boss, 'phase', 1)}", True, WHITE)
+            screen.blit(label, label.get_rect(midbottom=(WIDTH / 2, bar.y - 1)))
         # 위쪽 정보
         if self.mode == "mission":
             t = int(self.mission_time)
@@ -6216,6 +6398,10 @@ class Game:
                     f"{len(MISSION_STAGES)}   ENEMIES {len(self.enemies)}   KILLS {self.kills}   {t // 60}:{t % 60:02d}")
         elif self.mode == "training":
             info = f"TRAINING RANGE   {self.theme['name']}   TARGETS {len(self.enemies)}"
+        elif self.challenge:
+            t = self.challenge_time if self.challenge != "BLITZ" else max(0.0, BLITZ_TIME - self.challenge_time)
+            info = (f"CHALLENGE {self.challenge}   {self.theme['name']}   ENEMIES {len(self.enemies)}   "
+                    f"{'LEFT ' if self.challenge == 'BLITZ' else 'TIME '}{int(t) // 60}:{int(t) % 60:02d}")
         elif self.mode == "zombies":
             info = (f"WAVE {self.round}   {self.theme['name']}   "
                     f"ZOMBIES {len(self.enemies) + self.zombies_left}   KILLS {self.kills}")
@@ -6260,6 +6446,15 @@ class Game:
             self.center_text(screen, font, f"{self.theme['name']}   Time {t // 60}:{t % 60:02d}   Kills {self.kills}",
                              WHITE, HEIGHT / 2 + 10 * UI)
             self.center_text(screen, font, "R: play again    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
+        elif self.game_over and self.challenge_done:
+            self.center_text(screen, big_font, "CHALLENGE COMPLETE", (80, 240, 255), HEIGHT / 2 - 95 * UI)
+            self.center_text(screen, font, f"{self.challenge}   TIME {self.challenge_time:.1f}s   BEST {self.challenge_best:.1f}s",
+                             WHITE, HEIGHT / 2 - 45 * UI)
+            self.center_text(screen, font, "R: try again    ESC: menu", YELLOW, HEIGHT / 2 - 12 * UI)
+        elif self.game_over and self.challenge:
+            self.center_text(screen, big_font, self.fail_reason or "CHALLENGE FAILED", RED, HEIGHT / 2 - 40 * UI)
+            self.center_text(screen, font, f"{self.challenge}   Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
+            self.center_text(screen, font, "R: try again    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
         elif self.game_over and self.mode == "mission":
             self.center_text(screen, big_font, self.fail_reason or "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
             self.center_text(screen, font, f"Stage {self.stage + 1}  /  Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
@@ -6746,6 +6941,58 @@ async def controls_screen(save):
         await asyncio.sleep(0)
 
 
+async def challenge_screen(save):
+    """도전 모드 고르기: ↑↓ 고르기, Enter 시작, ESC 돌아가기"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    row = 0
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key == pygame.K_ESCAPE:
+                return None
+            if event.key in (pygame.K_UP, pygame.K_w):
+                row = (row - 1) % len(CHALLENGES)
+            elif event.key in (pygame.K_DOWN, pygame.K_s):
+                row = (row + 1) % len(CHALLENGES)
+            elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                return dict(mode="campaign", round=1, challenge=CHALLENGES[row][0])
+        screen.fill((14, 10, 30))
+        title = fonts["big"].render("CHALLENGES", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
+        records = save.get("challenges", {})
+        today = str(datetime.date.today())
+        for i, (name, round_no, desc_ko, desc_en) in enumerate(CHALLENGES):
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.2 + i * 0.13), WIDTH * 0.88, HEIGHT * 0.11)
+            selected = i == row
+            pygame.draw.rect(screen, (60, 40, 90) if selected else (24, 18, 44), rect, border_radius=8)
+            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1,
+                             border_radius=8)
+            label = fonts["normal"].render(name + (f"  ({today})" if name == "DAILY" else ""), True, WHITE)
+            screen.blit(label, (rect.x + 16, rect.y + rect.h * 0.12))
+            desc = fonts["help"].render(desc_ko if ko else desc_en, True, (200, 230, 255))
+            screen.blit(desc, (rect.x + 16, rect.y + rect.h * 0.58))
+            if name == "DAILY":
+                daily = save.get("daily", {})
+                best = daily.get("best") if daily.get("date") == today else None
+            else:
+                best = records.get(name)
+            text = f"BEST {best:.1f}s" if best else "-"
+            image = fonts["normal"].render(text, True, YELLOW if best else (140, 140, 160))
+            screen.blit(image, image.get_rect(midright=(rect.right - 20, rect.centery)))
+        hint = "↑↓ 고르기   Enter 시작   ESC 돌아가기" if ko else "UP/DOWN choose   ENTER start   ESC back"
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
 async def achievements_screen(save):
     """업적과 누적 기록. ←→ 로 위장 무늬 고르기 (업적을 모을수록 늘어나요), ESC 저장하고 돌아가기"""
     screen = pygame.display.get_surface()
@@ -6845,6 +7092,11 @@ async def intro_screen(save):
                 return dict(mode="zombies", round=1)
             if event.key == pygame.K_r:
                 return dict(mode="training", round=1)
+            if event.key == pygame.K_x:
+                picked = await challenge_screen(save)
+                if picked == "closed" or picked:
+                    return picked
+                continue
             if event.key == pygame.K_a:
                 if await achievements_screen(save) == "closed":
                     return "closed"
@@ -6891,6 +7143,7 @@ async def intro_screen(save):
             parts.append(f"T 해상도 {w}x{h}{note}" if ko else f"T resolution {w}x{h}{note}")
         parts.append("O 미션" if ko else "O missions")
         parts.append("R 사격장" if ko else "R training range")
+        parts.append("X 도전" if ko else "X challenges")
         parts.append("A 업적" if ko else "A achievements")
         parts.append("K 스킬" if ko else "K skills")
         parts.append("S 설정" if ko else "S settings")
@@ -7244,7 +7497,7 @@ async def run():
     training = choice["mode"] == "training"
     # 사격장은 저장 정보의 복사본으로 (무엇을 해도 진짜 저장에는 남지 않아요)
     game = Game(copy.deepcopy(save) if training else save, choice["round"], mode=choice["mode"], loadout=loadout,
-                mission=choice.get("mission", 0), stage=choice.get("stage", 0))
+                mission=choice.get("mission", 0), stage=choice.get("stage", 0), challenge=choice.get("challenge"))
     running = True
     closed = False             # 창을 닫았는지 여부
     work_time, frames, check_timer = 0.0, 0, 0.0   # 자동 해상도 조절용 기록
