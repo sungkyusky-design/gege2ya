@@ -3833,11 +3833,11 @@ class Game:
             self.sub_banners.insert(1, (f"OBJECTIVE: {OBJECTIVES[kind]['title']}", OBJECTIVES[kind]["color"]))
 
     def reset_round_state(self):
+        """라운드(웨이브)마다 새로 시작하는 것들"""
         self.contact_timer = 0.0       # 적이 나를 보고 있었던 뒤로 지난 시간 (CONTACT! 외침용)
         self.callout_cooldown = 0.0
         self.squad_timer = 0.0
         self.last_known = None
-        """라운드(웨이브)마다 새로 시작하는 것들"""
         self.projectiles = []
         self.effects = []
         self.tracers = []          # 내 총알 궤적: [x0, y0, x1, y1, 남은 시간]
