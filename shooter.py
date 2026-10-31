@@ -95,7 +95,7 @@ from strike.units import (HORIZONTAL_KICK, START_WEAPONS, UNLOCKS, PERKS, WEAPON
 from strike.sounds import SOUND_RECIPES, SOUND_MARK_KINDS, MUFFLED_SOUNDS, STEP_SOUNDS, ENEMY_STEPS, GUN_SOUNDS
 from strike.story import CHALLENGES, STORY, RADIO, HELP_TEXT
 
-from browser import load_save, prepare_window, write_save, copy_text, paste_text
+from browser import load_save, prepare_window, write_save, copy_text, paste_text, save_picture
 
 # ---------------------------------------------------------------
 # 화면 / 게임 설정값
@@ -475,6 +475,8 @@ PRIMARIES = ["RIFLE", "HEAVY AR", "BURST", "SMG", "SHOTGUN", "AUTO SHOTGUN", "LM
 SECONDARIES = ["PISTOL", "REVOLVER", "MACHINE PISTOL", "ROCKET", "LAUNCHER"]
 DEFAULT_LOADOUT = dict(primary="RIFLE", secondary="PISTOL", perk="HEAVY ROUNDS", tactical="FLASHBANG")
 TACTICAL_COUNT = 2                # 라운드마다 전술 장비 개수
+# 하이라이트: 0.1초마다 작은 화면을 기억해 두었다가, 라운드의 가장 멋진 순간을 끝날 때 다시 보여줘요
+CLIP_FPS, CLIP_BEFORE, CLIP_AFTER, CLIP_SIZE = 10, 2.5, 0.8, (320, 180)
 # 좀비 모드 2탄: B 로 사는 것들 (가까이 가면 화면 아래에 이름과 가격)
 BARRICADE_COST = 750
 WALL_WEAPONS = [("SMG", 1000), ("SHOTGUN", 1250), ("AUTO SHOTGUN", 1750)]   # 맵의 'y' 를 읽는 순서대로
@@ -3076,6 +3078,11 @@ class Game:
         self.squad_order = 0       # SQUAD_ORDERS 중 몇 번째
         self.flashlight = False    # 손전등 (L)
         self.chopper = None        # 지원 헬기 (킬스트릭)
+        self.clip_frames = []      # 최근 장면들 (하이라이트용)
+        self.clip_timer = 0.0
+        self.highlight = None      # 이번 라운드 최고의 순간: dict(label, score, frames)
+        self.frame_dt = 1 / 60
+        self.recording = None      # 하이라이트를 찍는 중 (순간 뒤 조금 더)
         self.mounted = None        # 지금 타고 있는 고정 기관총
         self.mg_heat = 0.0
         self.turrets = []
@@ -3624,6 +3631,23 @@ class Game:
         if self.dark_mult is not None:
             screen.blit(self.dark_mult, (0, 0), special_flags=pygame.BLEND_MULT)
 
+    def draw_highlight(self, screen):
+        """라운드가 끝나면 오른쪽에 최고의 순간을 다시 보여줘요 (반복)"""
+        frames = self.highlight["frames"]
+        if not frames:
+            return
+        shown = self.round_clear_timer
+        k = int((10.0 - shown) * CLIP_FPS * 0.8) % len(frames)           # 조금 느리게
+        w, h = int(WIDTH * 0.26), int(WIDTH * 0.26 * 9 / 16)
+        frame = pygame.transform.scale(frames[k], (w, h))
+        rect = frame.get_rect(topright=(WIDTH - 16 * UI, HEIGHT * 0.31))
+        pygame.draw.rect(screen, (255, 80, 200), rect.inflate(6, 6), 3)
+        screen.blit(frame, rect)
+        label = self.small_font.render(f"HIGHLIGHT: {self.highlight['label']}", True, (255, 220, 90))
+        screen.blit(label, label.get_rect(bottomleft=(rect.x, rect.y - 6)))
+        if k % 10 < 6:                                                  # 깜빡이는 다시보기 표시
+            pygame.draw.circle(screen, RED, (rect.right - 14 * UI, rect.y + 14 * UI), 6 * UI)
+
     def draw_radio(self, screen):
         """본부 무전: 왼쪽 가운데에 'HQ' 상자와 한 글자씩 나오는 말"""
         text, age = self.radio_msg
@@ -3939,6 +3963,7 @@ class Game:
         self.low_warned = False        # 체력 낮음 무전을 이번 라운드에 했는지
         self.tactical_left = TACTICAL_COUNT + (1 if self.perk == "SCAVENGER" else 0)
         self.mounted, self.mg_heat = None, 0.0
+        self.highlight, self.recording, self.clip_frames = None, None, []
         self.cooking = None
         SMOKES.clear()
         self.spawn_allies()
@@ -4779,6 +4804,7 @@ class Game:
 
     # ----- 게임 진행 -----
     def update(self, dt, keys, mouse_dx, mouse_dy, buttons):
+        self.frame_dt = dt
         if self.show_help:          # 도움말을 보는 동안은 멈춰요
             return
         if self.briefing is not None:   # 세트 브리핑: 스페이스/사격/클릭(패드 A)으로 시작
@@ -5455,6 +5481,7 @@ class Game:
             xp //= 2                                     # 동료가 쓰러뜨림: 절반
         self.add_xp(xp, f"+{xp}")
 
+        self.score_highlight(enemy, how)
         # 3초 안에 또 쓰러뜨리면 연속 처치 메달
         self.multi = self.multi + 1 if self.time - self.last_kill < 3 else 1
         self.last_kill = self.time
@@ -5476,6 +5503,40 @@ class Game:
                     self.sounds.play("streak")
                     self.popups.append([f"{name} READY!  press X", (80, 240, 255), 2.5])
         self.check_achievements()
+
+    def score_highlight(self, enemy, how):
+        """이 처치가 이번 라운드의 가장 멋진 순간인지 (연속 처치, 몰래 처치, 먼 헤드샷, 보스)"""
+        if how in STREAK_KILLS or self.mode == "training":
+            return
+        multi = self.multi + 1 if self.time - self.last_kill < 3 else 1
+        score, label = 1, "KILL"
+        dist = enemy.pos.distance_to(self.player.pos)
+        if multi >= 2:
+            score, label = 2 + multi, {2: "DOUBLE KILL", 3: "TRIPLE KILL"}.get(multi, "MULTI KILL")
+        if how == "TAKEDOWN!":
+            score, label = max(score, 4), "SILENT TAKEDOWN"
+        if how == "HEADSHOT!" and dist > 14:
+            score, label = max(score, 4), f"LONG SHOT {dist:.0f}m"
+        if enemy.kind in ("BOSS", "TITAN"):
+            score, label = 9, f"{getattr(enemy, 'name', enemy.kind)} DOWN"
+        best = max(self.highlight["score"] if self.highlight else 0, self.recording["score"] if self.recording else 0)
+        if score >= max(2, best + (0 if self.recording and self.recording["label"] == label else 1)):
+            self.recording = dict(label=label, score=score, frames=list(self.clip_frames), after=CLIP_AFTER)
+
+    def capture_clip(self, screen, dt):
+        """0.1초마다 작은 화면 한 장 (최근 2.5초만 기억)"""
+        self.clip_timer -= dt
+        if self.clip_timer > 0:
+            return
+        self.clip_timer = 1 / CLIP_FPS
+        frame = pygame.transform.scale(screen, CLIP_SIZE)
+        self.clip_frames.append(frame)
+        del self.clip_frames[:-int(CLIP_BEFORE * CLIP_FPS)]
+        if self.recording:
+            self.recording["frames"].append(frame)
+            self.recording["after"] -= 1 / CLIP_FPS
+            if self.recording["after"] <= 0:
+                self.highlight, self.recording = self.recording, None
 
     def check_achievements(self):
         """새로 이룬 업적을 알려줘요 (위장 무늬를 새로 얻으면 그것도)"""
@@ -5962,7 +6023,7 @@ class Game:
         return sx, bottom - size * height, bottom, size * width, perp
 
     # ----- 화면 그리기 -----
-    def draw(self, screen):
+    def draw(self, screen, hud=True):
         if self.game_over and self.killcam_from is not None and self.killcam_time < KILLCAM_TIME:
             self.draw_killcam(screen)
             return
@@ -5979,6 +6040,8 @@ class Game:
             self.draw_snow(screen)
         if self.theme.get("rain"):
             self.draw_rain(screen)
+        if not hud:                                       # 사진 모드: 총과 화면 글자 없이
+            return
         if self.scoped:
             screen.blit(self.scope_overlay, (0, 0))
             label = self.font.render(f"x{self.zoom}", True, WHITE)
@@ -5995,6 +6058,13 @@ class Game:
             self.flash_overlay.set_alpha(int(255 * min(1.0, self.flashed / 1.2)))
             screen.blit(self.flash_overlay, (0, 0))
         self.draw_hud(screen)
+        if self.round_clear_timer <= 0 and not self.game_over and self.briefing is None:
+            self.capture_clip(screen, self.frame_dt)
+        elif self.round_clear_timer > 0:
+            if self.recording:                               # 마지막 처치로 끝났으면 찍던 장면을 그대로
+                self.highlight, self.recording = self.recording, None
+            if self.highlight:
+                self.draw_highlight(screen)
         if self.radio_msg and not self.game_over:
             self.draw_radio(screen)
         if self.briefing is not None:
@@ -8036,7 +8106,83 @@ async def loadout_screen(save, choice):
         await asyncio.sleep(0)
 
 
-PAUSE_ITEMS = ["RESUME", "HELP", "SETTINGS", "QUIT TO MENU"]
+PAUSE_ITEMS = ["RESUME", "HELP", "SETTINGS", "PHOTO MODE", "QUIT TO MENU"]
+
+
+async def photo_mode(game):
+    """사진 모드 (일시정지 → PHOTO MODE): 게임이 멈춘 채로 카메라만 자유롭게.
+    WASD 이동, 화살표 시점, 1~4 필터, H 글자 숨기기, 스페이스 사진 저장, ESC 돌아가기"""
+    screen = pygame.display.get_surface()
+    clock = pygame.time.Clock()
+    p = game.player
+    saved = (pygame.Vector2(p.pos), p.angle, p.pitch)
+    filters = ["NORMAL", "BLACK & WHITE", "SEPIA", "VIGNETTE"]
+    filt, show_text, message, msg_time = 0, True, "", 0.0
+    vignette = pygame.Surface((160, 90))
+    vignette.fill((255, 255, 255))
+    for r in range(95, 0, -3):
+        v = int(255 - 150 * (r / 95) ** 1.8)
+        pygame.draw.ellipse(vignette, (v, v, v), (80 - r * 1.1, 45 - r * 0.62, r * 2.2, r * 1.24))
+    vignette = pygame.transform.smoothscale(vignette, (WIDTH, HEIGHT))
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+
+    def render():
+        game.draw(screen, hud=False)
+        if filt == 1:
+            screen.blit(pygame.transform.grayscale(screen), (0, 0))
+        elif filt == 2:
+            screen.blit(pygame.transform.grayscale(screen), (0, 0))
+            screen.fill((255, 225, 175), special_flags=pygame.BLEND_MULT)
+        elif filt == 3:
+            screen.blit(vignette, (0, 0), special_flags=pygame.BLEND_MULT)
+
+    while True:
+        dt = min(0.05, clock.tick(30) / 1000)
+        msg_time -= dt
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                p.pos, p.angle, p.pitch = saved
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key == pygame.K_ESCAPE:
+                p.pos, p.angle, p.pitch = saved                  # 카메라를 원래 자리로
+                return None
+            if event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
+                filt = event.key - pygame.K_1
+            elif event.key == pygame.K_h:
+                show_text = not show_text
+            elif event.key == pygame.K_SPACE:
+                render()
+                where = save_picture(screen)
+                message = (f"사진 저장: {where}" if ko else f"Saved: {where}") if where else \
+                    ("저장하지 못했어요" if ko else "Could not save")
+                msg_time = 3.0
+        keys = pygame.key.get_pressed()
+        forward = pygame.Vector2(math.cos(p.angle), math.sin(p.angle))
+        side = pygame.Vector2(-forward.y, forward.x)
+        move = pygame.Vector2()
+        move += forward * ((keys[pygame.K_w]) - (keys[pygame.K_s]))
+        move += side * ((keys[pygame.K_d]) - (keys[pygame.K_a]))
+        if move.length() > 0:
+            move_with_collision(p.pos, move.normalize() * 3.0 * dt)
+        p.angle += (keys[pygame.K_RIGHT] - keys[pygame.K_LEFT]) * 1.6 * dt
+        p.pitch = max(-MAX_PITCH, min(MAX_PITCH, p.pitch + (keys[pygame.K_UP] - keys[pygame.K_DOWN]) * 300 * UI * dt))
+        render()
+        if show_text:
+            hint = (f"사진 모드  [{filters[filt]}]   WASD 이동  화살표 시점  1~4 필터  H 글자 숨기기  스페이스 사진 저장  ESC 돌아가기"
+                    if ko else f"PHOTO MODE [{filters[filt]}]  WASD move  ARROWS look  1-4 filter  H hide  SPACE save  ESC back")
+            image = fonts["help"].render(hint, True, WHITE)
+            panel = pygame.Surface((image.get_width() + 20, image.get_height() + 10), pygame.SRCALPHA)
+            panel.fill((0, 0, 0, 150))
+            screen.blit(panel, panel.get_rect(midbottom=(WIDTH / 2, HEIGHT - 10)))
+            screen.blit(image, image.get_rect(midbottom=(WIDTH / 2, HEIGHT - 15)))
+        if msg_time > 0:
+            image = fonts["help"].render(message, True, (80, 255, 120))
+            screen.blit(image, image.get_rect(midtop=(WIDTH / 2, 12)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
 
 
 def draw_pause(screen, fonts, row):
@@ -8142,6 +8288,9 @@ async def run():
                 if await settings_screen(save) == "closed":
                     running, closed = False, True
                 game.sounds.refresh_background()
+            elif choice == "PHOTO MODE":
+                if await photo_mode(game) == "closed":
+                    running, closed = False, True
             elif choice == "QUIT TO MENU":
                 running = False
             if not running:

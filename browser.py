@@ -108,3 +108,31 @@ def paste_text():
             return f.read()
     except Exception:
         return ""
+
+
+def save_picture(surface):
+    """사진 저장. 컴퓨터: 사진 폴더(Pictures/StrikeZone), 웹: 파일 내려받기. 어디에 저장했는지 돌려줘요."""
+    import time
+    name = time.strftime("strikezone_%Y%m%d_%H%M%S.png")
+    if IN_BROWSER:
+        try:
+            import base64
+            import io
+            import platform
+            buffer = io.BytesIO()
+            pygame.image.save(surface, buffer, "png")
+            data = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+            link = platform.window.document.createElement("a")
+            link.href, link.download = data, name
+            link.click()
+            return "download"
+        except Exception:
+            return ""
+    try:
+        folder = os.path.join(os.path.expanduser("~"), "Pictures", "StrikeZone")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, name)
+        pygame.image.save(surface, path)
+        return path
+    except Exception:
+        return ""
