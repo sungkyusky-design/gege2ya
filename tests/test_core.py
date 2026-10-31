@@ -281,6 +281,33 @@ class GameTest(unittest.TestCase):
         self.assertEqual(save["xp"], 100)                                # 연습: 경험치 없음
         self.assertNotIn("lifetime", save)
 
+    def test_ranking_keeps_top_ten_in_order(self):
+        save = {}
+        places = [shooter.add_ranking(save, "zombies", dict(score=s)) for s in (50, 10, 30)]
+        self.assertEqual(places, [1, 2, 2])                               # 30 은 50 다음, 10 위로
+        for s in range(20):
+            shooter.add_ranking(save, "zombies", dict(score=100 + s))
+        table = save["rankings"]["zombies"]
+        self.assertEqual(len(table), shooter.RANK_SIZE)
+        self.assertEqual([e["score"] for e in table], sorted([e["score"] for e in table], reverse=True))
+        self.assertIsNone(shooter.add_ranking(save, "zombies", dict(score=1)))   # 10등 밖
+        self.assertEqual(shooter.add_ranking(save, "zombies", dict(score=119)), 2)  # 같은 점수는 먼저 세운 기록이 위
+
+    def test_zombie_death_goes_to_ranking_once(self):
+        save = {}
+        game = shooter.Game(save, 1, mode="zombies", loadout=LOADOUT)
+        game.add_xp(500)
+        game.player.hp = 0
+        game.update(1 / 60, Keys(), 0, 0, (False, False, False))
+        self.assertTrue(game.game_over)
+        game.finish_run()                                                 # 메뉴로 나가도 두 번 들어가지 않아요
+        table = save["rankings"]["zombies"]
+        self.assertEqual(len(table), 1)
+        self.assertEqual((table[0]["score"], table[0]["reached"]), (500, 1))
+        self.assertEqual(game.run_place, 1)
+        game.retry_round()                                                # 다시 하면 새 판
+        self.assertEqual(game.run_score, 0)
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
