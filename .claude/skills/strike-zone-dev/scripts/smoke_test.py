@@ -90,7 +90,8 @@ async def menus():
     try:
         save = rich_save()
         for screen_fn, args in ((shooter.settings_screen, (save,)), (shooter.skills_screen, (save,)),
-                                (shooter.mission_screen, (save,)),
+                                (shooter.mission_screen, (save,)), (shooter.controls_screen, (save,)),
+                                (shooter.achievements_screen, (save,)),
                                 (shooter.loadout_screen, (save, dict(mode="campaign", round=1)))):
             script[:] = [[], []]
             await screen_fn(*args)
@@ -98,7 +99,7 @@ async def menus():
         await shooter.intro_screen(save)
     finally:
         shooter.menu_events = real
-    print("OK  menus (settings, skills, missions, loadout, intro)")
+    print("OK  menus (settings, skills, missions, controls, achievements, loadout, intro)")
 
 
 def main():
@@ -109,6 +110,7 @@ def main():
     loadout = dict(primary="RIFLE", secondary="PISTOL", perk="HEAVY ROUNDS")
     cases = [(f"campaign round {r}", dict(start_round=r, mode="campaign")) for r in (1, 23, 47, 66, 100)]
     cases.append(("zombies", dict(start_round=1, mode="zombies")))
+    cases.append(("training range", dict(start_round=1, mode="training")))
     cases += [(f"mission {m['name']}", dict(start_round=1, mode="mission", mission=i))
               for i, m in enumerate(shooter.MISSIONS)]
     failed = False

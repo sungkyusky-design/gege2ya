@@ -74,6 +74,7 @@ RPG: 계급이 오르면 스킬 포인트(K), 계급/점수로 새 무기를 얻
 """
 
 import array
+import copy
 import asyncio
 import math
 import random
@@ -122,6 +123,104 @@ ASSIST_STICKY = [1.0, 0.75, 0.55, 0.4]     # 조준점이 적 위에 있을 때 
 # 난이도: (이름, 적 실력 배율, 내가 받는 피해 배율)
 DIFFICULTIES = [("RECRUIT", 0.7, 0.45), ("EASY", 0.85, 0.65), ("NORMAL", 1.0, 1.0),
                 ("HARD", 1.2, 1.35), ("VETERAN", 1.4, 1.8)]
+
+
+# ----- 키 바꾸기 -----
+# (이름, 기본 키, 한국어 설명). 게임 코드는 언제나 '기본 키'로 생각하고, 실제로 누른 키를 기본 키로 바꿔서 넘겨줘요.
+KEY_ACTIONS = [
+    ("FORWARD", pygame.K_w, "앞으로"), ("BACK", pygame.K_s, "뒤로"), ("LEFT", pygame.K_a, "왼쪽"),
+    ("RIGHT", pygame.K_d, "오른쪽"), ("SPRINT", pygame.K_LSHIFT, "달리기"), ("CROUCH", pygame.K_c, "앉기 / 슬라이딩"),
+    ("JUMP", pygame.K_SPACE, "점프"), ("FIRE", pygame.K_f, "사격"), ("AIM", pygame.K_e, "정조준"),
+    ("RELOAD", pygame.K_r, "재장전"), ("GRENADE", pygame.K_g, "수류탄"), ("KNIFE", pygame.K_v, "칼"),
+    ("STREAK", pygame.K_x, "킬스트릭"), ("NEXT WEAPON", pygame.K_q, "무기 바꾸기"), ("SCOPE ZOOM", pygame.K_z, "조준경 배율"),
+    ("FOCUS", pygame.K_t, "스킬: 집중"), ("MEDKIT", pygame.K_y, "스킬: 구급상자"), ("SCAN", pygame.K_j, "스킬: 탐지"),
+    ("SHOP AMMO", pygame.K_b, "좀비 상점: 탄약"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
+]
+# 바꿀 수 없는 키: 메뉴/시점/전체 화면
+KEY_FIXED = (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_UP, pygame.K_DOWN,
+             pygame.K_LEFT, pygame.K_RIGHT, pygame.K_F11)
+KEY_MAP = {}      # 실제로 누른 키 -> 게임이 알아듣는 키 (바꾼 것만)
+KEY_INV = {}      # 게임이 알아듣는 키 -> 실제로 눌러야 하는 키
+
+
+def apply_keys(saved):
+    """저장된 키 설정 적용 (save["keys"]: {"누른 키 번호": 기본 키 번호})"""
+    KEY_MAP.clear()
+    for physical, logical in saved.items():
+        if int(physical) != int(logical):
+            KEY_MAP[int(physical)] = int(logical)
+    KEY_INV.clear()
+    KEY_INV.update({logical: physical for physical, logical in KEY_MAP.items()})
+
+
+def bound_key(default):
+    """그 기능을 하려면 실제로 누를 키"""
+    return KEY_INV.get(default, default)
+
+
+def key_label(key):
+    return pygame.key.name(key).upper() or "?"
+
+
+def rebind(default, new_key):
+    """default 기능을 new_key로 옮겨요. new_key가 원래 하던 일은 이 기능이 쓰던 키로 (서로 바꾸기)"""
+    old = bound_key(default)
+    displaced = KEY_MAP.get(new_key, new_key)
+    KEY_MAP[new_key] = default
+    KEY_MAP[old] = displaced
+    apply_keys(dict(KEY_MAP))
+
+
+def saved_keys():
+    return {str(physical): logical for physical, logical in KEY_MAP.items()}
+
+
+class RemappedKeys:
+    """누르고 있는 키 상태도 바꾼 키에 맞게 읽어요"""
+
+    def __init__(self, pressed):
+        self.pressed = pressed
+
+    def __getitem__(self, key):
+        return self.pressed[KEY_INV.get(key, key)]
+
+
+def remap_event(event):
+    if event.type in (pygame.KEYDOWN, pygame.KEYUP) and event.key in KEY_MAP:
+        return pygame.event.Event(event.type, dict(event.dict, key=KEY_MAP[event.key]))
+    return event
+
+
+# ----- 업적과 위장 무늬 -----
+# 누적 기록 save["lifetime"]: kills, heads, knife, explosive, rounds, streak
+ACHIEVEMENTS = [
+    ("FIRST BLOOD", "처음으로 적 처치", "Get your first kill", lambda s, l: l.get("kills", 0) >= 1),
+    ("CENTURION", "누적 100명 처치", "100 total kills", lambda s, l: l.get("kills", 0) >= 100),
+    ("WAR MACHINE", "누적 1000명 처치", "1000 total kills", lambda s, l: l.get("kills", 0) >= 1000),
+    ("HEADHUNTER", "헤드샷 50번", "50 headshots", lambda s, l: l.get("heads", 0) >= 50),
+    ("DEADEYE", "헤드샷 300번", "300 headshots", lambda s, l: l.get("heads", 0) >= 300),
+    ("CLOSE QUARTERS", "칼로 10명 처치", "10 knife kills", lambda s, l: l.get("knife", 0) >= 10),
+    ("DEMOLITION", "폭발로 25명 처치", "25 explosive kills", lambda s, l: l.get("explosive", 0) >= 25),
+    ("ON FIRE", "한 판에서 연속 10명 처치", "10 kill streak", lambda s, l: l.get("streak", 0) >= 10),
+    ("VETERAN", "라운드/웨이브 50번 깨기", "Clear 50 rounds or waves", lambda s, l: l.get("rounds", 0) >= 50),
+    ("SET ONE", "캠페인 21라운드 도착", "Reach campaign round 21", lambda s, l: s.get("best", 0) >= 21),
+    ("HALFWAY", "캠페인 51라운드 도착", "Reach campaign round 51", lambda s, l: s.get("best", 0) >= 51),
+    ("LEGEND", "캠페인 100라운드 도착", "Reach campaign round 100", lambda s, l: s.get("best", 0) >= 100),
+    ("SURVIVOR", "좀비 10웨이브 도착", "Reach zombie wave 10", lambda s, l: s.get("zbest", 0) >= 10),
+    ("OPERATOR", "미션 하나 끝내기", "Complete a mission", lambda s, l: len(s.get("missions_done", [])) >= 1),
+    ("ARSENAL", "무기 10종 얻기", "Own 10 weapons", lambda s, l: len(unlocked_weapons(s)) >= 10),
+]
+# 위장 무늬: (이름, 필요한 업적 수, 몸통 색, 무늬 색)
+CAMOS = [("NONE", 0, None, None), ("ARCTIC", 2, (225, 230, 235), (150, 160, 175)),
+         ("JUNGLE", 4, (75, 100, 55), (45, 62, 35)), ("CRIMSON", 7, (150, 28, 34), (92, 16, 22)),
+         ("DIAMOND", 11, (170, 235, 250), (90, 170, 210))]
+CAMO_COLORS = {name: (body, accent) for name, need, body, accent in CAMOS if body}
+CAMO_COLORS["gold"] = ((212, 175, 55), (165, 128, 35))
+
+
+def earned_camos(save):
+    count = len(save.get("achievements", []))
+    return [name for name, need, body, accent in CAMOS if count >= need]
 
 
 def apply_settings(settings):
@@ -405,6 +504,12 @@ WEAPON_BY_NAME = {spec["name"]: spec for spec in WEAPONS}
 #   height / width : 크기 (눈높이 0.5 기준)
 #   look     : 생김새 (옷 색, 머리 장비, 총 길이)
 ENEMY_TYPES = {
+    # 사격장 과녁: 움직이지도 쏘지도 않아요
+    "TARGET": dict(hp=100, speed=0.0, sight=0, reaction=99, keep=0, range=0,
+                   fire=(9, 9), damage=(0, 0), accuracy=0.0, falloff=0.0,
+                   height=0.92, width=0.5,
+                   look=dict(uniform=(205, 175, 125), vest=(230, 70, 60), pants=(150, 120, 80),
+                             head="helmet", gun=0)),
     "GRUNT": dict(hp=100, speed=1.4, sight=14, reaction=0.7, keep=4, range=14,
                   fire=(0.35, 0.9), damage=(7, 13), accuracy=0.65, falloff=0.045,
                   height=0.9, width=0.45,
@@ -2603,8 +2708,9 @@ def make_viewmodel(name, ads, camo=None):
     """총 그림을 미리 그려 둬요. (그림, 화면 위치, 총구 위치)를 돌려줘요. camo="gold"면 금색 총"""
     canvas = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
     look = GUN_LOOKS[name]
-    if camo == "gold":
-        look = dict(look, body=(212, 175, 55), accent=(165, 128, 35))
+    if camo in CAMO_COLORS:                   # 금색(무기 레벨) 또는 업적으로 얻은 위장 무늬
+        body, accent = CAMO_COLORS[camo]
+        look = dict(look, body=body, accent=accent)
     muzzle = (draw_ads_gun if ads else draw_hip_gun)(canvas, look)
     rect = canvas.get_bounding_rect()
     return canvas.subsurface(rect).copy(), (rect.x, rect.y), (muzzle.x, muzzle.y)
@@ -3547,7 +3653,11 @@ class Game:
     def weapon_spec(self, name):
         """그 무기의 지금 성능 (처치 수에 따른 레벨과 부착물 적용)"""
         kills = self.save.get("wkills", {}).get(name, 0)
-        return apply_mods(WEAPON_BY_NAME[name], weapon_mods(kills), weapon_level(kills))
+        spec = apply_mods(WEAPON_BY_NAME[name], weapon_mods(kills), weapon_level(kills))
+        camo = self.save.get("camo", "NONE")
+        if camo != "NONE" and camo in earned_camos(self.save):
+            spec["camo"] = camo                         # 업적 화면에서 고른 위장 무늬
+        return spec
 
     def make_arsenal(self):
         """가진 무기를 모두 챙겨요 (인벤토리). 로드아웃의 시작 무기를 들고, 퍼크와 스킬도 적용해요."""
@@ -3568,7 +3678,7 @@ class Game:
 
     def check_unlocks(self):
         """조건을 채운 무기를 얻어요. 얻는 순간 바로 들고 쓸 수 있어요."""
-        if not self.loadout:
+        if not self.loadout or self.mode == "training":
             return
         earned = self.save.setdefault("unlocked", [])
         for name, (kind, need) in UNLOCKS.items():
@@ -3647,7 +3757,9 @@ class Game:
         return random.choice(pool)
 
     def start_round(self):
-        if self.mode == "zombies":
+        if self.mode == "training":
+            self.start_training()
+        elif self.mode == "zombies":
             self.start_wave()
         elif self.mode == "mission":
             self.start_mission()
@@ -3656,6 +3768,112 @@ class Game:
         self.reset_round_state()
         if self.mode == "mission":
             self.banner_timer = 5.0
+
+    def start_training(self):
+        """사격장: 움직이지 않는 과녁, 경험치/저장 없음, 단계별 연습 (화면 위 안내)"""
+        index = CAMPAIGN_MAPS[0]
+        if getattr(self, "map_key", None) != (index, 1):
+            self.setup_map(index, 1)
+        start = pygame.Vector2(find_cells("P")[0])
+        self.player = Player(start.x, start.y)
+        self.player.hp = self.max_hp
+        self.arsenal = self.make_arsenal()
+        # 과녁 자리: 나에게서 4~18칸, 곧장 보이는 곳
+        cells = [pygame.Vector2(x + 0.5, y + 0.5) for y in range(MAP_H) for x in range(MAP_W)]
+        self.target_spots = [c for c in cells if 4 < c.distance_to(start) < 18
+                             and not is_blocked(c.x, c.y) and can_see(start, c)]
+        self.enemies = []
+        for _ in range(6):
+            self.spawn_target()
+        if self.enemies:
+            middle = sum((e.pos for e in self.enemies), pygame.Vector2()) / len(self.enemies) - start
+            self.player.angle = math.atan2(middle.y, middle.x)
+        self.pickups = []
+        self.objective = None
+        self.zombies_left = 0
+        self.target_timer = 0.0
+        self.tutorial_step = 0
+        self.keys_seen = set()
+        self.start_angle = self.player.angle
+        self.banner = "TRAINING RANGE"
+        self.sub_banners = [("NO XP, NO SAVE - PRACTICE FREELY", WHITE), ("ESC: MENU", (200, 200, 255))]
+
+    def spawn_target(self):
+        free = [c for c in self.target_spots if all(c.distance_to(e.pos) > 1.5 for e in self.enemies)]
+        if free:
+            c = random.choice(free)
+            self.enemies.append(Enemy(c.x, c.y, "TARGET", 1.0))
+
+    def tutorial_steps(self):
+        """사격장 안내: (한국어, 영어, 다 했는지 검사)"""
+        k = key_label
+        seen = self.keys_seen
+        move = "/".join(k(bound_key(d)) for d in (pygame.K_w, pygame.K_a, pygame.K_s, pygame.K_d))
+        return [
+            (f"{move} 로 걸어 보세요", f"Walk with {move}", lambda: seen & {pygame.K_w, pygame.K_a, pygame.K_s, pygame.K_d}),
+            ("화살표 ← → 로 둘러보세요", "Look around with the arrow keys",
+             lambda: abs(self.player.angle - self.start_angle) > 0.3),
+            (f"{k(bound_key(pygame.K_f))} 로 과녁을 쏘세요", f"Shoot a target with {k(bound_key(pygame.K_f))}",
+             lambda: self.stats["hits"] > 0),
+            (f"{k(bound_key(pygame.K_e))} 로 정조준하세요", f"Aim down sights with {k(bound_key(pygame.K_e))}",
+             lambda: self.aiming),
+            (f"{k(bound_key(pygame.K_r))} 로 재장전하세요", f"Reload with {k(bound_key(pygame.K_r))}",
+             lambda: pygame.K_r in seen),
+            (f"{k(bound_key(pygame.K_q))} 로 무기를 바꾸세요", f"Switch weapons with {k(bound_key(pygame.K_q))}",
+             lambda: seen & {pygame.K_q, pygame.K_TAB, pygame.K_1, pygame.K_2, pygame.K_3}),
+            (f"{k(bound_key(pygame.K_c))} 로 앉아 보세요", f"Crouch with {k(bound_key(pygame.K_c))}",
+             lambda: pygame.K_c in seen),
+            (f"{k(bound_key(pygame.K_SPACE))} 로 점프하세요", f"Jump with {k(bound_key(pygame.K_SPACE))}",
+             lambda: pygame.K_SPACE in seen),
+            (f"{k(bound_key(pygame.K_g))} 로 수류탄을 던지세요", f"Throw a grenade with {k(bound_key(pygame.K_g))}",
+             lambda: pygame.K_g in seen),
+            ("과녁 10개를 쓰러뜨리세요 (헤드샷을 노려 보세요)", "Knock down 10 targets (try headshots)",
+             lambda: self.stats["kills"] >= 10),
+        ]
+
+    def update_training(self, dt):
+        """사격장: 탄약은 끝없이, 쓰러진 과녁은 다시 서요, 안내 단계 넘기기"""
+        for weapon in self.arsenal.weapons:
+            weapon.reserve = max(weapon.reserve, weapon.spec["reserve"])
+        self.arsenal.grenades = max(self.arsenal.grenades, 2)
+        self.player.hp = self.max_hp
+        self.target_timer -= dt
+        if len(self.enemies) < 6 and self.target_timer <= 0:
+            self.spawn_target()
+            self.target_timer = 1.0
+        for e in self.enemies:                       # 과녁은 언제나 나를 봐요
+            offset = self.player.pos - e.pos
+            if offset.length() > 0:
+                e.dir = offset.normalize()
+                e.facing = pygame.Vector2(e.dir)
+        steps = self.tutorial_steps()
+        if self.tutorial_step < len(steps) and steps[self.tutorial_step][2]():
+            self.tutorial_step += 1
+            self.sounds.play("streak" if self.tutorial_step == len(steps) else "beep")
+            self.popups.append(["TRAINING COMPLETE!" if self.tutorial_step == len(steps) else "GOOD!",
+                                (80, 255, 120), 1.5])
+
+    def draw_training(self, screen):
+        """사격장 안내판과 사격 기록"""
+        ko = self.fonts["lang"] == "ko"
+        steps = self.tutorial_steps()
+        if self.tutorial_step < len(steps):
+            text = steps[self.tutorial_step][0 if ko else 1]
+            head = f"{self.tutorial_step + 1} / {len(steps)}   "
+        else:
+            text = "연습 끝! 마음껏 쏴 보세요. ESC → QUIT TO MENU" if ko else "Done! Shoot freely. ESC -> QUIT TO MENU"
+            head = ""
+        label = self.fonts["help_big" if "help_big" in self.fonts else "help"].render(head + text, True, YELLOW)
+        rect = label.get_rect(midtop=(WIDTH / 2, HEIGHT * 0.12)).inflate(24 * UI, 12 * UI)
+        panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 160))
+        screen.blit(panel, rect)
+        screen.blit(label, label.get_rect(center=rect.center))
+        st = self.stats
+        accuracy = 100 * st["hits"] / st["shots"] if st["shots"] else 0
+        info = f"SHOTS {st['shots']}   HITS {st['hits']}   ACCURACY {accuracy:.0f}%   HEADSHOTS {st['heads']}   TARGETS {st['kills']}"
+        label = self.fonts["small"].render(info, True, WHITE)
+        screen.blit(label, label.get_rect(midtop=(WIDTH / 2, rect.bottom + 6 * UI)))
 
     def start_mission(self):
         """장기 미션 시작 (또는 저장된 단계부터 이어하기). 맵 곳곳에 적이 배치돼 있어요."""
@@ -4159,6 +4377,8 @@ class Game:
 
     def add_xp(self, amount, text=None, color=YELLOW):
         """경험치 추가. 계급이 오르면 크게 알려줘요."""
+        if self.mode == "training":
+            return                                   # 사격장: 경험치 없음
         before = self.rank
         self.xp += amount
         self.save["xp"] = self.xp
@@ -4222,6 +4442,8 @@ class Game:
 
     # ----- 입력 -----
     def handle_event(self, event):
+        if event.type == pygame.KEYDOWN and self.mode == "training":
+            self.keys_seen.add(event.key)
         if event.type == pygame.KEYDOWN and event.key in (pygame.K_p, pygame.K_F3):
             self.show_fps = not self.show_fps
         if event.type == pygame.KEYDOWN and event.key == pygame.K_h and not self.game_over:
@@ -4423,8 +4645,11 @@ class Game:
         if self.mode == "zombies":
             self.update_zombies(edt)
         else:
-            self.punish_camping(dt)
-            self.update_squad(dt)
+            if self.mode == "training":
+                self.update_training(dt)
+            else:
+                self.punish_camping(dt)
+                self.update_squad(dt)
 
         for enemy in self.enemies:
             if self.mode == "mission" and enemy.pos.distance_to(p.pos) > 28 and enemy.hp >= enemy.t["hp"]:
@@ -4506,6 +4731,7 @@ class Game:
             self.banner_timer = 6.0
             self.points += ZOMBIE_POINTS["wave"]
             self.add_xp(XP["round"], f"WAVE CLEAR  +{ZOMBIE_POINTS['wave']} POINTS")
+            self.count_round()
             self.save["zbest"] = max(self.save.get("zbest", 0), self.round + 1)
             write_save(self.save)
         elif self.mode == "campaign" and (self.objective["done"] if self.objective else not self.enemies):
@@ -4515,6 +4741,7 @@ class Game:
             self.sub_banners = [] if self.round != CAMPAIGN_ROUNDS else [("All 100 rounds cleared - the war goes on", YELLOW)]
             self.banner_timer = 4.0
             self.add_xp(XP["round"], f"ROUND CLEAR  +{XP['round']}")
+            self.count_round()
             self.record_progress(self.round + 1)
 
     def gun_sound(self, spec):
@@ -4702,6 +4929,12 @@ class Game:
     def on_kill(self, enemy, how):
         """처치 보상: 경험치, 연속 처치 메달, 킬스트릭"""
         self.sounds.play("headshot" if how == "HEADSHOT!" else "kill")
+        if self.mode != "training":                     # 누적 기록 (업적용)
+            life = self.save.setdefault("lifetime", {})
+            life["kills"] = life.get("kills", 0) + 1
+            key = {"HEADSHOT!": "heads", "KNIFE!": "knife", "BOOM!": "explosive"}.get(how)
+            if key:
+                life[key] = life.get(key, 0) + 1
         stats = self.stats
         stats["kills"] += 1
         if how == "HEADSHOT!":
@@ -4709,7 +4942,7 @@ class Game:
         if how in ("DOWN", "HEADSHOT!"):                 # 총으로 쓰러뜨렸으면 그 총의 경험
             name = self.arsenal.current.spec["name"]
             stats["weapons"][name] = stats["weapons"].get(name, 0) + 1
-            if self.loadout:
+            if self.loadout and self.mode != "training":
                 kills = self.save.setdefault("wkills", {})
                 kills[name] = kills.get(name, 0) + 1
                 changed = False
@@ -4749,11 +4982,37 @@ class Game:
         if how not in STREAK_KILLS:
             self.streak += 1
             self.stats["best"] = max(self.stats["best"], self.streak)
+            if self.mode != "training":
+                life = self.save.setdefault("lifetime", {})
+                life["streak"] = max(life.get("streak", 0), self.streak)
             for need, name in STREAKS:
                 if self.streak == need:
                     self.streaks_ready.append(name)
                     self.sounds.play("streak")
                     self.popups.append([f"{name} READY!  press X", (80, 240, 255), 2.5])
+        self.check_achievements()
+
+    def check_achievements(self):
+        """새로 이룬 업적을 알려줘요 (위장 무늬를 새로 얻으면 그것도)"""
+        if self.mode == "training":
+            return
+        done = self.save.setdefault("achievements", [])
+        life = self.save.get("lifetime", {})
+        before = earned_camos(self.save)
+        for name, ko, en, test in ACHIEVEMENTS:
+            if name not in done and test(self.save, life):
+                done.append(name)
+                self.sounds.play("streak")
+                self.popups.append([f"ACHIEVEMENT: {name}", (255, 215, 80), 3.0])
+        for camo in earned_camos(self.save):
+            if camo not in before:
+                self.popups.append([f"NEW CAMO: {camo}  (A on the start screen)", (80, 240, 255), 3.0])
+
+    def count_round(self):
+        """라운드/웨이브/미션 단계를 깰 때마다 누적 기록"""
+        life = self.save.setdefault("lifetime", {})
+        life["rounds"] = life.get("rounds", 0) + 1
+        self.check_achievements()
 
     def use_streak(self):
         """X: 받은 킬스트릭을 하나 써요 (먼저 받은 것부터)"""
@@ -5142,6 +5401,8 @@ class Game:
         if self.light_timer > 0:
             screen.blit(self.muzzle_light, (0, 0))       # 총구 섬광
         self.draw_hud(screen)
+        if self.mode == "training":
+            self.draw_training(screen)
         if self.show_help:
             draw_help(screen, self.fonts, HELP_TEXT[self.fonts["lang"]]["resume"])
 
@@ -5665,6 +5926,8 @@ class Game:
             t = int(self.mission_time)
             info = (f"MISSION {self.theme['name']}   STAGE {min(self.stage + 1, len(MISSION_STAGES))}/"
                     f"{len(MISSION_STAGES)}   ENEMIES {len(self.enemies)}   KILLS {self.kills}   {t // 60}:{t % 60:02d}")
+        elif self.mode == "training":
+            info = f"TRAINING RANGE   {self.theme['name']}   TARGETS {len(self.enemies)}"
         elif self.mode == "zombies":
             info = (f"WAVE {self.round}   {self.theme['name']}   "
                     f"ZOMBIES {len(self.enemies) + self.zombies_left}   KILLS {self.kills}")
@@ -5836,7 +6099,7 @@ PAD_GAME_KEYS = {"b": pygame.K_c, "x": pygame.K_r, "y": pygame.K_TAB, "rb": pyga
 # 메뉴 화면에서: A 확인, B 뒤로, 십자키 이동, X 좀비 모드, Y 이어하기, 시작 버튼 설정
 PAD_MENU_KEYS = {"a": pygame.K_RETURN, "b": pygame.K_ESCAPE, "up": pygame.K_UP, "down": pygame.K_DOWN,
                  "left": pygame.K_LEFT, "right": pygame.K_RIGHT, "x": pygame.K_z, "y": pygame.K_c,
-                 "start": pygame.K_s, "back": pygame.K_k, "lb": pygame.K_o}
+                 "start": pygame.K_s, "back": pygame.K_k, "lb": pygame.K_o, "rb": pygame.K_r}
 PAD_LOOK_YAW = 3.2                # 오른쪽 스틱 끝까지 밀었을 때 1초에 도는 각도(라디안)
 PAD_LOOK_PITCH = 520              # 1초에 위아래로 움직이는 px (화면 크기 비율을 곱해요)
 
@@ -6025,6 +6288,7 @@ SETTING_ROWS = [
     ("volume", "VOLUME", "소리 크기", "Sound volume"),
     ("music", "MUSIC", "배경 음악 크기 (컴퓨터에서만, 웹은 없음)", "Background music (desktop only)"),
     ("difficulty", "DIFFICULTY", "난이도: 적 실력과 내가 받는 피해", "Enemy skill and damage taken"),
+    ("controls", "CONTROLS", "키 바꾸기 (Enter 로 열기)", "Rebind keys (press Enter)"),
 ]
 
 
@@ -6044,6 +6308,8 @@ def change_setting(key, step):
 
 
 def setting_text(key):
+    if key == "controls":
+        return "ENTER"
     value = SETTINGS[key]
     if key == "assist":
         return ASSIST_LEVELS[value]
@@ -6070,6 +6336,11 @@ async def settings_screen(save):
                 return "closed"
             if event.type != pygame.KEYDOWN:
                 continue
+            if SETTING_ROWS[row][0] == "controls" and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER,
+                                                                     pygame.K_RIGHT, pygame.K_d):
+                if await controls_screen(save) == "closed":
+                    return "closed"
+                continue
             if event.key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_s):
                 save["settings"] = dict(SETTINGS)
                 write_save(save)
@@ -6086,7 +6357,7 @@ async def settings_screen(save):
         title = fonts["big"].render("SETTINGS", True, (255, 80, 200))
         screen.blit(title, title.get_rect(midleft=(WIDTH * 0.08, HEIGHT * 0.1)))
         for i, (key, name, desc_ko, desc_en) in enumerate(SETTING_ROWS):
-            rect = pygame.Rect(WIDTH * 0.08, HEIGHT * (0.19 + i * 0.105), WIDTH * 0.84, HEIGHT * 0.093)
+            rect = pygame.Rect(WIDTH * 0.08, HEIGHT * (0.18 + i * 0.094), WIDTH * 0.84, HEIGHT * 0.085)
             selected = i == row
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
@@ -6100,6 +6371,141 @@ async def settings_screen(save):
             screen.blit(image, image.get_rect(midright=(rect.right - 20, rect.centery)))
         hint = ("↑↓ 고르기     ←→ 바꾸기     Enter / ESC 저장하고 돌아가기" if ko
                 else "UP/DOWN choose     LEFT/RIGHT change     ENTER / ESC save and back")
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
+async def controls_screen(save):
+    """키 바꾸기: ↑↓←→ 고르기, Enter 누른 뒤 새 키 누르기, Backspace 모두 처음대로, ESC 저장하고 돌아가기"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    row, waiting, note = 0, False, ""
+    half = (len(KEY_ACTIONS) + 1) // 2
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if waiting:                                  # 새 키를 기다리는 중
+                waiting = False
+                if event.key == pygame.K_ESCAPE:
+                    note = ""
+                elif event.key in KEY_FIXED:
+                    note = "그 키는 쓸 수 없어요 (ESC, Enter, 화살표)" if ko else "That key is reserved"
+                else:
+                    rebind(KEY_ACTIONS[row][1], event.key)
+                    note = f"{KEY_ACTIONS[row][0]} = {key_label(event.key)}"
+                continue
+            if event.key == pygame.K_ESCAPE:
+                save["keys"] = saved_keys()
+                write_save(save)
+                return None
+            if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                waiting, note = True, ""
+            elif event.key == pygame.K_BACKSPACE:
+                apply_keys({})
+                note = "모든 키를 처음대로 돌렸어요" if ko else "All keys reset to default"
+            elif event.key == pygame.K_UP:
+                row = (row - 1) % len(KEY_ACTIONS)
+            elif event.key == pygame.K_DOWN:
+                row = (row + 1) % len(KEY_ACTIONS)
+            elif event.key in (pygame.K_LEFT, pygame.K_RIGHT):
+                row = (row + half) % (half * 2)
+                row = min(row, len(KEY_ACTIONS) - 1)
+        screen.fill((14, 10, 30))
+        title = fonts["big"].render("CONTROLS", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.08)))
+        for i, (name, default, desc) in enumerate(KEY_ACTIONS):
+            col, line = divmod(i, half)
+            rect = pygame.Rect(WIDTH * (0.05 + col * 0.46), HEIGHT * (0.16 + line * 0.072), WIDTH * 0.44, HEIGHT * 0.064)
+            selected = i == row
+            pygame.draw.rect(screen, (60, 40, 90) if selected else (24, 18, 44), rect, border_radius=6)
+            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 2 if selected else 1,
+                             border_radius=6)
+            label = fonts["help"].render(desc if ko else name, True, WHITE)
+            screen.blit(label, label.get_rect(midleft=(rect.x + 12, rect.centery)))
+            key = "..." if selected and waiting else key_label(bound_key(default))
+            changed = bound_key(default) != default
+            image = fonts["normal"].render(key, True, YELLOW if selected else ((80, 240, 255) if changed else WHITE))
+            screen.blit(image, image.get_rect(midright=(rect.right - 12, rect.centery)))
+        if waiting:
+            note = "바꿀 키를 누르세요 (ESC 취소)" if ko else "Press the new key (ESC cancel)"
+        if note:
+            image = fonts["help"].render(note, True, (80, 255, 120))
+            screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.9)))
+        hint = ("↑↓←→ 고르기   Enter 바꾸기   Backspace 모두 처음대로   ESC 저장하고 돌아가기   (화살표 시점, ESC, Enter는 고정)"
+                if ko else "ARROWS choose   ENTER change   BACKSPACE reset all   ESC save and back")
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.96)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
+async def achievements_screen(save):
+    """업적과 누적 기록. ←→ 로 위장 무늬 고르기 (업적을 모을수록 늘어나요), ESC 저장하고 돌아가기"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    previews = {}
+    while True:
+        clock.tick(30)
+        camos = earned_camos(save)
+        current = save.get("camo", "NONE")
+        if current not in camos:
+            current = "NONE"
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_a):
+                write_save(save)
+                return None
+            if event.key in (pygame.K_LEFT, pygame.K_RIGHT):
+                step = 1 if event.key == pygame.K_RIGHT else -1
+                current = camos[(camos.index(current) + step) % len(camos)]
+                save["camo"] = current
+        done = save.get("achievements", [])
+        life = save.get("lifetime", {})
+        screen.fill((14, 10, 30))
+        title = fonts["big"].render(f"ACHIEVEMENTS  {len(done)} / {len(ACHIEVEMENTS)}", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.05, HEIGHT * 0.08)))
+        half = (len(ACHIEVEMENTS) + 1) // 2
+        for i, (name, desc_ko, desc_en, test) in enumerate(ACHIEVEMENTS):
+            col, line = divmod(i, half)
+            rect = pygame.Rect(WIDTH * (0.04 + col * 0.47), HEIGHT * (0.15 + line * 0.069), WIDTH * 0.45, HEIGHT * 0.062)
+            got = name in done
+            pygame.draw.rect(screen, (50, 44, 20) if got else (24, 18, 44), rect, border_radius=6)
+            pygame.draw.rect(screen, (255, 215, 80) if got else (70, 60, 100), rect, 2 if got else 1, border_radius=6)
+            mark = fonts["normal"].render(("* " if got else "- ") + name, True, (255, 215, 80) if got else (140, 140, 160))
+            screen.blit(mark, mark.get_rect(midleft=(rect.x + 10, rect.centery)))
+            desc = fonts["help"].render(desc_ko if ko else desc_en, True, WHITE if got else (150, 150, 170))
+            screen.blit(desc, desc.get_rect(midright=(rect.right - 10, rect.centery)))
+        totals = (f"KILLS {life.get('kills', 0)}   HEADSHOTS {life.get('heads', 0)}   KNIFE {life.get('knife', 0)}   "
+                  f"EXPLOSIVE {life.get('explosive', 0)}   BEST STREAK {life.get('streak', 0)}   ROUNDS {life.get('rounds', 0)}")
+        image = fonts["small"].render(totals, True, (80, 240, 255))
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.73)))
+        # 위장 무늬 고르기 + 미리보기
+        names = []
+        for name, need, body, accent in CAMOS:
+            names.append(f"[{name}]" if name == current else (name if name in camos else f"{name}({need})"))
+        image = fonts["normal"].render("CAMO:  " + "   ".join(names), True, WHITE)
+        screen.blit(image, image.get_rect(midleft=(WIDTH * 0.05, HEIGHT * 0.8)))
+        if current not in previews:
+            previews[current] = make_viewmodel("RIFLE", False, None if current == "NONE" else current)[0]
+        gun = previews[current]
+        scale = HEIGHT * 0.16 / gun.get_height()
+        gun = pygame.transform.smoothscale(gun, (int(gun.get_width() * scale), int(gun.get_height() * scale)))
+        screen.blit(gun, gun.get_rect(midright=(WIDTH * 0.97, HEIGHT * 0.84)))
+        hint = ("←→ 위장 무늬 고르기 (업적을 모으면 늘어나요)   ESC 돌아가기" if ko
+                else "LEFT/RIGHT choose camo (earn more with achievements)   ESC back")
         image = fonts["help"].render(hint, True, YELLOW)
         screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
         pygame.display.flip()
@@ -6138,6 +6544,12 @@ async def intro_screen(save):
                 write_save(save)
             if event.key == pygame.K_z:
                 return dict(mode="zombies", round=1)
+            if event.key == pygame.K_r:
+                return dict(mode="training", round=1)
+            if event.key == pygame.K_a:
+                if await achievements_screen(save) == "closed":
+                    return "closed"
+                continue
             if event.key == pygame.K_o:
                 picked = await mission_screen(save)
                 if picked == "closed" or picked:
@@ -6179,6 +6591,8 @@ async def intro_screen(save):
             note = "" if fits_desktop(w, h) else (" 전체 화면" if ko else " fullscreen")
             parts.append(f"T 해상도 {w}x{h}{note}" if ko else f"T resolution {w}x{h}{note}")
         parts.append("O 미션" if ko else "O missions")
+        parts.append("R 사격장" if ko else "R training range")
+        parts.append("A 업적" if ko else "A achievements")
         parts.append("K 스킬" if ko else "K skills")
         parts.append("S 설정" if ko else "S settings")
         parts.append("ESC 메뉴" if ko else "ESC menu")
@@ -6510,6 +6924,7 @@ async def run():
     if "difficulty" in settings and not settings.get("v2"):     # 예전 3단계 난이도 -> 새 5단계
         settings = dict(settings, difficulty=[1, 2, 3][min(2, settings["difficulty"])], v2=True)
     apply_settings(settings)
+    apply_keys(save.get("keys", {}))
     while True:
         choice = await intro_screen(save)            # 모드 고르기
         if choice is None or choice == "closed":
@@ -6527,7 +6942,9 @@ async def run():
     pygame.mouse.set_visible(False)
     pygame.mouse.get_rel()
 
-    game = Game(save, choice["round"], mode=choice["mode"], loadout=loadout,
+    training = choice["mode"] == "training"
+    # 사격장은 저장 정보의 복사본으로 (무엇을 해도 진짜 저장에는 남지 않아요)
+    game = Game(copy.deepcopy(save) if training else save, choice["round"], mode=choice["mode"], loadout=loadout,
                 mission=choice.get("mission", 0), stage=choice.get("stage", 0))
     running = True
     closed = False             # 창을 닫았는지 여부
@@ -6536,7 +6953,7 @@ async def run():
     paused, pause_row = False, 0       # ESC: 일시정지 메뉴 (실수로 눌러도 진행이 날아가지 않아요)
     while running:
         dt = min(0.05, clock.tick(FPS) / 1000)
-        events = pygame.event.get()
+        events = [remap_event(event) for event in pygame.event.get()]   # 바꾼 키를 기본 키로
         pad, pad_pressed = gamepad.poll()
         if pad is not None:
             # 패드 버튼을 키 누름으로 바꿔서 같은 방식으로 처리해요
@@ -6606,7 +7023,7 @@ async def run():
         started = time.perf_counter()
         mouse_dx, mouse_dy = pygame.mouse.get_rel()
         game.fps = clock.get_fps()
-        keys = pygame.key.get_pressed()
+        keys = RemappedKeys(pygame.key.get_pressed()) if KEY_MAP else pygame.key.get_pressed()
         if pad is not None:
             keys = KeyState(keys, gamepad.held_keys(pad))
             game.pad_aim = pad["triggerleft"] > 0.4
@@ -6624,7 +7041,8 @@ async def run():
         # 웹 브라우저에서 화면이 멈추지 않도록 잠깐 차례를 넘겨줘요
         await asyncio.sleep(0)
 
-    write_save(game.save)          # 경험치(계급) 저장
+    if not training:
+        write_save(game.save)      # 경험치(계급) 저장
     game.sounds.stop_background()
     # 마우스 원래대로
     pygame.event.set_grab(False)
