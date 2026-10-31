@@ -700,6 +700,21 @@ class GameTest(unittest.TestCase):
         self.assertTrue(all(pt in hidden for pt in picks))
         self.assertEqual(len(game.fair_spawns(far, len(far))), len(far))      # 모자라면 보이는 자리도 써요
 
+    def test_save_backup_survives_a_broken_save(self):
+        import tempfile, browser
+        folder = tempfile.mkdtemp()
+        real = browser.SAVE_PATH
+        browser.SAVE_PATH = os.path.join(folder, "save.json")
+        try:
+            browser.write_save({"xp": 100})
+            browser.write_save({"xp": 200})                              # 앞의 것은 백업으로
+            self.assertEqual(browser.load_save()["xp"], 200)
+            with open(browser.SAVE_PATH, "w", encoding="utf-8") as f:
+                f.write('{"xp": 3')                                       # 저장 도중 꺼져서 깨진 파일
+            self.assertEqual(browser.load_save()["xp"], 100)                # 백업에서 살려요
+        finally:
+            browser.SAVE_PATH = real
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

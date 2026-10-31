@@ -80,6 +80,7 @@ import zlib
 import copy
 import asyncio
 import math
+import os
 import random
 import re
 import sys
@@ -8579,7 +8580,7 @@ class Game:
         screen.blit(dim, (0, 0))
         cx, cy = WIDTH / 2, HEIGHT * 0.48
         rx, ry = min(WIDTH * 0.36, HEIGHT * 0.62), HEIGHT * 0.34
-        box_w, box_h = min(150 * UI, 2 * math.pi * rx / max(n, 1) * 0.86), 46 * UI
+        box_w, box_h = min(150 * UI, 2 * math.pi * rx / max(n, 1) * 0.8), 46 * UI
         tiny, small = self.fonts["tiny"], self.fonts["small"]
         for i, w in enumerate(weapons):
             ang = -math.pi / 2 + 2 * math.pi * i / n
@@ -8587,7 +8588,7 @@ class Game:
             rect.center = (cx + rx * math.cos(ang), cy + ry * math.sin(ang))
             chosen = i == self.wheel["pick"]
             if chosen:
-                rect.inflate_ip(14 * UI, 8 * UI)
+                rect.inflate_ip(8 * UI, 4 * UI)
             fill = (70, 40, 100) if chosen else ((40, 34, 60) if i == self.arsenal.index else (22, 18, 38))
             pygame.draw.rect(screen, fill, rect, border_radius=int(10 * UI))
             pygame.draw.rect(screen, (255, 80, 200) if chosen else (90, 80, 120), rect, 3 if chosen else 1,
@@ -10905,6 +10906,24 @@ def grab_mouse(on):
     pygame.mouse.get_rel()
 
 
+ERROR_LOG = os.path.join(os.path.expanduser("~"), ".gege2ya_errors.log")
+MAX_FRAME_ERRORS = 60             # 한 판에 이보다 많이 오류가 나면 멈춰요
+
+
+def report_error():
+    """오류 내용을 파일에 남겨요 (웹은 브라우저 콘솔에). 고칠 때 이 파일을 보여주세요"""
+    import traceback
+    text = time.strftime("%Y-%m-%d %H:%M:%S ") + traceback.format_exc()
+    print(text)
+    if IN_BROWSER:
+        return
+    try:
+        with open(ERROR_LOG, "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+    except Exception:
+        pass
+
+
 async def run():
     """게임 한 판 실행. ESC를 누르면 끝나요.
 
@@ -10945,6 +10964,7 @@ async def run():
     paused, pause_row = False, 0       # ESC: 일시정지 메뉴 (실수로 눌러도 진행이 날아가지 않아요)
     pause_started = 0.0                # 일시정지 메뉴가 나타나는 움직임용
     pause_bg = None                    # 일시정지 뒤에 깔 흐린 게임 화면
+    errors = 0                         # 이번 판에서 건너뛴 오류 수
     pause_fonts = None
     while running:
         dt = min(0.05, clock.tick(FPS) / 1000)
@@ -11038,8 +11058,16 @@ async def run():
             keys = KeyState(keys, gamepad.held_keys(pad))
             game.pad_aim = pad["triggerleft"] > 0.4
             game.player.stick = gamepad.look(pad)
-        game.update(dt, keys, mouse_dx, mouse_dy, pygame.mouse.get_pressed())
-        game.draw(screen)
+        try:
+            game.update(dt, keys, mouse_dx, mouse_dy, pygame.mouse.get_pressed())
+            game.draw(screen)
+        except Exception:                        # 오류가 나도 게임이 멈추지 않게: 기록하고 이 장면만 건너뛰어요
+            errors += 1
+            report_error()
+            if errors > MAX_FRAME_ERRORS:
+                raise                            # 계속 같은 오류가 나면 그때는 멈춰요 (기록은 남아 있어요)
+            if errors == 1:
+                game.popups.append(["SOMETHING WENT WRONG - SKIPPED (LOG SAVED)", RED, 2.5])
         work_time += time.perf_counter() - started
         frames += 1
         check_timer += dt

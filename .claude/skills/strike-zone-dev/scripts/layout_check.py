@@ -48,6 +48,17 @@ def draw_hud(self, screen):
 
 
 shooter.Game.draw_hud = draw_hud
+_draw_wheel = shooter.Game.draw_wheel
+
+
+def draw_wheel(self, screen):
+    """무기 휠도 HUD 처럼: 휠을 그리기 시작한 곳부터만 검사 (뒤의 3D 이름표는 빼요)"""
+    if isinstance(screen, Recorder):
+        screen.hud_from = len(screen.texts)
+    return _draw_wheel(self, screen)
+
+
+shooter.Game.draw_wheel = draw_wheel
 
 
 class Recorder(pygame.Surface):
