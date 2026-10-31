@@ -615,6 +615,18 @@ class GameTest(unittest.TestCase):
                 break
         self.assertTrue(game.objective["done"])
 
+    def test_graphics_quality(self):
+        game = shooter.Game({}, 45)
+        screen = pygame.display.get_surface()
+        before = shooter.SETTINGS["gfx"]
+        for gfx in range(len(shooter.GFX_NAMES)):
+            shooter.SETTINGS["gfx"] = gfx
+            game.draw(screen)
+        self.assertIn(game.mood(), shooter.GRADES)
+        shooter.change_setting("gfx", 1)
+        self.assertEqual(shooter.setting_text("gfx"), shooter.GFX_NAMES[shooter.SETTINGS["gfx"]])
+        shooter.SETTINGS["gfx"] = before
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
