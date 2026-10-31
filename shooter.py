@@ -97,6 +97,11 @@ START_COL_W = 4 if IN_BROWSER else 2   # 세로 줄 하나의 폭(px). 작을수
 MIN_COL_W = 2 if IN_BROWSER else 1     # 컴퓨터에서는 1px(가장 선명)까지 올라가요
 MAX_COL_W = 8
 FRAME_BUDGET = 0.014              # 한 장면 계산에 이보다 오래 걸리면 줄 폭을 넓혀요(초)
+# 부서지는 엄폐물: 글자 -> 체력 (상자, 모래주머니). 총알과 폭발에 부서져요
+DESTRUCTIBLE = {"K": 160, "Z": 260}
+SHELL_RELOAD = {"SHOTGUN": 0.42}    # 한 발씩 넣는 총: 한 발 넣는 시간(초). 쏘면 바로 멈추고 쏴요
+BOLT_ACTION = ("SNIPER",)            # 쏠 때마다 노리쇠를 당기는 총
+MAX_DECALS = 240                     # 벽에 남는 총알 자국/그을음 최대 개수
 MAX_TEXTURE_COL = 4               # 세로 줄 폭이 이보다 넓으면(느린 컴퓨터) 벽 질감 대신 단색으로
 TEXTURE_DISTANCE = 9             # 이보다 먼 벽은 질감 없이 단색으로 (빠르게)
 NORMAL_FOV = math.radians(66)     # 시야각
@@ -135,7 +140,7 @@ KEY_ACTIONS = [
     ("RELOAD", pygame.K_r, "재장전"), ("GRENADE", pygame.K_g, "수류탄"), ("KNIFE", pygame.K_v, "칼"),
     ("STREAK", pygame.K_x, "킬스트릭"), ("NEXT WEAPON", pygame.K_q, "무기 바꾸기"), ("SCOPE ZOOM", pygame.K_z, "조준경 배율"),
     ("FOCUS", pygame.K_t, "스킬: 집중"), ("MEDKIT", pygame.K_y, "스킬: 구급상자"), ("SCAN", pygame.K_j, "스킬: 탐지"),
-    ("SHOP AMMO", pygame.K_b, "좀비 상점: 탄약"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
+    ("INSPECT", pygame.K_i, "무기 살펴보기"), ("SHOP AMMO", pygame.K_b, "좀비 상점: 탄약"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
 ]
 # 바꿀 수 없는 키: 메뉴/시점/전체 화면
 KEY_FIXED = (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_UP, pygame.K_DOWN,
@@ -1282,7 +1287,7 @@ def load_map(index, theme=None):
     theme: 분위기를 바꾼 맵 정보 (세트마다 밤/폭풍우 등). 없으면 원래 맵"""
     global GAME_MAP, MAP_W, MAP_H, FLOOR_GRID, WALL_GRID, MAX_WALL, HAZE, LIT, FLOOR_COLORS
     theme = theme or MAPS[index]
-    GAME_MAP = theme["rows"]
+    GAME_MAP = list(theme["rows"])     # 복사본: 게임 중에 상자가 부서져도 원래 맵은 그대로
     MAP_W, MAP_H = len(GAME_MAP[0]), len(GAME_MAP)
     # 매번 계산하지 않도록 칸마다 바닥/건물 정보를 미리 만들어 둬요
     FLOOR_GRID = [[floor_of(col, row) for col in range(MAP_W)] for row in range(MAP_H)]
@@ -2192,6 +2197,8 @@ SOUND_RECIPES = {
     # 총소리 겹치기: 쏠 때마다 "탕" 위에 노리쇠의 "착" + 가슴을 치는 낮은 "쿵"
     "mech":      (0.05, 80, 0.7, 0.10, 0, 0, 2600, 0.5, 0.30),
     "radio":     (0.14, 18, 0.7, 0.30, 0, 0, 1500, 0.35, 0.22),    # 적 무전 "치직"
+    "glass":     (0.35, 9, 0.7, 0.05, 0, 0, 3400, 0.45, 0.40),      # 유리 깨지는 "쨍그랑"
+    "smash":     (0.30, 11, 1.0, 0.55, 85, 0.7, 0, 0, 0.60),        # 상자/모래주머니가 부서지는 "와장창"
     "punch":     (0.16, 26, 0.0, 0.0, 52, 1.0, 0, 0, 0.55),
 }
 # 벽 너머에서 나는 소리는 먹먹하게 (높은 소리를 깎은 "_m" 소리를 따로 만들어요)
@@ -3223,6 +3230,8 @@ class Arsenal:
         self.reload_left = 0.0
         self.reload_total = 1.0
         self.reload_empty = False
+        self.shell = False         # 한 발씩 넣는 재장전 중인지 (산탄총)
+        self.shells_loaded = 0     # 이번 장면에 넣은 탄 수 (Game이 "착" 소리를 내요)
         self.switch_left = 0.0
         self.recoil = 0.0          # 반동으로 시점이 위로 튄 정도(px)
         self.since_shot = 1.0
@@ -3249,7 +3258,11 @@ class Arsenal:
         w = self.current
         if not self.busy and w.mag < w.spec["mag"] and w.reserve > 0:
             self.reload_empty = w.mag == 0          # 다 쏘고 하는 재장전은 노리쇠까지 당겨서 더 오래
-            self.reload_left = w.spec["reload"] * self.reload_mult * (1.25 if self.reload_empty else 1.0)
+            self.shell = w.spec["name"] in SHELL_RELOAD
+            if self.shell:
+                self.reload_left = SHELL_RELOAD[w.spec["name"]] * self.reload_mult
+            else:
+                self.reload_left = w.spec["reload"] * self.reload_mult * (1.25 if self.reload_empty else 1.0)
             self.reload_total = self.reload_left
 
     def add_ammo(self):
@@ -3274,6 +3287,13 @@ class Arsenal:
             if self.reload_left <= 0:
                 self.reload_left = 0.0
                 w = self.current
+                if self.shell:                          # 한 발 넣고, 더 넣을 수 있으면 계속
+                    w.mag += 1
+                    w.reserve -= 1
+                    self.shells_loaded += 1
+                    if w.mag < w.spec["mag"] and w.reserve > 0:
+                        self.reload_left = self.reload_total
+                    return
                 taken = min(w.spec["mag"] - w.mag, w.reserve)
                 w.mag += taken
                 w.reserve -= taken
@@ -3281,6 +3301,8 @@ class Arsenal:
     def try_fire(self):
         """쏠 수 있으면 총알 하나를 쓰고 True"""
         w = self.current
+        if self.shell and self.reload_left > 0 and w.mag > 0:
+            self.reload_left = 0.0                      # 한 발씩 넣다가 쏘면 바로 멈춰요
         if self.cooldown > 0 or self.busy:
             return False
         if w.mag == 0:
@@ -3536,6 +3558,7 @@ class Game:
         self.zbuffer = [math.inf] * self.num_rays
         self.wall_top = [HEIGHT] * self.num_rays    # 줄마다 가장 가까운 건물의 위쪽 y (총알 자국 위치 계산용)
         self.wall_thin = [False] * self.num_rays    # 줄마다 가장 가까운 벽이 총알이 뚫는 얇은 엄폐물인지
+        self.wall_hit = [None] * self.num_rays      # 줄마다 가장 가까운 벽: (칸 x, 칸 y, 세로벽인지, 맞은 위치, 건물 정보)
 
     def adjust_quality(self, frame_time):
         """한 장면 계산 시간을 보고 선명도를 자동으로 조절해요."""
@@ -3549,6 +3572,10 @@ class Game:
         """맵 바꾸기: 맵 정보, 장식물, 적 출현 위치, 미니맵, 하늘을 새로 만들어요."""
         self.theme = variant_theme(MAPS[index], set_no)
         load_map(index, self.theme)
+        self.decals = {}           # 벽 자국: (칸 x, 칸 y, 세로벽인지) -> [(위치, 높이, "hole"/"scorch"), ...]
+        self.decal_count = 0
+        self.broken_windows = set()
+        self.cover_hp = {}         # 부서지는 엄폐물 남은 체력
         self.map_index = index
         self.map_key = (index, set_no)
         self.decor = []
@@ -3644,6 +3671,8 @@ class Game:
         """죽은 라운드부터 다시 (처치 수는 그대로). 좀비 모드는 1웨이브부터"""
         self.fail_reason = ""
         self.killcam_from = None
+        self.map_key = None                      # 부서진 상자, 깨진 창문을 원래대로 (맵을 다시 불러요)
+        self.map_index = None
         if self.mode == "zombies":
             self.reset(1)
             return
@@ -4123,6 +4152,12 @@ class Game:
         self.seen_index = self.arsenal.index
         self.popups = []           # 점수/메달 글자: [글자, 색, 남은 시간]
         self.damage_dirs = []      # 맞은 방향 표시: [방향(각도), 남은 시간]
+        self.puff_cache = {}
+        self.smoke = []            # 총구 연기: [x, y (총구에서 떨어진 거리), 속도 x, 속도 y, 남은 시간, 크기]
+        self.bolt_anim = 0.0       # 저격총 노리쇠 당기는 동작 남은 시간
+        self.inspect_timer = 0.0   # 무기 살펴보기 (I) 남은 시간
+        self.ads_anim = 0.0        # 정조준 들어가고 나올 때 총이 살짝 내려갔다 오는 동작
+        self.was_aiming = False
         self.sound_marks = []      # 소리 표시 (설정 SOUND MARKS): [방향, "step"/"shot", 남은 시간]
         self.radar_timer = 0.0
         self.airstrikes = []       # 떨어질 폭탄: [위치, 남은 시간]
@@ -4527,6 +4562,8 @@ class Game:
                 a.switch(a.last_index)
             elif event.key == pygame.K_r:
                 a.reload()
+            elif event.key == pygame.K_i and not a.busy and not self.aiming:   # 무기 살펴보기
+                self.inspect_timer = 2.4
             elif event.key == pygame.K_e:      # 정조준 켜기/끄기
                 self.aim_on = not self.aim_on
             elif event.key == pygame.K_z:      # 배율 바꾸기 3 -> 6 -> 12 -> 3
@@ -4582,6 +4619,18 @@ class Game:
         self.feed = [[text, t - dt] for text, t in self.feed if t - dt > 0]
         self.popups = [[text, color, t - dt] for text, color, t in self.popups if t - dt > 0]
         self.damage_dirs = [[a, t - dt] for a, t in self.damage_dirs if t - dt > 0]
+        for puff in self.smoke:                          # 연기는 위로 퍼지며 사라져요
+            puff[0] += puff[2] * dt
+            puff[1] += puff[3] * dt
+            puff[4] -= dt
+            puff[5] += 14 * UI * dt
+        self.smoke = [puff for puff in self.smoke if puff[4] > 0]
+        self.bolt_anim = max(0.0, self.bolt_anim - dt)
+        self.inspect_timer = max(0.0, self.inspect_timer - dt)
+        self.ads_anim = max(0.0, self.ads_anim - dt)
+        if self.aiming != self.was_aiming:
+            self.ads_anim = 0.16
+            self.was_aiming = self.aiming
         self.sound_marks = [[a, k, t - dt] for a, k, t in self.sound_marks if t - dt > 0]
         self.tracers = [tr[:4] + [tr[4] - dt] for tr in self.tracers if tr[4] - dt > 0]
         self.enemy_tracers = [[e, t - dt, off] for e, t, off in self.enemy_tracers if t - dt > 0]
@@ -4632,7 +4681,12 @@ class Game:
         if arsenal.reload_left > 0 and not self.was_reloading:
             self.sounds.play("reload")
         self.was_reloading = arsenal.reload_left > 0
-        if arsenal.reload_left > 0:                # 재장전 동작 소리: 탄창 빼기 → 끼우기 → (빈 탄창이면) 노리쇠
+        if arsenal.shells_loaded:
+            self.sounds.play("magin")                   # 산탄총: 한 발 넣을 때마다 "착"
+            arsenal.shells_loaded = 0
+        if arsenal.reload_left > 0 and arsenal.shell:
+            self.reload_prev = 0.0
+        elif arsenal.reload_left > 0:                # 재장전 동작 소리: 탄창 빼기 → 끼우기 → (빈 탄창이면) 노리쇠
             prog = 1 - arsenal.reload_left / arsenal.reload_total
             for mark, name in ((0.25, "magout"), (0.62, "magin"), (0.88, "bolt")):
                 if self.reload_prev < mark <= prog and (name != "bolt" or arsenal.reload_empty):
@@ -4812,6 +4866,15 @@ class Game:
         self.echoes.append([delay, GUN_SOUNDS[spec["name"]], echo * loud])
         if not spec["projectile"] and (not spec["auto"] or random.random() < 0.4):
             self.echoes.append([random.uniform(0.3, 0.45), "casing", random.uniform(0.2, 0.35)])
+        if spec["name"] in BOLT_ACTION:                # 노리쇠 당기기: 소리와 동작
+            self.bolt_anim = 0.75
+            self.echoes.append([0.35, "bolt", 0.9])
+        if not spec.get("suppressed"):                   # 총구에서 연기가 피어올라요 (연사하면 더 많이)
+            heat = 2 if spec["auto"] and self.shot_index > 4 else 1
+            for _ in range(heat):
+                self.smoke.append([0.0, 0.0, random.uniform(-15, 15) * UI, random.uniform(-60, -30) * UI,
+                                   random.uniform(0.6, 1.0), random.uniform(6, 10) * UI])
+            del self.smoke[:-24]
         self.gun_noise = 0.5
         self.gun_noise_radius = 6.0 if spec.get("suppressed") else 16.0   # 소음기: 가까운 적만 들어요
         self.stats["shots"] += 1
@@ -4842,13 +4905,18 @@ class Game:
             y = random.uniform(HEIGHT * 0.1, HEIGHT * 0.8)
             self.screen_blood.append([x, y, random.uniform(0.8, 1.8) * UI, 1.5])
 
-    def add_impact(self, x, y):
+    def add_impact(self, x, y, damage=0):
         """빗나간 총알: 맞은 벽/바닥 자리에서 먼지와 불똥이 튀어요"""
         col = int(x // self.col_w)
         if not 0 <= col < self.num_rays:
             return
         if self.zbuffer[col] < math.inf and y >= self.wall_top[col]:
             perp = self.zbuffer[col]
+            if damage and self.wall_hit[col]:
+                cx, cy, vertical, wall_x, spec = self.wall_hit[col]
+                size = self.proj / max(0.05, perp)
+                height = (self.horizon + self.eye * size - y) / size       # 맞은 높이 (땅에서 몇 칸 위)
+                self.hit_wall(cx, cy, vertical, wall_x, height, damage, spec)
         elif y > self.horizon + 2:
             perp = self.eye * self.proj / (y - self.horizon)
         else:
@@ -4862,6 +4930,64 @@ class Game:
                                    random.uniform(0.2, 0.4), max(1.0, random.uniform(1.5, 3.5) * UI * near),
                                    (grey, grey - 10, grey - 30), False])
         self.particles.append([x, y, 0, 0, 0.05, max(2.0, 5 * UI * near), (255, 230, 140), False])   # 불똥
+
+    def add_decal(self, cx, cy, vertical, wall_x, height, kind):
+        marks = self.decals.setdefault((cx, cy, vertical), [])
+        marks.append((wall_x, height, kind))
+        self.decal_count += 1
+        if self.decal_count > MAX_DECALS:                # 너무 많으면 오래된 것부터 지워요
+            for key in list(self.decals):
+                if self.decals[key]:
+                    self.decals[key].pop(0)
+                    self.decal_count -= 1
+                    break
+
+    def hit_wall(self, cx, cy, vertical, wall_x, height, damage, spec):
+        """총알이 벽에 맞았어요: 부서지는 엄폐물은 체력이 깎이고, 창문은 깨지고, 나머지엔 총알 자국"""
+        letter = GAME_MAP[cy][cx]
+        if letter in DESTRUCTIBLE:
+            self.damage_cover(cx, cy, damage)
+            return
+        if spec[2] is True and (0.18 < wall_x < 0.42 or 0.58 < wall_x < 0.82):
+            k = int(height / 0.5)
+            if 0.17 < height - k * 0.5 < 0.42:          # 창문에 맞음
+                key = (cx, cy, vertical, 0 if wall_x < 0.5 else 1, k)
+                if key not in self.broken_windows:
+                    self.broken_windows.add(key)
+                    self.play_at("glass", pygame.Vector2(cx + 0.5, cy + 0.5), 18)
+                return
+        self.add_decal(cx, cy, vertical, wall_x, height, "hole")
+
+    def damage_cover(self, cx, cy, damage):
+        letter = GAME_MAP[cy][cx]
+        hp = self.cover_hp.get((cx, cy), DESTRUCTIBLE[letter]) - damage
+        self.cover_hp[(cx, cy)] = hp
+        if hp <= 0:
+            self.destroy_cell(cx, cy)
+
+    def destroy_cell(self, cx, cy):
+        """상자/모래주머니가 부서져요: 그 칸은 바닥이 되고 조각이 튀어요"""
+        color = WALL_GRID[cy][cx][0] if WALL_GRID[cy][cx] else (150, 120, 80)
+        row = GAME_MAP[cy]
+        GAME_MAP[cy] = row[:cx] + FLOOR_GRID[cy][cx] + row[cx + 1:]
+        WALL_GRID[cy][cx] = None
+        self.decals.pop((cx, cy, True), None)
+        self.decals.pop((cx, cy, False), None)
+        center = pygame.Vector2(cx + 0.5, cy + 0.5)
+        self.play_at("smash", center, 20)
+        box = self.project(center, 0.8, 1.0)
+        if box:
+            sx, top, bottom, w, perp = box
+            near = min(1.0, 4 / max(0.5, perp))
+            for _ in range(16):
+                angle = random.uniform(math.pi * 1.1, math.pi * 1.9)
+                speed = random.uniform(80, 300) * UI * near
+                tone = random.uniform(0.6, 1.1)
+                self.particles.append([sx + random.uniform(-w, w) * 0.4, (top + bottom) / 2,
+                                       math.cos(angle) * speed, math.sin(angle) * speed, random.uniform(0.4, 0.8),
+                                       max(2.0, random.uniform(3, 7) * UI * near),
+                                       tuple(min(255, int(c * tone)) for c in color), False])
+        self.minimap = self.make_minimap()
 
     def chunks(self, enemy, count, color, size, upward=False):
         """적 몸에서 조각이 튀어요 (헤드샷이면 헬멧, 폭발이면 살점)"""
@@ -5201,7 +5327,7 @@ class Game:
             if not self.scoped:
                 self.tracers.append([*self.muzzle_screen, ax, ay, 0.05])
             if not target:
-                self.add_impact(ax, ay)           # 벽이나 바닥에 맞으면 먼지와 불똥
+                self.add_impact(ax, ay, spec["body"])     # 벽이나 바닥에 맞으면 먼지와 불똥 (+ 자국, 부서짐)
             if target:
                 amount = spec["head"] * (1 + 0.15 * self.rank_of("MARKSMAN")) if head else spec["body"]
                 if self.perk == "HEAVY ROUNDS":
@@ -5340,6 +5466,21 @@ class Game:
 
         self.effects.append(Effect(pos, self.explosion_frames, 0.5, radius * 0.9))
         self.play_at("explosion", pos, 25, 1.1)
+        for row in range(int(pos.y) - 2, int(pos.y) + 3):      # 가까운 상자는 부서지고, 벽엔 그을음
+            for col in range(int(pos.x) - 2, int(pos.x) + 3):
+                if not in_map(col, row) or not WALL_GRID[row][col]:
+                    continue
+                center = pygame.Vector2(col + 0.5, row + 0.5)
+                d = center.distance_to(pos)
+                if d > radius * 0.75:
+                    continue
+                if GAME_MAP[row][col] in DESTRUCTIBLE:
+                    self.damage_cover(col, row, damage * 3 * power(d))
+                elif d < 1.6:
+                    off = pos - center
+                    vertical = abs(off.x) > abs(off.y)             # 폭발이 난 쪽의 벽면
+                    wall_x = (pos.y - row) if vertical else (pos.x - col)
+                    self.add_decal(col, row, vertical, min(0.95, max(0.05, wall_x)), 0.3, "scorch")
         if owner in ("player", "streak"):
             how = "AIRSTRIKE!" if owner == "streak" else "BOOM!"
             for enemy in list(self.enemies):
@@ -5540,6 +5681,7 @@ class Game:
         draw_rect, blit, fill, scale = pygame.draw.rect, screen.blit, screen.fill, pygame.transform.scale
         wall_textures, game_map, zbuffer, wall_top, wall_thin = (self.wall_textures, GAME_MAP, self.zbuffer,
                                                                  self.wall_top, self.wall_thin)
+        wall_hit, decals, broken = self.wall_hit, self.decals, self.broken_windows
         px, py, angle = p.pos.x, p.pos.y, p.angle
         textured = col_w <= MAX_TEXTURE_COL
         light = self.light_timer > 0
@@ -5563,7 +5705,10 @@ class Game:
                 near = proj / max(0.05, walls[0][0] * fix)
                 wall_top[i] = horizon + eye * near - walls[0][3][1] * near
                 wall_thin[i] = walls[0][3][1] <= 1.0          # 상자, 모래주머니, 돌담, 쓰레기통
+                first = walls[0]
+                wall_hit[i] = (first[4], first[5], first[1], first[2], first[3])
             else:
+                wall_hit[i] = None
                 wall_thin[i] = False
                 wall_top[i] = HEIGHT
             # 가까운 벽부터 보며, 앞 벽에 가려지는 아래쪽은 그리지 않아요 (같은 곳을 두 번 칠하지 않게)
@@ -5621,8 +5766,27 @@ class Game:
                         y0 = bottom - (k * 0.5 + 0.42) * size
                         y1 = min(vis_b, bottom - (k * 0.5 + 0.17) * size)
                         if y1 > max(0, y0) and y0 < HEIGHT:
+                            if broken and (cx, cy, vertical, half, k) in broken:     # 깨진 창문: 시커먼 구멍
+                                draw_rect(screen, (14, 14, 18), (x, y0, col_w, y1 - y0))
+                                continue
                             lit = (cx * 7 + cy * 13 + k * 5 + half * 3 + vertical) % LIT == 0
                             draw_rect(screen, lit_glass if lit else dark_glass, (x, y0, col_w, y1 - y0))
+                # 총알 자국과 폭발 그을음
+                marks = decals.get((cx, cy, vertical)) if decals else None
+                if marks:
+                    for mx_, mv, kind in marks:
+                        gap = abs(mx_ - wall_x)
+                        if kind == "hole" and gap < 0.03:
+                            hy = bottom - mv * size
+                            hs = max(2.0, 0.035 * size)
+                            if hy < vis_b:
+                                draw_rect(screen, (30, 26, 24), (x, hy - hs / 2, col_w, hs))
+                        elif kind == "scorch" and gap < 0.32:
+                            half_h = 0.32 * size * math.sqrt(1 - (gap / 0.32) ** 2)
+                            y0 = max(top, bottom - mv * size - half_h)
+                            y1 = min(vis_b, bottom - mv * size + half_h)
+                            if y1 > y0:
+                                fill((95, 88, 82), (x, y0, col_w, y1 - y0), special_flags=pygame.BLEND_MULT)
                 # 네온사인: 건물 꼭대기에 빛나는 띠 (안개를 덜 타서 멀리서도 잘 보여요)
                 if neon:
                     glow = fog(neon, perp * 0.3, fog_dist)
@@ -5811,21 +5975,60 @@ class Game:
         else:
             bx, by = 0.0, math.sin(t * 2) * 3 * UI * calm      # 숨쉬기
         down = 0
+        tilt = 0.0
         prog = 1 - a.reload_left / a.reload_total if a.reload_left > 0 else None
+        if prog is not None and a.shell:
+            # 한 발씩 장전: 총을 기울인 채로, 한 발 넣을 때마다 살짝 들썩
+            down = 70 + 18 * math.sin(prog * math.pi)
+            bx -= 40 * UI
+            prog = None
+            shell_prog = 1 - a.reload_left / a.reload_total
+        else:
+            shell_prog = None
         if prog is not None:
             # 재장전: 총을 내리며 기울이고, 탄창을 빼고 끼운 뒤 다시 올려요
             down = 110 * math.sin(min(1.0, prog * 1.15) * math.pi) + 30
             bx -= 50 * UI * math.sin(prog * math.pi)
         elif a.switch_left > 0:
             down = 220 * a.switch_left / a.SWITCH_TIME
+        if self.bolt_anim > 0:                      # 노리쇠: 총을 살짝 내리고 오른쪽으로 비틀었다 돌아와요
+            k = math.sin((1 - self.bolt_anim / 0.75) * math.pi)
+            down += 45 * k
+            bx += 25 * UI * k
+        if self.ads_anim > 0:                       # 정조준 전환: 잠깐 내려갔다 올라와요
+            down += 55 * math.sin(self.ads_anim / 0.16 * math.pi)
+        if self.inspect_timer > 0:                  # 살펴보기: 총을 왼쪽으로 돌려 옆면을 보여줘요
+            k = math.sin((1 - self.inspect_timer / 2.4) * math.pi)
+            tilt = 22 * k
+            bx -= 160 * UI * k
+            down -= 30 * k
         if ads:
             kx, ky = 0, a.kick * 12 * UI
         else:
             kx, ky = a.kick * 12 * UI, a.kick * 20 * UI
         dx = bx + kx + self.sway * calm
         dy = by + ky + down * UI + p.crouch_amt * 10 * UI
-        screen.blit(image, (ox + dx, oy + dy))
+        if tilt:
+            turned = pygame.transform.rotate(image, tilt)
+            screen.blit(turned, turned.get_rect(center=(ox + dx + image.get_width() / 2, oy + dy + image.get_height() / 2)))
+        else:
+            screen.blit(image, (ox + dx, oy + dy))
         self.muzzle_screen = (mx + dx, my + dy)
+        if shell_prog is not None:                  # 산탄총 탄이 아래에서 올라와 들어가요
+            sx = ox + dx + image.get_width() * 0.45
+            sy = oy + dy + image.get_height() * 0.62 + (1 - shell_prog) * 90 * UI
+            pygame.draw.rect(screen, (200, 40, 40), (sx, sy, 12 * UI, 26 * UI), border_radius=3)
+            pygame.draw.rect(screen, (210, 175, 70), (sx, sy + 18 * UI, 12 * UI, 8 * UI))
+            draw_glove(screen, pygame.Vector2(sx + 6 * UI, sy + 34 * UI), 20 * UI)
+        for x, y, vx, vy, life, size in self.smoke:      # 총구 연기 (같은 크기·진하기 그림은 한 번만 만들어요)
+            key = (int(size), int(6 * min(1.0, life)))
+            puff = self.puff_cache.get(key)
+            if puff is None:
+                r = key[0]
+                puff = pygame.Surface((r * 2 + 2, r * 2 + 2), pygame.SRCALPHA)
+                pygame.draw.circle(puff, (200, 200, 205, 15 * key[1]), (r + 1, r + 1), r)
+                self.puff_cache[key] = puff
+            screen.blit(puff, (mx + dx + x - size, my + dy + y - size))
         if prog is not None and not a.current.spec["projectile"]:
             # 탄창: 0.2~0.45 사이엔 빠져서 아래로 떨어지고, 0.5~0.75 사이엔 올라와 끼워져요
             mag_x = ox + dx + image.get_width() * 0.42
