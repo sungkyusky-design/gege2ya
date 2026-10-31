@@ -1,0 +1,31 @@
+# PR을 만들거나 main에 올릴 때마다 게임을 자동으로 검사해요.
+# 고장 난 코드는 여기서 빨간 X가 떠서 병합하기 전에 알 수 있어요.
+name: Test game
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install pygame pyflakes
+      - name: Check code (pyflakes)
+        run: python -m pyflakes shooter.py main.py browser.py
+      - name: Check every map
+        run: python .claude/skills/strike-zone-dev/scripts/check_maps.py
+      - name: Auto-play every mode
+        run: python .claude/skills/strike-zone-dev/scripts/smoke_test.py --seconds 6
+      - name: Balance report
+        run: python .claude/skills/strike-zone-dev/scripts/balance.py

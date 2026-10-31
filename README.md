@@ -343,7 +343,7 @@ GitHub 저장소 페이지에서 초록색 **Code** 버튼 → **Download ZIP** 
 | M | 소리 끄기 / 켜기 | |
 | P (또는 F3) | FPS와 화면 선명도 표시 | |
 | Enter (또는 F11) | 전체 화면 (컴퓨터에서) | |
-| ESC | 메뉴로 | |
+| ESC | **일시정지 메뉴** (계속 / 도움말 / 설정 / 메뉴로 나가기) | 패드 Start |
 
 ### 무기
 
@@ -493,6 +493,9 @@ Claude에게 무기·적·맵 추가나 테스트를 부탁하면 자동으로 �
 | `scripts/screenshot.py` | 원하는 라운드/맵/미션 화면을 PNG로 찍기 |
 | `scripts/web_smoke.sh` | 웹(브라우저) 버전을 띄워서 눌러 보고 오류 확인 |
 | `scripts/release_check.sh` | 병합 뒤 새 exe/맥 앱이 다 만들어졌는지 확인 |
+| `scripts/balance.py` | 무기별 처치 시간, 적별 초당 피해 표 (밸런스 확인) |
+
+PR을 만들면 GitHub가 자동으로 맵 검사와 자동 플레이 테스트를 돌려요 (`.github/workflows/test.yml`).
 
 ## 🧪 Strike Zone 3D (Godot, 만드는 중)
 

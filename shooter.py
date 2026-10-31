@@ -52,7 +52,7 @@ RPG: 계급이 오르면 스킬 포인트(K), 계급/점수로 새 무기를 얻
     M                : 소리 끄기 / 켜기
     P 또는 F3        : FPS와 화면 선명도 표시
     Enter 또는 F11   : 전체 화면 (컴퓨터에서 실행할 때)
-    ESC              : 종료 (메뉴로)
+    ESC              : 일시정지 메뉴 (계속 / 도움말 / 설정 / 메뉴로 나가기)
 
 시작 화면:
     Enter : 캠페인    Z : 좀비 모드    C : 이어하기    T : 해상도 바꾸기 (컴퓨터에서)
@@ -2035,7 +2035,7 @@ HELP_TEXT = {
               ("F,  왼쪽 클릭", "사격 (꾹 누르면 연사)"), ("E,  오른쪽 클릭", "정조준 / 저격총 조준경"), ("Z", "조준경 배율 3·6·12배"),
               ("G", "수류탄"), ("V", "칼"), ("X", "킬스트릭 쓰기"), ("1~9, 0, Tab, Q", "무기 바꾸기 (가진 무기 전부)"), ("T,  Y,  J", "스킬: 집중 / 구급상자 / 탐지"),
               ("R,  B,  U", "재장전,  좀비 상점 (탄약 / 강화)"), ("H,  M", "도움말 (일시정지),  소리 끄기"), ("P,  Enter", "FPS 표시,  전체 화면"),
-              ("ESC", "메뉴로")],
+              ("ESC", "일시정지 (계속 / 설정 / 나가기)")],
         tips=["적을 모두 쓰러뜨리면 다음 라운드! 라운드마다 맵이 바뀌어요.",
               "죽지 않고 연속으로 쓰러뜨리면 킬스트릭: 3킬 레이더, 5킬 공습, 7킬 자동 포탑 (X).",
               "앉으면 덜 맞고 잘 맞혀요. 차·상자 뒤에 숨으면 총알을 막아요.",
@@ -2052,7 +2052,7 @@ HELP_TEXT = {
               ("ARROWS", "look (or mouse)"), ("SPACE", "jump"),
               ("F, LEFT CLICK", "fire (hold for auto)"), ("E, RIGHT CLICK", "aim / sniper scope"), ("Z", "scope zoom 3/6/12x"),
               ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1-9, 0, TAB, Q", "switch weapon (whole inventory)"), ("T, Y, J", "skills: focus / medkit / scan"),
-              ("R, B, U", "reload, zombie shop"), ("H, M", "help (pause), mute"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "menu")],
+              ("R, B, U", "reload, zombie shop"), ("H, M", "help (pause), mute"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "pause menu")],
         tips=["Kill every enemy to clear the round. The map changes each round.",
               "Killstreaks without dying: 3 radar, 5 airstrike, 7 sentry turret (X).",
               "Crouch to be harder to hit. Cars and crates stop bullets.",
@@ -5357,7 +5357,7 @@ class Game:
 # ---------------------------------------------------------------
 # 버튼 -> 키보드 키 (게임 중). A 점프와 왼쪽 스틱 이동, 트리거는 따로 처리해요
 PAD_GAME_KEYS = {"b": pygame.K_c, "x": pygame.K_r, "y": pygame.K_TAB, "rb": pygame.K_g, "lb": pygame.K_j,
-                 "r3": pygame.K_v, "up": pygame.K_x, "down": pygame.K_b, "left": pygame.K_u, "start": pygame.K_h,
+                 "r3": pygame.K_v, "up": pygame.K_x, "down": pygame.K_b, "left": pygame.K_u, "start": pygame.K_ESCAPE,
                  "right": pygame.K_t, "back": pygame.K_y}
 # 메뉴 화면에서: A 확인, B 뒤로, 십자키 이동, X 좀비 모드, Y 이어하기, 시작 버튼 설정
 PAD_MENU_KEYS = {"a": pygame.K_RETURN, "b": pygame.K_ESCAPE, "up": pygame.K_UP, "down": pygame.K_DOWN,
@@ -5993,6 +5993,38 @@ async def loadout_screen(save, choice):
         await asyncio.sleep(0)
 
 
+PAUSE_ITEMS = ["RESUME", "HELP", "SETTINGS", "QUIT TO MENU"]
+
+
+def draw_pause(screen, fonts, row):
+    """일시정지 메뉴: 게임 화면 위에 반투명 판"""
+    shade_panel = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    shade_panel.fill((5, 5, 15, 215))
+    screen.blit(shade_panel, (0, 0))
+    title = fonts["big"].render("PAUSED", True, (255, 80, 200))
+    screen.blit(title, title.get_rect(center=(WIDTH / 2, HEIGHT * 0.25)))
+    for i, item in enumerate(PAUSE_ITEMS):
+        selected = i == row
+        rect = pygame.Rect(0, 0, WIDTH * 0.32, HEIGHT * 0.08)
+        rect.center = (WIDTH / 2, HEIGHT * (0.38 + i * 0.1))
+        panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+        panel.fill((255, 255, 255, 45) if selected else (0, 0, 0, 120))
+        screen.blit(panel, rect)
+        pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1)
+        label = fonts["normal"].render(item, True, YELLOW if selected else WHITE)
+        screen.blit(label, label.get_rect(center=rect.center))
+    ko = fonts["lang"] == "ko"
+    hint = "↑↓ 고르기   Enter 확인   ESC 계속하기" if ko else "UP/DOWN choose   ENTER select   ESC resume"
+    image = fonts["help"].render(hint, True, YELLOW)
+    screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.85)))
+
+
+def grab_mouse(on):
+    pygame.event.set_grab(on)
+    pygame.mouse.set_visible(not on)
+    pygame.mouse.get_rel()
+
+
 async def run():
     """게임 한 판 실행. ESC를 누르면 끝나요.
 
@@ -6026,22 +6058,60 @@ async def run():
     closed = False             # 창을 닫았는지 여부
     work_time, frames, check_timer = 0.0, 0, 0.0   # 자동 해상도 조절용 기록
     gamepad = get_gamepad()
+    paused, pause_row = False, 0       # ESC: 일시정지 메뉴 (실수로 눌러도 진행이 날아가지 않아요)
     while running:
         dt = min(0.05, clock.tick(FPS) / 1000)
         events = pygame.event.get()
         pad, pad_pressed = gamepad.poll()
         if pad is not None:
             # 패드 버튼을 키 누름으로 바꿔서 같은 방식으로 처리해요
-            mapping = dict(PAD_GAME_KEYS, a=pygame.K_r) if game.game_over else PAD_GAME_KEYS
+            if paused:
+                mapping = PAD_MENU_KEYS
+            else:
+                mapping = dict(PAD_GAME_KEYS, a=pygame.K_r) if game.game_over else PAD_GAME_KEYS
             events += [pygame.event.Event(pygame.KEYDOWN, key=mapping[b], mod=0, unicode="")
                        for b in pad_pressed if b in mapping]
+        if paused:
+            choice = None
+            for event in events:
+                if event.type == pygame.QUIT:
+                    running, closed = False, True
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        choice = "RESUME"
+                    elif event.key in (pygame.K_UP, pygame.K_w):
+                        pause_row = (pause_row - 1) % len(PAUSE_ITEMS)
+                    elif event.key in (pygame.K_DOWN, pygame.K_s):
+                        pause_row = (pause_row + 1) % len(PAUSE_ITEMS)
+                    elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                        choice = PAUSE_ITEMS[pause_row]
+            if choice == "RESUME":
+                paused = False
+                grab_mouse(True)
+            elif choice == "HELP":
+                paused = False
+                game.show_help = True                  # 도움말 (H로 닫으면 계속)
+                grab_mouse(True)
+            elif choice == "SETTINGS":
+                if await settings_screen(save) == "closed":
+                    running, closed = False, True
+            elif choice == "QUIT TO MENU":
+                running = False
+            if not running:
+                break
+            game.draw(screen)
+            draw_pause(screen, game.fonts, pause_row)
+            pygame.display.flip()
+            await asyncio.sleep(0)
+            continue
         for event in events:
             if event.type in (getattr(pygame, "CONTROLLERDEVICEADDED", -1), pygame.JOYDEVICEADDED):
                 gamepad.connect()
             if event.type == pygame.QUIT:
                 running, closed = False, True
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                running = False
+                paused, pause_row = True, 0
+                grab_mouse(False)
             elif event.type == pygame.KEYDOWN and game.game_over and event.key == pygame.K_r:
                 game.retry_round()
             elif event.type == pygame.KEYDOWN and game.game_over and event.key == pygame.K_n:
