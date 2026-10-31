@@ -567,6 +567,26 @@ class GameTest(unittest.TestCase):
         self.assertEqual(alarm.state, "ringing")
         self.assertGreater(len(game.enemies), before)                      # 증원
 
+    def test_weapon_feel(self):
+        for spec in shooter.WEAPONS:
+            if spec["name"] not in shooter.SHELL_RELOAD:
+                self.assertIn(shooter.weapon_class(spec["name"]), shooter.RELOAD_STYLES)
+        game = shooter.Game({}, 1)
+        game.briefing = None
+        screen = pygame.display.get_surface()
+        game.arsenal.current.mag = 3
+        game.arsenal.reload()
+        for _ in range(20):                                               # 재장전 동작 + 옆걸음 기울기
+            game.update(1 / 60, Keys({pygame.K_d: True}), 0, 0, (False, False, False))
+            game.draw(screen)
+        self.assertLess(game.strafe_tilt, -1)
+        self.assertLessEqual(len(game.tilt_cache), 48)
+        w = game.arsenal.current
+        w.mag, w.reserve = 0, 0
+        game.arsenal.reload_left = 0
+        game.update(1 / 60, Keys({pygame.K_f: True}), 0, 0, (False, False, False))
+        self.assertTrue(any("OUT OF AMMO" in p[0] for p in game.popups))   # 빈 총 딸깍
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

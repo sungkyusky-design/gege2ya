@@ -111,7 +111,10 @@ MAX_COL_W = 8
 FRAME_BUDGET = 0.014              # 한 장면 계산에 이보다 오래 걸리면 줄 폭을 넓혀요(초)
 # 부서지는 엄폐물: 글자 -> 체력 (상자, 모래주머니). 총알과 폭발에 부서져요
 DESTRUCTIBLE = {"K": 160, "Z": 260}
-SHELL_RELOAD = {"SHOTGUN": 0.42}    # 한 발씩 넣는 총: 한 발 넣는 시간(초). 쏘면 바로 멈추고 쏴요
+SHELL_RELOAD = {"SHOTGUN": 0.42}
+# 무기 종류마다 다른 재장전 동작: (내리는 정도, 옆으로, 기울기(도))
+RELOAD_STYLES = {"RIFLES": (110, 50, 14), "SMGS": (90, 40, 20), "MARKSMAN": (115, 55, 10), "LMGS": (150, 30, 6),
+                 "PISTOLS": (70, 25, 30), "LAUNCHERS": (130, 80, 4), "SHOTGUNS": (100, 45, 12)}    # 한 발씩 넣는 총: 한 발 넣는 시간(초). 쏘면 바로 멈추고 쏴요
 BOLT_ACTION = ("SNIPER",)            # 쏠 때마다 노리쇠를 당기는 총
 MAX_DECALS = 240                     # 벽에 남는 총알 자국/그을음 최대 개수
 # 실내: 이 바닥 위에는 천장이 있어요. 천장 높이는 실내 벽 높이와 같아요
@@ -4725,6 +4728,11 @@ class Game:
         self.smoke = []            # 총구 연기: [x, y (총구에서 떨어진 거리), 속도 x, 속도 y, 남은 시간, 크기]
         self.bolt_anim = 0.0       # 저격총 노리쇠 당기는 동작 남은 시간
         self.inspect_timer = 0.0   # 무기 살펴보기 (I) 남은 시간
+        self.strafe_tilt = 0.0     # 옆으로 걸으면 총이 살짝 기울어요
+        self.land_dip = 0.0        # 착지하면 총이 쿵 내려갔다 올라와요
+        self.was_air = False
+        self.dry_cd = 0.0
+        self.tilt_cache = {}
         self.ads_anim = 0.0        # 정조준 들어가고 나올 때 총이 살짝 내려갔다 오는 동작
         self.was_aiming = False
         self.sound_marks = []      # 소리 표시 (설정 SOUND MARKS): [방향, "step"/"shot", 남은 시간]
@@ -5947,6 +5955,13 @@ class Game:
     def update_movement2(self, dt, keys):
         """움직임 2.0: 낮은 엄폐물 뛰어넘기(앞으로 가며 스페이스), 몸 기울이기(, .)"""
         p = self.player
+        strafe = (1 if keys[pygame.K_d] else 0) - (1 if keys[pygame.K_a] else 0)
+        self.strafe_tilt += (-3.5 * strafe - self.strafe_tilt) * min(1.0, 8 * dt)
+        if self.was_air and p.z == 0:
+            self.land_dip = 0.25
+        self.was_air = p.z > 0
+        self.land_dip = max(0.0, self.land_dip - dt)
+        self.dry_cd -= dt
         want = (1 if keys[pygame.K_PERIOD] else 0) - (1 if keys[pygame.K_COMMA] else 0)
         if p.sprinting or p.slide_timer > 0 or self.vault:
             want = 0
@@ -6204,6 +6219,11 @@ class Game:
         # 자동 무기는 누르고 있으면 계속, 나머지는 누를 때마다 한 발 (점사는 한 번에 여러 발)
         pressed = fire_down and not self.fire_was_down
         self.fire_was_down = fire_down
+        w_now = arsenal.current
+        if pressed and w_now.mag == 0 and w_now.reserve == 0 and self.dry_cd <= 0 and not arsenal.busy:
+            self.sounds.play("dry")                       # 빈 총: 딸깍
+            self.dry_cd = 0.3
+            self.popups.append([f"OUT OF AMMO  -  {kl(pygame.K_TAB)} SWITCH", RED, 1.2])
         if ready and (fire_down if spec["auto"] else pressed) and arsenal.try_fire():
             self.gun_sound(spec)
             self.on_fire(spec)
@@ -7921,9 +7941,12 @@ class Game:
         else:
             shell_prog = None
         if prog is not None:
-            # 재장전: 총을 내리며 기울이고, 탄창을 빼고 끼운 뒤 다시 올려요
-            down = 110 * math.sin(min(1.0, prog * 1.15) * math.pi) + 30
-            bx -= 50 * UI * math.sin(prog * math.pi)
+            # 재장전: 무기 종류마다 다르게 (권총은 휙 기울이고, 기관총은 크게 내려요)
+            lower, side, roll = RELOAD_STYLES.get(weapon_class(a.current.spec["name"]), (110, 50, 14))
+            k = math.sin(min(1.0, prog * 1.15) * math.pi)
+            down = lower * k + 30
+            bx -= side * UI * math.sin(prog * math.pi)
+            tilt += roll * k
         elif a.switch_left > 0:
             down = 220 * a.switch_left / a.SWITCH_TIME
         if self.bolt_anim > 0:                      # 노리쇠: 총을 살짝 내리고 오른쪽으로 비틀었다 돌아와요
@@ -7932,6 +7955,9 @@ class Game:
             bx += 25 * UI * k
         if self.ads_anim > 0:                       # 정조준 전환: 잠깐 내려갔다 올라와요
             down += 55 * math.sin(self.ads_anim / 0.16 * math.pi)
+        if self.land_dip > 0:                       # 착지: 쿵
+            down += 40 * math.sin(self.land_dip / 0.25 * math.pi)
+        tilt += self.strafe_tilt * calm
         if self.inspect_timer > 0:                  # 살펴보기: 총을 왼쪽으로 돌려 옆면을 보여줘요
             k = math.sin((1 - self.inspect_timer / 2.4) * math.pi)
             tilt = 22 * k
@@ -7943,8 +7969,14 @@ class Game:
             kx, ky = a.kick * 12 * UI, a.kick * 20 * UI
         dx = bx + kx + self.sway * calm
         dy = by + ky + down * UI + p.crouch_amt * 10 * UI
-        if tilt:
-            turned = pygame.transform.rotate(image, tilt)
+        angle = int(round(tilt / 2)) * 2                            # 2도 단위로 (돌린 그림을 다시 써요)
+        if angle:
+            turned = self.tilt_cache.get((key, angle))
+            if turned is None:
+                if len(self.tilt_cache) > 48:
+                    self.tilt_cache.clear()
+                turned = pygame.transform.rotate(image, angle)
+                self.tilt_cache[(key, angle)] = turned
             screen.blit(turned, turned.get_rect(center=(ox + dx + image.get_width() / 2, oy + dy + image.get_height() / 2)))
         else:
             screen.blit(image, (ox + dx, oy + dy))
@@ -8234,7 +8266,8 @@ class Game:
                          border_radius=3)
         w = self.arsenal.current
         ammo = "RELOADING..." if self.arsenal.reload_left > 0 else f"{w.mag} / {w.reserve}"
-        image = big_font.render(ammo, True, WHITE)
+        low = self.arsenal.reload_left <= 0 and w.mag <= max(1, w.spec["mag"] // 4)
+        image = big_font.render(ammo, True, RED if low and pygame.time.get_ticks() // 300 % 2 else WHITE)
         rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, HEIGHT - 20 * UI)))
         name = w.spec["name"] + (" +" if w.upgraded else "")
         image = self.small_font.render(name, True, (200, 200, 220))
