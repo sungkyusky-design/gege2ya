@@ -153,7 +153,8 @@ KEY_ACTIONS = [
     ("RELOAD", pygame.K_r, "재장전"), ("GRENADE", pygame.K_g, "수류탄"), ("KNIFE", pygame.K_v, "칼"),
     ("STREAK", pygame.K_x, "킬스트릭"), ("NEXT WEAPON", pygame.K_q, "무기 바꾸기"), ("SCOPE ZOOM", pygame.K_z, "조준경 배율"),
     ("FOCUS", pygame.K_t, "스킬: 집중"), ("MEDKIT", pygame.K_y, "스킬: 구급상자"), ("SCAN", pygame.K_j, "스킬: 탐지"),
-    ("INSPECT", pygame.K_i, "무기 살펴보기"), ("SQUAD ORDER", pygame.K_k, "동료 명령: 따라와/대기/공격"), ("SHOP AMMO", pygame.K_b, "좀비 상점: 탄약"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
+    ("INSPECT", pygame.K_i, "무기 살펴보기"), ("SQUAD ORDER", pygame.K_k, "동료 명령: 따라와/대기/공격"),
+    ("FLASHLIGHT", pygame.K_l, "손전등 켜기/끄기"), ("SHOP AMMO", pygame.K_b, "좀비 상점: 탄약"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
 ]
 # 바꿀 수 없는 키: 메뉴/시점/전체 화면
 KEY_FIXED = (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_UP, pygame.K_DOWN,
@@ -430,6 +431,10 @@ ENEMY_GRENADE_BLAST = (2.8, 70)
 
 KNIFE_RANGE = 1.5
 KNIFE_DAMAGE = 150
+# 잠입: 적이 나를 알아채는 데 걸리는 시간. 앞쪽 시야(약 140도) 안에서만 알아채요 (가까우면 바로)
+VIEW_COS = math.cos(math.radians(70))
+AWARE_DECAY = 0.25                # 안 보이면 1초에 이만큼 줄어요
+TAKEDOWN_XP = 50                  # 뒤에서 몰래 처치 보너스
 KNIFE_TIME = 0.3                  # 칼 휘두르는 시간
 KNIFE_COOLDOWN = 0.6
 
@@ -2185,6 +2190,10 @@ class Enemy:
         self.suppressed = 0.0     # 내 총알이 가까이 지나가면 움츠러들어 덜 맞혀요
         self.walk = 0.0           # 걸은 거리 (다리 그림 바꾸기용)
         self.nav_timer, self.nav_goal, self.nav_target = 0.0, None, None   # 길찾기 (steer)
+        self.aware = 0.0          # 나를 알아챈 정도 0~1 (1이 되면 공격). 머리 위에 ? 로 보여요
+        self.in_view = False
+        self.combat_timer = 0.0   # 싸우는 중 (이때는 뒤도 봐요)
+        self.alarm = 0.0          # 방금 알아챘을 때 머리 위 ! 표시 시간
         self.role = None          # 분대 역할: "suppress" 제압 사격 / "flank" 옆으로 돌아가기
         self.role_timer = 0.0
         self.flank_spot = None
@@ -2233,7 +2242,23 @@ class Enemy:
         self.los_timer -= dt
         if self.los_timer <= 0:
             self.los_timer = 0.2
-            self.sees = dist < t["sight"] and can_see(self.pos, player.pos)
+            # 시야 안에 있는지: 싸우는 중이거나 아주 가까우면 사방, 아니면 앞쪽만
+            front = True
+            if dist > 2.0 and self.combat_timer <= 0 and dist > 0:
+                front = (player.pos - self.pos).normalize().dot(self.facing) > VIEW_COS
+            self.in_view = dist < t["sight"] and front and can_see(self.pos, player.pos)
+        self.combat_timer -= dt
+        self.alarm -= dt
+        if self.in_view:
+            if not self.sees:                       # 알아채는 중: 가까울수록, 눈에 띌수록 빨리
+                rate = player.visibility * max(1.0, self.skill) / (0.25 + dist * 0.06)
+                self.aware = min(1.0, self.aware + rate * dt)
+                if self.aware >= 1.0:
+                    self.sees, self.alarm = True, 1.0
+            self.combat_timer = max(self.combat_timer, 6.0) if self.sees else self.combat_timer
+        else:
+            self.sees = False
+            self.aware = max(0.0, self.aware - AWARE_DECAY * dt)
         self.cover_cooldown -= dt
         if self.reload_left > 0:                  # 재장전 중
             self.reload_left -= dt
@@ -2516,6 +2541,7 @@ class Player:
         self.slide_timer = 0.0    # 슬라이딩 남은 시간
         self.slide_dir = pygame.Vector2(1, 0)
         self.noise = 0.0          # 내 소리가 들리는 거리 (적이 듣고 다가와요)
+        self.visibility = 1.0     # 눈에 띄는 정도 (앉으면/어두우면 작게, 손전등을 켜면 크게)
         self.turn_hold = 0.0      # 화살표 키를 누르고 있는 시간 (살짝 누르면 천천히, 오래 누르면 빠르게)
         self.look_hold = 0.0
         self.stick = (0.0, 0.0)   # 게임패드 오른쪽 스틱 (좌우 라디안/초, 위아래 px/초)
@@ -2898,6 +2924,8 @@ class Game:
         self.challenge = challenge  # 도전 모드 이름 (없으면 None)
         self.allies = []           # AI 동료 (설정 SQUADMATES)
         self.squad_order = 0       # SQUAD_ORDERS 중 몇 번째
+        self.flashlight = False    # 손전등 (L)
+        self.body_timer = 0.0      # 시체 발견 검사 간격
         self.hold_pos = None
         self.world_tracers = []    # 동료와 적이 서로 쏜 총알 궤적: [시작 위치, 끝 위치, 남은 시간]
         self.briefing = None       # 세트 브리핑 화면을 보여준 시간 (None이면 안 보여줌)
@@ -3390,6 +3418,33 @@ class Game:
             self.popups.append(["TRAINING COMPLETE!" if self.tutorial_step == len(steps) else "GOOD!",
                                 (80, 255, 120), 1.5])
 
+    def draw_darkness(self, screen):
+        """밤: 화면 가장자리가 어두워요. 손전등을 켜면 가운데가 밝게 비춰져요"""
+        key = (WIDTH, HEIGHT, self.night, self.flashlight)
+        if getattr(self, "dark_key", None) != key:
+            self.dark_key = key
+            small = pygame.Surface((160, 90))
+            add = pygame.Surface((160, 90))
+            small.fill((255, 255, 255))
+            add.fill((0, 0, 0))
+            if self.night:
+                edge = 55 if self.flashlight else 80
+                for r in range(95, 0, -3):                 # 바깥에서 안쪽으로 점점 밝게
+                    k = r / 95
+                    v = int(255 - (255 - edge) * k ** 1.6)
+                    pygame.draw.ellipse(small, (v, v, int(v * 1.02) if v < 250 else 255),
+                                        (80 - r * 1.1, 45 - r * 0.62, r * 2.2, r * 1.24))
+            if self.flashlight:
+                for r in range(30, 0, -2):                 # 손전등 빛: 가운데가 밝고 따뜻하게
+                    k = 1 - r / 30
+                    pygame.draw.ellipse(add, (int(95 * k), int(88 * k), int(62 * k)), (80 - r * 1.3, 48 - r, r * 2.6, r * 2))
+            self.dark_mult = pygame.transform.smoothscale(small, (WIDTH, HEIGHT)) if self.night else None
+            self.dark_add = pygame.transform.smoothscale(add, (WIDTH, HEIGHT)) if self.flashlight else None
+        if self.dark_add is not None:
+            screen.blit(self.dark_add, (0, 0), special_flags=pygame.BLEND_ADD)
+        if self.dark_mult is not None:
+            screen.blit(self.dark_mult, (0, 0), special_flags=pygame.BLEND_MULT)
+
     def draw_radio(self, screen):
         """본부 무전: 왼쪽 가운데에 'HQ' 상자와 한 글자씩 나오는 말"""
         text, age = self.radio_msg
@@ -3862,6 +3917,27 @@ class Game:
             if self.mode == "mission":
                 self.advance_stage()
 
+    def check_bodies(self):
+        """눈치 못 챈 적이 쓰러진 동료를 보면: "MAN DOWN!" 외치고 그쪽을 수색해요 (근처 동료도)"""
+        for corpse in self.corpses:
+            if getattr(corpse, "found", False):
+                continue
+            for enemy in self.enemies:
+                if enemy.sees or "melee" in enemy.t or enemy.kind == "TARGET":
+                    continue
+                offset = corpse.pos - enemy.pos
+                d = offset.length()
+                if d < 9 and (d < 2 or offset.normalize().dot(enemy.facing) > VIEW_COS) and can_see(enemy.pos, corpse.pos):
+                    corpse.found = True
+                    self.callout_cooldown = 0.0
+                    self.shout(enemy, "MAN DOWN!")
+                    for other in self.enemies:
+                        if other.pos.distance_to(enemy.pos) < 10 and not other.sees and "melee" not in other.t:
+                            other.search = pygame.Vector2(corpse.pos)
+                            other.aware = max(other.aware, 0.5)
+                            other.combat_timer = 6.0
+                    break
+
     def update_boss(self, boss, dt):
         """보스 패턴: 체력 60% 아래 → 화가 나서 빨라지고 돌진, 30% 아래 → 부하를 부르고 연막"""
         ratio = boss.hp / boss.t["hp"]
@@ -4266,6 +4342,10 @@ class Game:
                 for ally in self.allies:
                     if not ally.down:
                         ally.callout = [{"FOLLOW": "ON YOU!", "HOLD": "HOLDING!", "ATTACK": "MOVING IN!"}[order], 1.2]
+            elif event.key == pygame.K_l:                       # 손전등
+                self.flashlight = not self.flashlight
+                self.sounds.play("beep", 0.4)
+                self.popups.append(["FLASHLIGHT ON" if self.flashlight else "FLASHLIGHT OFF", WHITE, 0.8])
             elif event.key == pygame.K_i and not a.busy and not self.aiming:   # 무기 살펴보기
                 self.inspect_timer = 2.4
             elif event.key == pygame.K_e:      # 정조준 켜기/끄기
@@ -4468,6 +4548,21 @@ class Game:
             step_noise = 9.0 if p.sprinting else 4.5
         self.gun_noise = max(0.0, self.gun_noise - dt)
         p.noise = max(step_noise, self.gun_noise_radius if self.gun_noise > 0 else 0.0)
+        # 눈에 띄는 정도: 앉으면 작게, 달리면 크게, 어두운 맵은 작게, 손전등을 켜면 크게
+        vis = 1.0
+        if p.crouch_amt > 0.5:
+            vis *= 0.55
+        if p.sprinting:
+            vis *= 1.4
+        elif p.moving:
+            vis *= 1.15
+        if self.night:
+            vis *= 1.8 if self.flashlight else 0.6
+        p.visibility = vis
+        self.body_timer -= dt
+        if self.body_timer <= 0 and self.mode != "zombies":
+            self.body_timer = 0.5
+            self.check_bodies()
         if self.mode == "zombies":
             self.update_zombies(edt)
         else:
@@ -4484,6 +4579,11 @@ class Game:
             damage = enemy.update(edt, self.player)
             if enemy.kind == "BOSS":
                 self.update_boss(enemy, edt)
+            if enemy.alarm >= 0.99 and not getattr(enemy, "alarm_played", False):
+                enemy.alarm_played = True                      # 들켰어요! (한 번만)
+                self.play_at("beep", enemy.pos, 18, 0.7)
+            elif enemy.alarm < 0:
+                enemy.alarm_played = False
             moved = enemy.pos.distance_to(before)
             enemy.walk += moved
             enemy.moving = 0.15 if moved > 0.0005 else max(0.0, enemy.moving - dt)
@@ -4808,6 +4908,7 @@ class Game:
         enemy.flinch = 0.16 if how == "HEADSHOT!" else 0.12
         enemy.flinch_pose = "flinch_head" if how == "HEADSHOT!" else random.choice(("flinch_l", "flinch_r"))
         enemy.spotted = max(enemy.spotted, enemy.t["reaction"])   # 맞으면 바로 반격
+        enemy.aware, enemy.combat_timer = 1.0, 6.0               # 맞으면 바로 알아채고 사방을 봐요
         enemy.sees = True
         if how not in STREAK_KILLS:
             self.sounds.play("hit")
@@ -4863,7 +4964,7 @@ class Game:
         if self.mode != "training" and how != "ALLY":   # 누적 기록 (업적용, 내가 쓰러뜨린 것만)
             life = self.save.setdefault("lifetime", {})
             life["kills"] = life.get("kills", 0) + 1
-            key = {"HEADSHOT!": "heads", "KNIFE!": "knife", "BOOM!": "explosive"}.get(how)
+            key = {"HEADSHOT!": "heads", "KNIFE!": "knife", "TAKEDOWN!": "knife", "BOOM!": "explosive"}.get(how)
             if key:
                 life[key] = life.get(key, 0) + 1
         stats = self.stats
@@ -4901,6 +5002,9 @@ class Game:
             xp += XP["headshot"]
         elif how == "KNIFE!":
             xp += XP["knife"]
+        elif how == "TAKEDOWN!":
+            xp += XP["knife"] + TAKEDOWN_XP
+            self.popups.append(["SILENT TAKEDOWN", (150, 220, 255), 1.5])
         if enemy.kind == "BOSS":
             xp += XP["boss"]
         if how == "ALLY":
@@ -5281,7 +5385,11 @@ class Game:
             if d < best_d and abs(angle_diff(math.atan2(offset.y, offset.x), p.angle)) < 0.5:
                 best, best_d = enemy, d
         if best:
-            self.damage_enemy(best, KNIFE_DAMAGE, "KNIFE!")
+            behind = (p.pos - best.pos).dot(best.facing) < 0
+            if not best.sees and best.aware < 1.0 and behind and best.kind != "BOSS" and "melee" not in best.t:
+                self.damage_enemy(best, 9999, "TAKEDOWN!")      # 눈치 못 챈 적을 뒤에서: 한 번에, 조용히
+            else:
+                self.damage_enemy(best, KNIFE_DAMAGE, "KNIFE!")
 
     def collect_pickups(self):
         """가까이 간 상자를 주워요. 꽉 차서 못 쓰는 상자는 그대로 둬요."""
@@ -5347,6 +5455,8 @@ class Game:
         if self.lightning > 0:
             self.flash_overlay.set_alpha(int(190 * self.lightning / 0.3 * (0.75 + 0.25 * math.sin(self.lightning * 60))))
             screen.blit(self.flash_overlay, (0, 0))
+        if self.night or self.flashlight:
+            self.draw_darkness(screen)
         if self.theme["snow"]:
             self.draw_snow(screen)
         if self.theme.get("rain"):
@@ -5714,6 +5824,18 @@ class Game:
                     pygame.draw.polygon(screen, WHITE, [(box[0] - 4 * UI, bubble.bottom - 1), (box[0] + 4 * UI, bubble.bottom - 1),
                                                         (box[0], bubble.bottom + 6 * UI)])
                     screen.blit(label, label.get_rect(center=bubble.center))
+            if isinstance(enemy, Enemy) and box[4] < 25 and "melee" not in enemy.t and enemy.kind != "TARGET" and (
+                    (not enemy.sees and enemy.aware > 0.05) or enemy.alarm > 0):
+                col = int(box[0] // self.col_w)
+                if 0 <= col < self.num_rays and box[4] < self.zbuffer[col] + 0.3:
+                    if enemy.alarm > 0:                      # 들켰어요
+                        mark, color = "!", RED
+                    else:                                     # 알아채는 중: 노란 ? 가 점점 진해져요
+                        k = enemy.aware
+                        mark, color = "?", (255, int(255 - 120 * k), int(90 * (1 - k)))
+                    label = self.big_font.render(mark, True, color)
+                    label = pygame.transform.smoothscale(label, (max(4, int(label.get_width() * 0.6)), max(4, int(label.get_height() * 0.6))))
+                    screen.blit(label, label.get_rect(midbottom=(box[0], box[1] - 16 * UI)))
             if enemy and enemy.heal_flash > 0:     # 치료받는 중: 머리 위에 초록 +
                 sx, top = box[0], box[1]
                 size = max(4, int(10 * UI))
@@ -6088,6 +6210,9 @@ class Game:
         # 계급과 경험치 막대
         rank_label = self.small_font.render(f"RANK {self.rank}", True, WHITE)
         screen.blit(rank_label, (16, 12 + 30 * UI))
+        if self.flashlight:
+            label = self.small_font.render("LIGHT ON", True, (255, 240, 170))
+            screen.blit(label, (16, 12 + 70 * UI))
         if self.allies:
             parts = [f"SQUAD [{SQUAD_ORDERS[self.squad_order]}]"]
             parts += [f"{a.name} {'DOWN' if a.down else int(a.hp)}" for a in self.allies]

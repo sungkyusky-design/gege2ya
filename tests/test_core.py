@@ -178,6 +178,40 @@ class GameTest(unittest.TestCase):
             game.navigator.clock += 1 / 60
         self.assertLess(enemy.pos.distance_to(p.pos), 3.0)
 
+    def _stealth_setup(self):
+        game = shooter.Game({}, 1, loadout=LOADOUT)
+        game.briefing, game.allies = None, []
+        p = game.player
+        for k in range(32):
+            angle = k * math.pi / 16
+            q = p.pos + pygame.Vector2(math.cos(angle), math.sin(angle)) * 5
+            if shooter.walk_clear(p.pos, q) and shooter.can_see(p.pos, q):
+                return game, q
+        self.skipTest("트인 곳이 없어요")
+
+    def test_enemy_only_notices_in_front(self):
+        game, spot = self._stealth_setup()
+        p = game.player
+        for facing_me, expected in ((False, False), (True, True)):
+            enemy = shooter.Enemy(spot.x, spot.y, "GRUNT")
+            enemy.t = dict(enemy.t, speed=0)
+            toward = (p.pos - enemy.pos).normalize()
+            for _ in range(60 * 3):
+                enemy.facing = toward if facing_me else -toward
+                enemy.update(1 / 60, p)
+            self.assertEqual(enemy.sees, expected)
+
+    def test_silent_takedown_from_behind(self):
+        game, spot = self._stealth_setup()
+        p = game.player
+        away = (spot - p.pos).normalize()
+        enemy = shooter.Enemy(*(p.pos + away * 1.0), "HEAVY")      # 칼 한 번으론 안 죽는 적도 한 번에
+        enemy.facing = pygame.Vector2(away)
+        game.enemies = [enemy, shooter.Enemy(0.5, 0.5, "GRUNT")]
+        p.angle = math.atan2(away.y, away.x)
+        game.knife_attack()
+        self.assertNotIn(enemy, game.enemies)
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
