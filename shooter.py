@@ -2460,6 +2460,7 @@ class MaskedKeys:
         return False if key in self.hidden else bool(self.real[key])
 
 
+ENDING_TIME = 40.0               # 엔딩 크레딧 길이(초)
 SPRINT_FOV = 0.07                # 달리면 시야가 이만큼 넓어져요 (7%)
 DIRECTOR_PEAK = 0.85       # 긴장감이 이만큼 차면 클라이맥스
 DIRECTOR_PEAK_TIME = 5.0   # 클라이맥스 길이(초)
@@ -6273,6 +6274,12 @@ class Game:
             dt *= WHEEL_SLOW                       # 휠을 보는 동안 시간이 느려져요
         if self.show_help:          # 도움말을 보는 동안은 멈춰요
             return
+        if getattr(self, "ending", None) is not None:   # 엔딩 크레딧: 스페이스로 넘기기
+            self.ending += dt
+            if (self.ending > 2.0 and (keys[pygame.K_SPACE] or keys[pygame.K_f] or buttons[0])) or \
+                    self.ending > ENDING_TIME:
+                self.ending = None
+            return
         if self.briefing is not None:   # 세트 브리핑: 스페이스/사격/클릭(패드 A)으로 시작
             self.briefing += dt
             if self.briefing > 0.8 and (keys[pygame.K_SPACE] or keys[pygame.K_f] or buttons[0]):
@@ -6652,6 +6659,9 @@ class Game:
             self.slowmo = 0.8                         # 마지막 한 명(또는 목표 완료): 슬로모션
             self.round_clear_timer = 4.0
             self.banner = "CAMPAIGN COMPLETE!" if self.round == CAMPAIGN_ROUNDS else "ROUND CLEAR"
+            if self.round == CAMPAIGN_ROUNDS and not self.deeprun and not self.challenge:
+                self.ending = 0.0                         # 100라운드: 엔딩 크레딧
+                self.save["campaign_done"] = True
             self.sub_banners = [] if self.round != CAMPAIGN_ROUNDS else [("All 100 rounds cleared - the war goes on", YELLOW)]
             if self.round % SET_SIZE == 0 and self.round < CAMPAIGN_ROUNDS:       # 세트 끝
                 story = STORY[set_of(self.round) - 1]
@@ -7694,6 +7704,8 @@ class Game:
             self.draw_radio(screen)
         if self.briefing is not None:
             self.draw_briefing(screen)
+        if getattr(self, "ending", None) is not None:
+            self.draw_ending(screen)
         if self.mode == "training":
             self.draw_training(screen)
         if self.show_help:
@@ -7790,6 +7802,44 @@ class Game:
         self.sounds.duck = max(0.25, min(getattr(self.sounds, "duck", 1.0), 1 - amount))
         if amount > 0.4:
             self.sounds.play("ring", amount * 0.6)
+
+    def ending_lines(self):
+        """엔딩 크레딧 글: 이야기 마무리 + 내 기록 + 만든 사람들"""
+        life = self.save.get("lifetime", {})
+        lines = [("STRIKE ZONE", "title"), ("", None), ("ALL 100 ROUNDS CLEARED", "big"),
+                 ("The five operations are over. The coast is quiet again.", "normal"),
+                 ("HQ: Outstanding work, soldier. Get some rest.", "normal"), ("", None),
+                 ("YOUR WAR", "big"),
+                 (f"RANK {self.rank}", "normal"),
+                 (f"TOTAL KILLS {life.get('kills', 0)}   HEADSHOTS {life.get('heads', 0)}", "normal"),
+                 (f"ROUNDS CLEARED {life.get('rounds', 0)}   BEST STREAK {life.get('streak', 0)}", "normal"),
+                 (f"ACHIEVEMENTS {len(self.save.get('achievements', []))} / {len(ACHIEVEMENTS)}", "normal"),
+                 ("", None), ("MADE WITH", "big"), ("Python + pygame", "normal"),
+                 ("Every picture and sound is drawn in code", "normal"),
+                 ("Game design and play testing: YOU", "normal"), ("Code: you and Claude", "normal"),
+                 ("", None), ("THANK YOU FOR PLAYING", "big"), ("", None),
+                 ("The war goes on: keep playing for higher rounds", "small")]
+        return lines
+
+    def draw_ending(self, screen):
+        """엔딩: 화면이 어두워지고 글이 아래에서 위로 천천히 올라가요"""
+        t = self.ending
+        dim = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        dim.fill((6, 4, 16, int(min(235, t * 160))))
+        screen.blit(dim, (0, 0))
+        fonts = {"title": self.fonts["title"], "big": self.big_font, "normal": self.font, "small": self.small_font}
+        y = HEIGHT - (t - 0.8) * 46 * UI
+        for text, kind in self.ending_lines():
+            if kind is None:
+                y += 40 * UI
+                continue
+            font = fonts[kind]
+            color = UI_ACCENT if kind in ("title", "big") else WHITE
+            if -60 < y < HEIGHT + 60:
+                self.center_text(screen, font, text, color, y)
+            y += font.get_linesize() + 10 * UI
+        if t > 2.0:
+            draw_key_text(screen, self.small_font, [(kl(pygame.K_SPACE), "skip")], (WIDTH - 20, HEIGHT - 20), "bottomright")
 
     def mood(self):
         """맵 분위기 이름 (색 보정용)"""
@@ -8539,6 +8589,8 @@ class Game:
 
     def draw_hud(self, screen):
         font, big_font = self.font, self.big_font
+        if getattr(self, "ending", None) is not None:
+            return                               # 엔딩 크레딧 동안은 HUD 없이
         if self.game_over:                       # 끝났으면 결과 카드만 (HUD 글자가 카드 뒤로 비치지 않게)
             self.draw_game_over(screen, big_font, font)
             return
@@ -9983,6 +10035,59 @@ async def help_screen(fonts):
         await asyncio.sleep(0)
 
 
+_splash_shown = [False]
+
+
+async def splash_screen():
+    """게임을 켜면 한 번: 2.5초 타이틀 연출 (아무 키나 누르면 바로 넘어가요).
+    넘기려고 누른 키는 버리지 않고 돌려줘서 메뉴가 그대로 받아요"""
+    if _splash_shown[0]:
+        return []
+    _splash_shown[0] = True
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    clock = pygame.time.Clock()
+    t = 0.0
+    while t < SPLASH_TIME:
+        t += clock.tick(60) / 1000
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type == pygame.KEYDOWN:
+                return [event]
+        draw_backdrop(screen)
+        # 네온 줄이 왼쪽에서 오른쪽으로 쓸고 지나가요
+        sweep = min(1.0, t / 0.8)
+        for i in range(5):
+            y = HEIGHT * (0.45 + i * 0.014)
+            color = UI_ACCENT if i % 2 else UI_CYAN
+            pygame.draw.line(screen, color, (0, y), (WIDTH * sweep, y), 2)
+        # 제목: 크게 나타났다가 제자리로 (살짝 깜빡이는 네온)
+        k = min(1.0, max(0.0, (t - 0.4) / 0.6))
+        if k > 0:
+            title = fonts["title"].render("STRIKE ZONE", True, UI_ACCENT).copy()
+            scale = 1.6 - 0.6 * (1 - (1 - k) ** 3)
+            title = pygame.transform.smoothscale(title, (int(title.get_width() * scale), int(title.get_height() * scale)))
+            flicker = 0.75 if 1.0 < t < 1.15 else 1.0
+            title.set_alpha(int(255 * k * flicker))
+            screen.blit(title, title.get_rect(center=(WIDTH / 2, HEIGHT * 0.36)))
+        if t > 1.3:
+            sub = fonts["normal"].render("A RAYCAST SHOOTER", True, UI_CYAN).copy()
+            sub.set_alpha(int(255 * min(1.0, (t - 1.3) / 0.4)))
+            screen.blit(sub, sub.get_rect(center=(WIDTH / 2, HEIGHT * 0.58)))
+        fade = min(1.0, max(0.0, (t - (SPLASH_TIME - 0.4)) / 0.4))    # 끝에 어두워지며 메뉴로
+        if fade:
+            dim = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            dim.fill((0, 0, 0, int(255 * fade)))
+            screen.blit(dim, (0, 0))
+        present("splash_screen")
+        await asyncio.sleep(0)
+    return []
+
+
+SPLASH_TIME = 2.6
+
+
 async def intro_screen(save):
     """시작 화면: 왼쪽 PLAY(게임 모드), 오른쪽 PROFILE(기록·설정) 메뉴.
     ↑↓ 고르기, ←→ 값 바꾸기(세트·난이도·해상도) 또는 옆 칸으로, Enter 실행. 칸마다 단축키도 그대로.
@@ -9991,6 +10096,9 @@ async def intro_screen(save):
     res_index = min(save.get("res", 0), len(options) - 1)
     set_resolution(*options[res_index])
     screen = open_window()
+    replay = await splash_screen()                 # 오프닝 (넘길 때 누른 키는 메뉴로)
+    if replay == "closed":
+        return "closed"
     fonts = make_fonts()
     clock = pygame.time.Clock()
     continue_round = save.get("continue", 1)
@@ -10016,7 +10124,8 @@ async def intro_screen(save):
         items = [it for it in INTRO_ITEMS
                  if not (it[0] == pygame.K_c and continue_round <= 1) and not (it[0] == pygame.K_t and len(options) < 2)]
         sel = min(sel, len(items) - 1)
-        for event in menu_events():
+        events, replay = replay + menu_events(), []
+        for event in events:
             if event.type == pygame.QUIT:
                 return "closed"
             if event.type != pygame.KEYDOWN:
