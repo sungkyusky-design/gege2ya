@@ -125,6 +125,20 @@ class GameTest(unittest.TestCase):
         self.assertTrue(game.game_over)
         self.assertEqual(save["continue"], 33)
 
+    def test_door_opens_when_near_and_closes_later(self):
+        index = next(i for i, m in enumerate(shooter.MAPS) if m["name"] == "OFFICE BLOCK")
+        game = shooter.Game({}, shooter.CAMPAIGN_MAPS.index(index) + 1, loadout=LOADOUT)
+        game.briefing = None
+        game.enemies = []
+        (cx, cy) = next(iter(game.doors))
+        game.player.pos = pygame.Vector2(cx + 0.5, cy + 1.5) if not shooter.is_blocked(cx + 0.5, cy + 1.5) \
+            else pygame.Vector2(cx + 1.5, cy + 0.5)
+        game.update_doors(0.1)
+        self.assertFalse(shooter.is_blocked(cx + 0.5, cy + 0.5))
+        game.player.pos = pygame.Vector2(1.5, 1.5)
+        game.update_doors(5.0)
+        self.assertTrue(shooter.is_blocked(cx + 0.5, cy + 0.5))
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

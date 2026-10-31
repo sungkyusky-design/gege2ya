@@ -65,6 +65,7 @@ SOUND_RECIPES = {
     "radio":     (0.14, 18, 0.7, 0.30, 0, 0, 1500, 0.35, 0.22),    # 적 무전 "치직"
     "glass":     (0.35, 9, 0.7, 0.05, 0, 0, 3400, 0.45, 0.40),      # 유리 깨지는 "쨍그랑"
     "smash":     (0.30, 11, 1.0, 0.55, 85, 0.7, 0, 0, 0.60),        # 상자/모래주머니가 부서지는 "와장창"
+    "door":      (0.22, 14, 0.5, 0.80, 70, 0.6, 260, 0.25, 0.45),   # 문 여닫는 "끼익 쿵"
     "punch":     (0.16, 26, 0.0, 0.0, 52, 1.0, 0, 0, 0.55),
 }
 
@@ -80,7 +81,7 @@ MUFFLED_SOUNDS = ("enemy", "spit", "explosion", "boot_hard", "boot_soft", "boot_
 
 # 바닥 -> 발소리 (없는 바닥은 step_hard)
 STEP_SOUNDS = {".": "step_soft", ";": "step_soft", "g": "step_soft", "#": "step_soft",
-               "*": "step_snow", "-": "step_snow", "_": "step_wood", "p": "step_wood"}
+               "*": "step_snow", "-": "step_snow", "_": "step_wood", "p": "step_wood", "w": "step_wood"}
 
 
 # 내 발소리 -> 같은 바닥에서 적이 내는 군화 소리

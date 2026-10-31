@@ -397,6 +397,8 @@ WALLS = {
     "V": ((120, 120, 112), 0.9, False, None),
     "Z": ((165, 145, 100), 0.7, "ribs", None),
     "H": ((240, 238, 230), 3.2, "ribs", (255, 225, 120)),     # 등대: 높은 흰 탑, 꼭대기에 불빛
+    "i": ((225, 220, 205), 1.4, False, None),                 # 실내 벽 (천장 높이)
+    "d": ((150, 100, 60), 1.4, "door", None),                 # 문 (닫혀 있을 때)
 }
 
 
@@ -415,4 +417,36 @@ FLOORS = {
     "#": (135, 105, 75),
     "*": (232, 238, 245),
     "-": (190, 198, 210),
+    "w": (165, 125, 90),           # 실내 나무 바닥 (위에 천장이 있어요)
 }
+
+
+# 사무실 건물 (22번째 캠페인 맵): 건물 안은 천장이 있고 문(d)이 있어요
+#   'w' 실내 바닥(나무)  'i' 실내 벽  'd' 문 (가까이 가면 저절로 열리고, 아무도 없으면 닫혀요)
+OFFICE_BLOCK = dict(
+    name="OFFICE BLOCK",
+    sky=[(0.0, (70, 90, 140)), (0.55, (140, 160, 190)), (0.85, (215, 200, 185)), (1.0, (235, 215, 190))],
+    haze=(220, 210, 200), sun=math.pi * 0.6, stars=False, ground=":", lit=5, fog=1.0, snow=False, camo=None,
+    op="OPERATION PAPERWORK", brief="They turned an office tower into a fortress. Clear it room by room.",
+    rows=[
+        "gggggggggggggggggggggggggg",
+        "g::::::::::::::::::::::::g",
+        "g:L::::::::::E:::::::::L:g",
+        "g:::::RRRRRRdRRRRRRRRRR::g",
+        "g:K:::RwwwwiwwwwwiwwwwR::g",
+        "g:::::RwEwwiwwhwwdwwEwR::g",
+        "g:::::RwwwwdwwwwwiwwwwR:Eg",
+        "g:::::RiidiiwwwwwiiidiR::g",
+        "gE::::dwwwwwwwwwwwwwwwd::g",
+        "g:::::RiiidiwwwwwiidiiR::g",
+        "g:::::RwwwwiwwKwwiwwwwR::g",
+        "g::K::RwEwwdwwwwwdwwEwR::g",
+        "g:::::RwwwwiwwnwwiwwwwR::g",
+        "g:::::RRRRRRRRdRRRRRRRR::g",
+        "g::::::::::::::::::::::::g",
+        "g====================c===g",
+        "g=========c==============g",
+        "g:::P::::::::::::E:::::a:g",
+        "gggggggggggggggggggggggggg",
+    ],
+)
