@@ -7818,7 +7818,7 @@ async def settings_screen(save):
         hint = ("↑↓ 고르기     ←→ 바꾸기     Enter / ESC 저장하고 돌아가기" if ko
                 else "UP/DOWN choose     LEFT/RIGHT change     ENTER / ESC save and back")
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("settings_screen")
         await asyncio.sleep(0)
 
 
@@ -7884,7 +7884,7 @@ async def controls_screen(save):
         hint = ("↑↓←→ 고르기   Enter 바꾸기   Backspace 모두 처음대로   ESC 저장하고 돌아가기   (화살표 시점, ESC, Enter는 고정)"
                 if ko else "ARROWS choose   ENTER change   BACKSPACE reset all   ESC save and back")
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("controls_screen")
         await asyncio.sleep(0)
 
 
@@ -8019,7 +8019,7 @@ async def map_slots_screen(save):
         hint = ("↑↓ 고르기   Enter 만들기/고치기   P 플레이   Backspace 지우기   ESC 돌아가기" if ko
                 else "UP/DOWN choose   ENTER edit   P play   BACKSPACE delete   ESC back")
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("map_slots_screen")
         await asyncio.sleep(0)
 
 
@@ -8124,7 +8124,7 @@ async def map_editor(save, slot):
         hint = ("화살표 이동  스페이스 칠하기(누른 채 움직이면 계속)  X 지우기  C 검사  Enter 저장+플레이  ESC 저장+돌아가기" if ko
                 else "ARROWS move  SPACE paint (hold to draw)  X erase  C check  ENTER save+play  ESC save+back")
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("map_editor")
         await asyncio.sleep(0)
 
 
@@ -8177,7 +8177,7 @@ async def ranking_screen(save, mode_index=0):
         hint = ("←→ 모드 바꾸기   ESC 돌아가기   - 점수 = 그 판에 얻은 경험치 (처치, 헤드샷, 라운드 클리어...)"
                 if ko else "LEFT / RIGHT change mode   ESC back   - score = XP earned in that game")
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("ranking_screen")
         await asyncio.sleep(0)
 
 
@@ -8263,7 +8263,7 @@ async def stats_screen(save):
         hint = ("E 저장 코드 내보내기(복사)   I 코드 가져오기(붙여넣기)   ESC 돌아가기   - 웹과 맥 사이에 진행을 옮길 수 있어요"
                 if ko else "E export save code   I import save code   ESC back")
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("stats_screen")
         await asyncio.sleep(0)
 
 
@@ -8311,7 +8311,7 @@ async def challenge_screen(save):
             screen.blit(image, image.get_rect(midright=(rect.right - 20, rect.centery)))
         hint = "↑↓ 고르기   Enter 시작   ESC 돌아가기" if ko else "UP/DOWN choose   ENTER start   ESC back"
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("challenge_screen")
         await asyncio.sleep(0)
 
 
@@ -8374,7 +8374,7 @@ async def achievements_screen(save):
         hint = ("←→ 위장 무늬 고르기 (업적을 모으면 늘어나요)   ESC 돌아가기" if ko
                 else "LEFT/RIGHT choose camo (earn more with achievements)   ESC back")
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("achievements_screen")
         await asyncio.sleep(0)
 
 
@@ -8413,7 +8413,7 @@ async def help_screen(fonts):
         draw_backdrop(screen)
         draw_help(screen, fonts, "")
         draw_hint_bar(screen, fonts, "Enter / ESC 돌아가기 (아무 키)" if ko else "ANY KEY back")
-        pygame.display.flip()
+        present("help_screen")
         await asyncio.sleep(0)
 
 
@@ -8608,7 +8608,7 @@ async def intro_screen(save):
         hint = ("↑↓ 고르기   ←→ 값 바꾸기 / 옆 칸   Enter 실행   ESC 뒤로   - 칸 오른쪽 글자는 바로 가는 키" if ko else
                 "UP/DOWN choose   LEFT/RIGHT change / other column   ENTER select   ESC back   - letters are shortcuts")
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("intro_screen")
         await asyncio.sleep(0)
 
 
@@ -8674,7 +8674,7 @@ async def mission_screen(save):
         hint = "↑↓ 고르기     Enter 처음부터     C 이어하기     ESC 뒤로" if ko else \
             "UP/DOWN choose     ENTER start     C continue     ESC back"
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("mission_screen")
         await asyncio.sleep(0)
 
 
@@ -8730,7 +8730,7 @@ async def skills_screen(save):
         hint = ("↑↓ 고르기     → 배우기     ← 되돌리기     ESC 돌아가기   (계급이 오를 때마다 포인트 1)" if ko
                 else "UP/DOWN choose     RIGHT learn     LEFT undo     ESC back   (1 point per rank)")
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("skills_screen")
         await asyncio.sleep(0)
 
 
@@ -8824,7 +8824,7 @@ async def gunsmith_screen(save, name):
         hint = ("↑↓ 칸 고르기   ←→ 부착물 바꾸기   Enter / ESC 저장하고 돌아가기" if ko
                 else "UP/DOWN slot   LEFT/RIGHT attachment   ENTER / ESC save and back")
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("gunsmith_screen")
         await asyncio.sleep(0)
 
 
@@ -8974,7 +8974,7 @@ async def loadout_screen(save, choice):
         hint = ("↑↓ 고르기     ←→ 바꾸기     Enter 시작     G 총기 개조     K 스킬     ESC 뒤로" if ko
                 else "UP/DOWN choose     LEFT/RIGHT change     ENTER start     G gunsmith     K skills     ESC back")
         draw_hint_bar(screen, fonts, hint)
-        pygame.display.flip()
+        present("loadout_screen")
         await asyncio.sleep(0)
 
 
@@ -9053,31 +9053,79 @@ async def photo_mode(game):
         if msg_time > 0:
             image = fonts["help"].render(message, True, (80, 255, 120))
             screen.blit(image, image.get_rect(midtop=(WIDTH / 2, 12)))
-        pygame.display.flip()
+        present("photo_mode")
         await asyncio.sleep(0)
 
 
-def draw_pause(screen, fonts, row):
-    """일시정지 메뉴: 게임 화면 위에 반투명 판"""
+def blur_screen(screen, amount=10):
+    """화면을 흐리게: 작게 줄였다가 다시 키우면 뿌옇게 돼요"""
+    w, h = screen.get_size()
+    small = pygame.transform.smoothscale(screen, (max(1, w // amount), max(1, h // amount)))
+    screen.blit(pygame.transform.smoothscale(small, (w, h)), (0, 0))
+
+
+_pause_cursor = [None]
+
+
+def draw_pause(screen, fonts, row, age=1.0, blur=True):
+    """일시정지 메뉴: 게임 화면을 흐리고 어둡게, 가운데 카드에 메뉴. 처음 0.2초 동안 부드럽게 나타나요
+    blur=False: 이미 흐린 배경을 깔았을 때 (매 장면 흐리게 하면 느려요)"""
+    show = min(1.0, age / 0.2)
+    if blur:
+        blur_screen(screen)
     shade_panel = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-    shade_panel.fill((5, 5, 15, 215))
+    shade_panel.fill((5, 5, 15, int(150 * show)))
     screen.blit(shade_panel, (0, 0))
-    title = fonts["big"].render("PAUSED", True, (255, 80, 200))
-    screen.blit(title, title.get_rect(center=(WIDTH / 2, HEIGHT * 0.25)))
+    card = pygame.Rect(0, 0, WIDTH * 0.4, HEIGHT * (0.2 + len(PAUSE_ITEMS) * 0.095))
+    card.center = (WIDTH / 2, HEIGHT * 0.5 + (1 - show) * 30 * UI)            # 아래에서 살짝 올라와요
+    back = pygame.Surface(card.size, pygame.SRCALPHA)
+    pygame.draw.rect(back, (14, 10, 30, int(225 * show)), back.get_rect(), border_radius=int(12 * UI))
+    screen.blit(back, card)
+    pygame.draw.rect(screen, UI_EDGE, card, 1, border_radius=int(12 * UI))
+    draw_title(screen, fonts, "PAUSED", (WIDTH / 2, card.y + 46 * UI), anchor="center")
+    rects = []
     for i, item in enumerate(PAUSE_ITEMS):
-        selected = i == row
-        rect = pygame.Rect(0, 0, WIDTH * 0.32, HEIGHT * 0.08)
-        rect.center = (WIDTH / 2, HEIGHT * (0.38 + i * 0.1))
-        panel = pygame.Surface(rect.size, pygame.SRCALPHA)
-        panel.fill((255, 255, 255, 45) if selected else (0, 0, 0, 120))
-        screen.blit(panel, rect)
-        pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1)
-        label = fonts["normal"].render(item, True, YELLOW if selected else WHITE)
+        rect = pygame.Rect(0, 0, card.w * 0.8, HEIGHT * 0.075)
+        rect.center = (WIDTH / 2, card.y + 110 * UI + i * HEIGHT * 0.095)
+        rects.append(rect)
+        draw_panel(screen, rect, False)
+    target = pygame.Vector2(rects[row].topleft)
+    cur = _pause_cursor[0]
+    cur = target if cur is None or age < 0.05 else cur.lerp(target, 0.35)    # 고른 칸이 부드럽게 움직여요
+    _pause_cursor[0] = cur
+    draw_panel(screen, pygame.Rect(cur.x, cur.y, rects[0].w, rects[0].h), True)
+    for i, (item, rect) in enumerate(zip(PAUSE_ITEMS, rects)):
+        label = fonts["normal"].render(item, True, YELLOW if i == row else WHITE)
         screen.blit(label, label.get_rect(center=rect.center))
     ko = fonts["lang"] == "ko"
     hint = "↑↓ 고르기   Enter 확인   ESC 계속하기" if ko else "UP/DOWN choose   ENTER select   ESC resume"
-    image = fonts["help"].render(hint, True, YELLOW)
-    screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.85)))
+    draw_hint_bar(screen, fonts, hint)
+
+
+# 화면이 바뀔 때(메뉴 → 다른 메뉴, 메뉴 → 게임) 앞 화면이 0.22초 동안 부드럽게 사라져요
+FADE_TIME = 0.22
+_present = dict(key=None, frame=None, fade=None, start=0.0)
+
+
+def present(key, keep=True):
+    """pygame.display.flip() 대신 써요. key: 지금 화면 이름 (바뀌면 앞 화면에서 부드럽게 넘어가요)
+    keep=False 면 이 화면은 기억하지 않아요 (게임 화면은 매 장면 복사하면 느려서)"""
+    st = _present
+    screen = pygame.display.get_surface()
+    if key != st["key"]:
+        old = st["frame"]
+        st["fade"] = old if old is not None and old.get_size() == screen.get_size() else None
+        st["start"], st["key"] = time.time(), key
+    fresh = screen.copy() if keep else None
+    if st["fade"] is not None:
+        alpha = 1 - (time.time() - st["start"]) / FADE_TIME
+        if alpha <= 0:
+            st["fade"] = None
+        else:
+            st["fade"].set_alpha(int(255 * alpha))
+            screen.blit(st["fade"], (0, 0))
+    st["frame"] = fresh
+    pygame.display.flip()
 
 
 def grab_mouse(on):
@@ -9124,6 +9172,8 @@ async def run():
     work_time, frames, check_timer = 0.0, 0, 0.0   # 자동 해상도 조절용 기록
     gamepad = get_gamepad()
     paused, pause_row = False, 0       # ESC: 일시정지 메뉴 (실수로 눌러도 진행이 날아가지 않아요)
+    pause_started = 0.0                # 일시정지 메뉴가 나타나는 움직임용
+    pause_bg = None                    # 일시정지 뒤에 깔 흐린 게임 화면
     while running:
         dt = min(0.05, clock.tick(FPS) / 1000)
         events = [remap_event(event) for event in pygame.event.get()]   # 바꾼 키를 기본 키로
@@ -9169,9 +9219,13 @@ async def run():
                 running = False
             if not running:
                 break
-            game.draw(screen)
-            draw_pause(screen, game.fonts, pause_row)
-            pygame.display.flip()
+            if pause_bg is None or pause_bg.get_size() != screen.get_size():
+                game.draw(screen, hud=False)             # 멈춘 화면을 한 번만 그리고 흐리게 해서 기억해요
+                blur_screen(screen)
+                pause_bg = screen.copy()
+            screen.blit(pause_bg, (0, 0))
+            draw_pause(screen, game.fonts, pause_row, time.time() - pause_started, blur=False)
+            present("pause")
             await asyncio.sleep(0)
             continue
         for event in events:
@@ -9181,6 +9235,7 @@ async def run():
                 running, closed = False, True
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 paused, pause_row = True, 0
+                pause_started, pause_bg = time.time(), None
                 grab_mouse(False)
             elif event.type == pygame.KEYDOWN and game.game_over and event.key == pygame.K_r:
                 game.retry_round()
@@ -9218,7 +9273,7 @@ async def run():
             game.adjust_quality(work_time / frames)
             work_time, frames, check_timer = 0.0, 0, 0.0
 
-        pygame.display.flip()
+        present("game", keep=False)
         # 웹 브라우저에서 화면이 멈추지 않도록 잠깐 차례를 넘겨줘요
         await asyncio.sleep(0)
 
