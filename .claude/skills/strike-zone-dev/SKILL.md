@@ -78,6 +78,7 @@ README 무기 표 / 얻는 조건 표. 포물선 유탄은 `lobbed=True`, 로켓
 **손으로 그린 맵**: `strike/maps.py` 의 `MAPS` 에 테마 dict (name, sky, haze, sun, stars, ground, lit, fog, snow, camo, op, brief, rows).
 `P` 하나, 먼 `E` 6개 이상. 다 그리면 반드시 `check_maps.py`. 캠페인 맵은 `CAMPAIGN_MAPS` 순서대로 22개
 (늘리면 `SET_SIZE` 와 README 표도 확인). 메아리는 `ECHOES` 에 맵 이름으로.
+동료: `Ally`, `Game.spawn_allies` (라운드마다), `update_allies`, `hurt_ally`, 명령 `SQUAD_ORDERS` (K). 동료 처치는 how=`"ALLY"`.
 실내: 바닥 `w` 위에는 천장(`INDOOR_FLOORS`, `CEILING`), 실내 벽 `i`, 문 `d` (`DOORS`, `Game.update_doors`). 실내 벽은 천장 높이(1.4)로.
 
 **생성 맵**: `MAP_STYLES` 에 스타일 → `GENERATED_MAPS` 에 `generate_map(style, 26, 18, seed)` 로 테마 추가.

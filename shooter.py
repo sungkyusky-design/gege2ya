@@ -135,7 +135,7 @@ GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
 # 설정 (시작 화면에서 S): 저장돼서 다음에도 그대로예요
 SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=2, v2=True, music=40,
-                hud=100, shake=1, soundviz=0, colorblind=0)
+                hud=100, shake=1, soundviz=0, colorblind=0, squad=2)
 ASSIST_LEVELS = ["OFF", "LOW", "NORMAL", "HIGH"]
 ASSIST_PAD = [0.0, 0.6, 1.0, 1.5]          # 아깝게 빗나간 총알을 몸통에 맞혀 주는 정도
 ASSIST_STICKY = [1.0, 0.75, 0.55, 0.4]     # 조준점이 적 위에 있을 때 시점이 느려지는 정도
@@ -153,7 +153,7 @@ KEY_ACTIONS = [
     ("RELOAD", pygame.K_r, "재장전"), ("GRENADE", pygame.K_g, "수류탄"), ("KNIFE", pygame.K_v, "칼"),
     ("STREAK", pygame.K_x, "킬스트릭"), ("NEXT WEAPON", pygame.K_q, "무기 바꾸기"), ("SCOPE ZOOM", pygame.K_z, "조준경 배율"),
     ("FOCUS", pygame.K_t, "스킬: 집중"), ("MEDKIT", pygame.K_y, "스킬: 구급상자"), ("SCAN", pygame.K_j, "스킬: 탐지"),
-    ("INSPECT", pygame.K_i, "무기 살펴보기"), ("SHOP AMMO", pygame.K_b, "좀비 상점: 탄약"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
+    ("INSPECT", pygame.K_i, "무기 살펴보기"), ("SQUAD ORDER", pygame.K_k, "동료 명령: 따라와/대기/공격"), ("SHOP AMMO", pygame.K_b, "좀비 상점: 탄약"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
 ]
 # 바꿀 수 없는 키: 메뉴/시점/전체 화면
 KEY_FIXED = (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_UP, pygame.K_DOWN,
@@ -284,7 +284,7 @@ SLIDE_SPEED = 2.3                 # 슬라이딩 처음 속도 (점점 느려져
 
 # 킬스트릭: 죽지 않고 연속으로 쓰러뜨린 수 -> 받는 보상 (X 키로 사용)
 STREAKS = [(3, "RADAR"), (5, "AIRSTRIKE"), (7, "SENTRY")]
-STREAK_KILLS = ("AIRSTRIKE!", "SENTRY")   # 킬스트릭으로 쓰러뜨린 건 연속 처치 수에 안 세요
+STREAK_KILLS = ("AIRSTRIKE!", "SENTRY", "ALLY")   # 킬스트릭으로 쓰러뜨린 건 연속 처치 수에 안 세요
 RADAR_TIME = 20                   # 레이더: 미니맵에 적이 다 보이는 시간(초)
 AIRSTRIKE_BLAST = (2.6, 220)
 SENTRY_TIME = 30                  # 자동 포탑이 버티는 시간(초)
@@ -2732,6 +2732,29 @@ class Corpse:
         self.side = random.choice((-1, 1))    # 왼쪽/오른쪽 중 쓰러지는 쪽
 
 
+# AI 동료: 나를 따라다니며 보이는 적을 쏴요. K 로 명령 (따라와 → 대기 → 공격)
+ALLY_NAMES = ("ALPHA", "BRAVO")
+ALLY_HP = 150
+ALLY_LOOK = dict(uniform=(95, 110, 80), vest=(55, 95, 160), pants=(70, 75, 60), head="helmet", gun=32)
+SQUAD_ORDERS = ("FOLLOW", "HOLD", "ATTACK")
+
+
+class Ally:
+    def __init__(self, x, y, name):
+        self.pos = pygame.Vector2(x, y)
+        self.name = name
+        self.hp = ALLY_HP
+        self.down = False
+        self.facing = pygame.Vector2(1, 0)
+        self.walk = 0.0
+        self.moving = 0.0
+        self.shoot_timer = random.uniform(0.3, 0.8)
+        self.target = None
+        self.look_timer = 0.0     # 적 찾기는 0.25초마다
+        self.flash = 0.0
+        self.callout = None
+
+
 class Sentry:
     """킬스트릭 자동 포탑: 가까이 보이는 적을 알아서 쏴요"""
 
@@ -2772,6 +2795,10 @@ class Game:
         loadout: 고른 주무기/보조무기/퍼크 (없으면 모든 무기를 들고 시작)"""
         self.mode = mode
         self.challenge = challenge  # 도전 모드 이름 (없으면 None)
+        self.allies = []           # AI 동료 (설정 SQUADMATES)
+        self.squad_order = 0       # SQUAD_ORDERS 중 몇 번째
+        self.hold_pos = None
+        self.world_tracers = []    # 동료와 적이 서로 쏜 총알 궤적: [시작 위치, 끝 위치, 남은 시간]
         self.briefing = None       # 세트 브리핑 화면을 보여준 시간 (None이면 안 보여줌)
         self.briefed = set()       # 이번에 이미 본 세트 브리핑
         self.radio_msg = None      # 본부 무전 [글자, 지난 시간]
@@ -2919,6 +2946,14 @@ class Game:
             self.enemy_images[(kind, "flinch_l")] = pygame.transform.rotate(hurt, 9)
             self.enemy_images[(kind, "flinch_r")] = pygame.transform.rotate(hurt, -9)
             self.enemy_images[(kind, "flinch_head")] = pygame.transform.rotate(hurt, 16 * random.choice((-1, 1)))
+        # 동료 그림: 파란 조끼 (앞, 뒤, 걷기, 쏘기, 쓰러짐)
+        normal = make_enemy_image(ALLY_LOOK)
+        back = make_back_image(ALLY_LOOK)
+        self.ally_images = {"normal": normal, "flash": make_enemy_image(ALLY_LOOK, "flash"), "back": back,
+                            "down": pygame.transform.rotate(make_enemy_image(ALLY_LOOK, "hurt"), 90)}
+        for side in (0, 1):
+            self.ally_images[f"walk{side}"] = walk_frame(normal, side)
+            self.ally_images[f"back_walk{side}"] = walk_frame(back, side)
         # 쓰러지는 모습: 서 있는 그림을 25도, 55도, 90도로 기울인 그림 (왼쪽/오른쪽)
         self.corpse_frames = {}
         self.enemy_images[("PLAYER", "hurt")] = make_enemy_image(PLAYER_LOOK, "hurt")   # 킬캠에서 쓰러진 나
@@ -3450,6 +3485,7 @@ class Game:
         self.player.hp = self.max_hp
         self.arsenal = self.make_arsenal()
         self.enemies = [e for e in self.enemies if e.pos.distance_to(self.checkpoint) > 7]
+        self.spawn_allies()
         if self.objective:
             self.objective["progress"] = 0.0
             self.face_objective()
@@ -3544,9 +3580,25 @@ class Game:
         self.radio_msg = [random.choice(lines), 0.0]
         self.sounds.play("radio", 0.9)
 
+    def spawn_allies(self):
+        """동료를 내 뒤에 세워요 (쓰러졌던 동료도 다시 일어나요)"""
+        count = SETTINGS.get("squad", 2) if self.mode in ("campaign", "mission", "zombies") and not self.challenge else 0
+        p = self.player
+        back = -p.forward
+        side = pygame.Vector2(-back.y, back.x)
+        self.allies = []
+        for k in range(count):
+            spot = p.pos + back * 1.2 + side * (0.9 if k == 0 else -0.9)
+            if is_blocked(spot.x, spot.y) or not can_see(p.pos, spot):
+                spot = pygame.Vector2(p.pos)
+            self.allies.append(Ally(spot.x, spot.y, ALLY_NAMES[k]))
+        self.squad_order, self.hold_pos = 0, None
+
     def reset_round_state(self):
         """라운드(웨이브)마다 새로 시작하는 것들"""
         self.low_warned = False        # 체력 낮음 무전을 이번 라운드에 했는지
+        self.spawn_allies()
+        self.world_tracers = []
         self.contact_timer = 0.0       # 적이 나를 보고 있었던 뒤로 지난 시간 (CONTACT! 외침용)
         self.callout_cooldown = 0.0
         self.squad_timer = 0.0
@@ -3741,9 +3793,80 @@ class Game:
             elif boss.charge_timer <= -1.2:
                 boss.charge_timer = 6.0
 
+    def update_allies(self, dt):
+        """동료: 명령에 따라 움직이고, 보이는 가장 가까운 적을 쏴요"""
+        p = self.player
+        order = SQUAD_ORDERS[self.squad_order]
+        side = pygame.Vector2(-p.forward.y, p.forward.x)
+        self.world_tracers = [[a, b, t - dt] for a, b, t in self.world_tracers if t - dt > 0]
+        for k, ally in enumerate(self.allies):
+            ally.flash = max(0.0, ally.flash - dt)
+            if ally.callout:
+                ally.callout[1] -= dt
+                if ally.callout[1] <= 0:
+                    ally.callout = None
+            if ally.down:
+                continue
+            # 적 고르기: 보이는 적 중 가장 가까운 (0.25초마다)
+            ally.look_timer -= dt
+            if ally.look_timer <= 0:
+                ally.look_timer = 0.25
+                seen = [e for e in self.enemies if e.pos.distance_to(ally.pos) < 15 and can_see(ally.pos, e.pos)]
+                ally.target = min(seen, key=lambda e: e.pos.distance_to(ally.pos)) if seen else None
+            if ally.target not in self.enemies:
+                ally.target = None
+            # 갈 곳
+            offset_side = side * (0.9 if k == 0 else -0.9)
+            if order == "HOLD" and self.hold_pos is not None:
+                goal = self.hold_pos + offset_side
+            elif order == "ATTACK" and self.enemies:
+                aim = ally.target or min(self.enemies, key=lambda e: e.pos.distance_to(ally.pos))
+                goal = aim.pos if ally.pos.distance_to(aim.pos) > 5 or not ally.target else ally.pos
+            else:
+                goal = p.pos - p.forward * 1.5 + offset_side
+            before = pygame.Vector2(ally.pos)
+            offset = goal - ally.pos
+            dist = offset.length()
+            if dist > 0.6:
+                speed = 3.6 if dist > 5 else 2.6
+                move_with_collision(ally.pos, offset.normalize() * speed * dt)
+                if dist > 12 and not can_see(ally.pos, p.pos) and order == "FOLLOW":
+                    spot = p.pos - p.forward * 1.0                # 너무 멀리 떨어지면 내 뒤로 따라붙어요
+                    if not is_blocked(spot.x, spot.y):
+                        ally.pos = pygame.Vector2(spot)
+            moved = ally.pos.distance_to(before)
+            ally.walk += moved
+            ally.moving = 0.15 if moved > 0.0005 else max(0.0, ally.moving - dt)
+            if ally.target:
+                face = ally.target.pos - ally.pos
+            else:
+                face = ally.pos - before if moved > 0.0005 else p.forward
+            if face.length() > 0:
+                ally.facing = face.normalize()
+            # 쏘기
+            ally.shoot_timer -= dt
+            if ally.target and ally.shoot_timer <= 0:
+                ally.shoot_timer = random.uniform(0.45, 0.9)
+                ally.flash = 0.08
+                self.play_at("rifle", ally.pos, 20, 0.45)
+                self.world_tracers.append([pygame.Vector2(ally.pos), pygame.Vector2(ally.target.pos), 0.07])
+                chance = 0.55 - ally.pos.distance_to(ally.target.pos) * 0.02
+                if random.random() < chance:
+                    target = ally.target
+                    self.damage_enemy(target, random.randint(10, 16), "ALLY")
+                    if target not in self.enemies and not ally.callout:
+                        ally.callout = [random.choice(("TANGO DOWN!", "GOT ONE!", "HOSTILE DOWN!")), 1.2]
+
+    def hurt_ally(self, ally, damage):
+        ally.hp -= damage
+        if ally.hp <= 0 and not ally.down:
+            ally.down = True
+            self.popups.append([f"{ally.name} IS DOWN!", (90, 170, 255), 2.0])
+            self.sounds.play("radio")
+
     def update_doors(self, dt):
         """문: 나나 적이 가까이 오면 열리고, 4초 동안 아무도 없으면 닫혀요 (그 칸에 아무도 없을 때만)"""
-        people = [self.player.pos] + [e.pos for e in self.enemies]
+        people = [self.player.pos] + [e.pos for e in self.enemies] + [a.pos for a in self.allies if not a.down]
         for (cx, cy), timer in self.doors.items():
             center = pygame.Vector2(cx + 0.5, cy + 0.5)
             near = min(center.distance_to(q) for q in people)
@@ -4042,6 +4165,16 @@ class Game:
                 a.switch(a.last_index)
             elif event.key == pygame.K_r:
                 a.reload()
+            elif event.key == pygame.K_k and self.allies:      # 동료 명령: 따라와 → 대기 → 공격
+                self.squad_order = (self.squad_order + 1) % len(SQUAD_ORDERS)
+                order = SQUAD_ORDERS[self.squad_order]
+                self.hold_pos = pygame.Vector2(self.player.pos) if order == "HOLD" else None
+                text = {"FOLLOW": "SQUAD: ON ME!", "HOLD": "SQUAD: HOLD THIS POSITION", "ATTACK": "SQUAD: ATTACK!"}[order]
+                self.popups.append([text, (90, 170, 255), 1.5])
+                self.sounds.play("radio")
+                for ally in self.allies:
+                    if not ally.down:
+                        ally.callout = [{"FOLLOW": "ON YOU!", "HOLD": "HOLDING!", "ATTACK": "MOVING IN!"}[order], 1.2]
             elif event.key == pygame.K_i and not a.busy and not self.aiming:   # 무기 살펴보기
                 self.inspect_timer = 2.4
             elif event.key == pygame.K_e:      # 정조준 켜기/끄기
@@ -4089,6 +4222,8 @@ class Game:
         self.lightning = max(0.0, self.lightning - dt)
         if self.doors:
             self.update_doors(dt)
+        if self.allies and not self.game_over and self.round_clear_timer <= 0:
+            self.update_allies(dt)
         if self.theme.get("rain"):                 # 폭풍우: 가끔 번개가 번쩍, 조금 뒤 천둥
             self.lightning_timer -= dt
             if self.lightning_timer <= 0:
@@ -4268,6 +4403,19 @@ class Game:
                     enemy.step_timer = 0.65 if zombie else 0.5
                     name = "zstep" if zombie else ENEMY_STEPS[step_sound_at(enemy.pos)]
                     self.play_at(name, enemy.pos, 13, 0.95)
+            if enemy.flash_timer == 0.08 and self.allies and "melee" not in enemy.t:
+                # 나보다 가까이 보이는 동료가 있으면 절반은 동료를 쏴요
+                dist_me = enemy.pos.distance_to(p.pos)
+                close = [a for a in self.allies if not a.down and a.pos.distance_to(enemy.pos) < min(dist_me, enemy.t["range"])
+                         and can_see(enemy.pos, a.pos)]
+                if close and random.random() < 0.5:
+                    ally = min(close, key=lambda a: a.pos.distance_to(enemy.pos))
+                    self.play_at(enemy.t.get("sound", "enemy"), enemy.pos, 24)
+                    self.world_tracers.append([pygame.Vector2(enemy.pos), pygame.Vector2(ally.pos), 0.07])
+                    if random.random() < enemy.t["accuracy"] * 0.7:
+                        self.hurt_ally(ally, random.randint(*enemy.t["damage"]))
+                    damage = 0
+                    enemy.flash_timer = 0.079              # 아래에서 내 쪽 궤적을 또 그리지 않게
             if enemy.flash_timer == 0.08:          # 방금 쐈어요
                 self.play_at(enemy.t.get("sound", "enemy"), enemy.pos, 24)
                 off = pygame.Vector2(random.uniform(-1, 1), random.uniform(-1, 1)) * (40 if damage else 170) * UI
@@ -4619,7 +4767,7 @@ class Game:
     def on_kill(self, enemy, how):
         """처치 보상: 경험치, 연속 처치 메달, 킬스트릭"""
         self.sounds.play("headshot" if how == "HEADSHOT!" else "kill")
-        if self.mode != "training":                     # 누적 기록 (업적용)
+        if self.mode != "training" and how != "ALLY":   # 누적 기록 (업적용, 내가 쓰러뜨린 것만)
             life = self.save.setdefault("lifetime", {})
             life["kills"] = life.get("kills", 0) + 1
             key = {"HEADSHOT!": "heads", "KNIFE!": "knife", "BOOM!": "explosive"}.get(how)
@@ -4662,6 +4810,8 @@ class Game:
             xp += XP["knife"]
         if enemy.kind == "BOSS":
             xp += XP["boss"]
+        if how == "ALLY":
+            xp //= 2                                     # 동료가 쓰러뜨림: 절반
         self.add_xp(xp, f"+{xp}")
 
         # 3초 안에 또 쓰러뜨리면 연속 처치 메달
@@ -5132,6 +5282,8 @@ class Game:
 
     def draw_tracers(self, screen):
         """총알 궤적: 내 총알은 총구에서 맞은 곳까지, 적 총알은 적에게서 내 쪽으로 (침은 초록)"""
+        if self.world_tracers:
+            self.draw_world_tracers(screen)
         for x0, y0, x1, y1, life in self.tracers:
             start = pygame.Vector2(x0, y0)
             end = pygame.Vector2(x1, y1)
@@ -5154,6 +5306,16 @@ class Game:
                 pygame.draw.line(screen, (120, 230, 80), start, end, max(3, int(6 * UI)))
             else:
                 pygame.draw.line(screen, (255, 225, 150), start, end, max(1, int(2 * UI)))
+
+    def draw_world_tracers(self, screen):
+        """동료 ↔ 적 사이 총알 궤적 (둘 다 화면 안에 있을 때)"""
+        for start, end, life in self.world_tracers:
+            a = self.project(start, 0.9, 0.45)
+            b = self.project(end, 0.9, 0.45)
+            if a and b:
+                pa = (a[0], a[1] + (a[2] - a[1]) * 0.45)
+                pb = (b[0], b[1] + (b[2] - b[1]) * 0.45)
+                pygame.draw.line(screen, (255, 225, 150), pa, pb, max(1, int(2 * UI)))
 
     def draw_particles(self, screen, casings):
         for x, y, vx, vy, life, size, color, is_casing in self.particles:
@@ -5396,6 +5558,19 @@ class Game:
             box = self.project(sentry.pos, 0.55, 0.5)
             if box:
                 items.append((box, self.sentry_images[1 if sentry.flash > 0 else 0], None))
+        for ally in self.allies:
+            if ally.down:
+                box = self.project(ally.pos, 0.3, 0.9)
+                if box:
+                    items.append((box, self.ally_images["down"], None))
+                continue
+            box = self.project(ally.pos, 0.9, 0.45)
+            if box:
+                prefix = "back_" if (self.player.pos - ally.pos).dot(ally.facing) < 0 else ""
+                step = int(ally.walk / 0.32) % 4 if ally.moving > 0 else 0
+                name = "flash" if ally.flash > 0 and not prefix else prefix + ("walk0", "", "walk1", "")[step]
+                name = {"": "normal", "back_": "back"}.get(name, name)
+                items.append((box, self.ally_images[name], ally))
         o = self.objective
         if o and not (o["done"] and o["kind"] == "HOSTAGE"):
             height, width = {"HOSTAGE": (0.6, 0.45), "BOMB": (0.45, 0.4), "HOLD": (1.4, 0.6),
@@ -5419,6 +5594,17 @@ class Game:
                         lights.append(box)
         for box, img, enemy in items:
             self.draw_sprite_columns(screen, img, *box)
+            if isinstance(enemy, Ally):                    # 동료: 파란 이름표 (+ 말풍선)
+                col = int(box[0] // self.col_w)
+                if 0 <= col < self.num_rays and box[4] < self.zbuffer[col] + 0.3 and box[4] < 20:
+                    tag = self.fonts["tiny"].render(enemy.name, True, (90, 170, 255))
+                    screen.blit(tag, tag.get_rect(midbottom=(box[0], box[1] - 4 * UI)))
+                    if enemy.callout:
+                        label = self.fonts["tiny"].render(enemy.callout[0], True, BLACK)
+                        bubble = label.get_rect(midbottom=(box[0], box[1] - 22 * UI)).inflate(10 * UI, 6 * UI)
+                        pygame.draw.rect(screen, (200, 225, 255), bubble, border_radius=int(5 * UI))
+                        screen.blit(label, label.get_rect(center=bubble.center))
+                continue
             if enemy and enemy.hp < enemy.t["hp"]:
                 self.draw_hp_bar(screen, enemy, box)
             if enemy and enemy.reload_left > 0 and box[4] < 14:   # 재장전 중: 지금이 기회!
@@ -5809,6 +5995,11 @@ class Game:
         # 계급과 경험치 막대
         rank_label = self.small_font.render(f"RANK {self.rank}", True, WHITE)
         screen.blit(rank_label, (16, 12 + 30 * UI))
+        if self.allies:
+            parts = [f"SQUAD [{SQUAD_ORDERS[self.squad_order]}]"]
+            parts += [f"{a.name} {'DOWN' if a.down else int(a.hp)}" for a in self.allies]
+            label = self.small_font.render("   ".join(parts), True, (90, 170, 255))
+            screen.blit(label, (16, 12 + 50 * UI))
         bar = pygame.Rect(16 + rank_label.get_width() + 10, 12 + 34 * UI, 140 * UI, 6 * UI)
         pygame.draw.rect(screen, (40, 40, 50), bar)
         bar.width = int(bar.width * (self.xp % XP_PER_RANK) / XP_PER_RANK)
@@ -5950,6 +6141,9 @@ class Game:
                 pygame.draw.circle(screen, RED, enemy.pos * cell + (ox, oy), max(2, cell // 2 + 1))
         for sentry in self.sentries:
             pygame.draw.circle(screen, (80, 240, 255), sentry.pos * cell + (ox, oy), max(2, cell // 2))
+        for ally in self.allies:                             # 파란 점: 동료
+            pygame.draw.circle(screen, (60, 120, 200) if ally.down else (90, 170, 255),
+                               ally.pos * cell + (ox, oy), max(2, cell // 2))
         if self.objective and not self.objective["done"]:     # 목표 위치
             color = OBJECTIVES[self.objective["kind"]]["color"]
             pygame.draw.circle(screen, color, self.objective["pos"] * cell + (ox, oy), max(3, cell))
@@ -6168,6 +6362,7 @@ SETTING_ROWS = [
     ("volume", "VOLUME", "소리 크기", "Sound volume"),
     ("music", "MUSIC", "배경 음악 크기 (컴퓨터에서만, 웹은 없음)", "Background music (desktop only)"),
     ("difficulty", "DIFFICULTY", "난이도: 적 실력과 내가 받는 피해", "Enemy skill and damage taken"),
+    ("squad", "SQUADMATES", "같이 싸우는 AI 동료 수 0~2 (다음 판부터, K 로 명령)", "AI squadmates 0-2 (next game, K = orders)"),
     ("hud", "UI SIZE", "글자와 화면 표시 크기 (다음 판부터)", "Text and HUD size (next game)"),
     ("shake", "SCREEN SHAKE", "쏘거나 맞을 때 화면 흔들림", "Camera shake when shooting or hit"),
     ("soundviz", "SOUND MARKS", "발소리·총소리 방향을 조준점 둘레에 표시", "Show footstep/gunshot directions"),
@@ -6188,6 +6383,8 @@ def change_setting(key, step):
         SETTINGS[key] = max(0, min(100, SETTINGS[key] + step * 10))
     elif key == "hud":
         SETTINGS[key] = max(80, min(130, SETTINGS[key] + step * 10))
+    elif key == "squad":
+        SETTINGS[key] = (SETTINGS[key] + step) % 3
     elif key in ("shake", "soundviz", "colorblind"):
         SETTINGS[key] = 1 - SETTINGS[key]
     elif key == "difficulty":
@@ -6209,6 +6406,8 @@ def setting_text(key):
         return f"{value}"
     if key in ("shake", "soundviz", "colorblind"):
         return "ON" if value else "OFF"
+    if key == "squad":
+        return str(value)
     return f"{value}%"
 
 
@@ -6247,7 +6446,7 @@ async def settings_screen(save):
         title = fonts["big"].render("SETTINGS", True, (255, 80, 200))
         screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.08)))
         for i, (key, name, desc_ko, desc_en) in enumerate(SETTING_ROWS):
-            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.15 + i * 0.066), WIDTH * 0.88, HEIGHT * 0.06)
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.14 + i * 0.061), WIDTH * 0.88, HEIGHT * 0.056)
             selected = i == row
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
@@ -6314,7 +6513,7 @@ async def controls_screen(save):
         screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.08)))
         for i, (name, default, desc) in enumerate(KEY_ACTIONS):
             col, line = divmod(i, half)
-            rect = pygame.Rect(WIDTH * (0.05 + col * 0.46), HEIGHT * (0.16 + line * 0.072), WIDTH * 0.44, HEIGHT * 0.064)
+            rect = pygame.Rect(WIDTH * (0.05 + col * 0.46), HEIGHT * (0.15 + line * 0.066), WIDTH * 0.44, HEIGHT * 0.058)
             selected = i == row
             pygame.draw.rect(screen, (60, 40, 90) if selected else (24, 18, 44), rect, border_radius=6)
             pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 2 if selected else 1,
