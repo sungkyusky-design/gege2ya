@@ -2076,6 +2076,7 @@ SOUND_RECIPES = {
     "hurt":      (0.12, 20, 0.6, 0.20, 0, 0, 220, 0.5, 0.40),
     # 총소리 겹치기: 쏠 때마다 "탕" 위에 노리쇠의 "착" + 가슴을 치는 낮은 "쿵"
     "mech":      (0.05, 80, 0.7, 0.10, 0, 0, 2600, 0.5, 0.30),
+    "radio":     (0.14, 18, 0.7, 0.30, 0, 0, 1500, 0.35, 0.22),    # 적 무전 "치직"
     "punch":     (0.16, 26, 0.0, 0.0, 52, 1.0, 0, 0, 0.55),
 }
 # 벽 너머에서 나는 소리는 먹먹하게 (높은 소리를 깎은 "_m" 소리를 따로 만들어요)
@@ -2657,6 +2658,15 @@ class Enemy:
         self.flinch_pose = "flinch_l"
         self.suppressed = 0.0     # 내 총알이 가까이 지나가면 움츠러들어 덜 맞혀요
         self.walk = 0.0           # 걸은 거리 (다리 그림 바꾸기용)
+        self.role = None          # 분대 역할: "suppress" 제압 사격 / "flank" 옆으로 돌아가기
+        self.role_timer = 0.0
+        self.flank_spot = None
+        self.search = None        # 동료 무전이나 소리로 알게 된 내 마지막 위치 (찾으러 가요)
+        self.look_timer = 0.0     # 찾던 곳에 도착하면 두리번거리는 시간
+        self.waypoint = None      # 순찰: 다음에 걸어갈 곳
+        self.pause_timer = random.uniform(0, 2)
+        self.callout = None       # 머리 위 말풍선 [글자, 남은 시간]
+        self.shout = None         # Game에게 "외치고 싶어요" (Game이 너무 자주 외치지 않게 골라요)
         self.moving = 0.0         # 방금 움직였는지
         self.mag, self.reload_time = ENEMY_MAGS.get(kind, (0, 0))
         self.ammo = self.mag
@@ -2711,20 +2721,28 @@ class Enemy:
             self.spotted = 0.0
             self.alert -= dt
             if dist < player.noise and dist > 0:
-                self.dir = (player.pos - self.pos).normalize()
+                self.search = pygame.Vector2(player.pos)     # 소리 난 곳으로
                 self.alert = 2.5
-            before = pygame.Vector2(self.pos)
-            move_with_collision(self.pos, self.dir * t["speed"] * (1.0 if self.alert > 0 else 0.6) * dt)
-            if self.pos == before or random.random() < 0.005:
-                self.dir = pygame.Vector2(1, 0).rotate(random.uniform(0, 360))
-            self.facing = pygame.Vector2(self.dir)
+            if self.role == "flank" and self.flank_spot is not None:
+                self.search = self.flank_spot                # 옆으로 돌아가는 중이면 그 자리로
+            self.wander(dt, player)
             return 0
 
         # 봤을 때: 플레이어 쪽을 보고, 너무 멀면 다가오고, 반응 시간이 지나면 공격
         self.spotted += dt
         if dist > 0:
             self.facing = (player.pos - self.pos).normalize()
-        if dist > t["keep"]:
+        self.search = None
+        self.role_timer -= dt
+        if self.role and self.role_timer <= 0:
+            self.role, self.flank_spot = None, None
+        if self.role == "flank" and self.flank_spot is not None:
+            offset = self.flank_spot - self.pos          # 옆으로 돌아 들어가요 (쏘면서)
+            if offset.length() < 0.7:
+                self.role, self.flank_spot = None, None
+            else:
+                move_with_collision(self.pos, offset.normalize() * t["speed"] * 1.1 * dt)
+        elif dist > t["keep"] * (1.4 if self.role == "suppress" else 1.0):
             move_with_collision(self.pos, self.facing * t["speed"] * dt)
         # 옆으로 왔다 갔다 피해요 (실력이 좋을수록 많이). 저격수와 무거운 적은 안 피해요
         if self.kind not in ("SNIPER", "HEAVY", "BOSS", "GUNNER"):
@@ -2757,8 +2775,59 @@ class Enemy:
             if self.throw_timer <= 0:
                 self.throw_timer = random.uniform(*throw)
                 self.throw_at = pygame.Vector2(player.pos)
+                self.shout = "GRENADE OUT!"
 
         return self.shoot_at(dt, player, dist)
+
+    def wander(self, dt, player):
+        """안 보일 때 움직임: 알게 된 위치로 찾아가고, 도착하면 두리번, 아니면 순찰 (갈 곳 -> 잠깐 멈춤 -> 다음 곳)"""
+        t = self.t
+        self.role_timer -= dt
+        if self.role and self.role_timer <= 0:
+            self.role, self.flank_spot = None, None
+        before = pygame.Vector2(self.pos)
+        if self.search is not None:
+            offset = self.search - self.pos
+            if offset.length() < 0.7:
+                self.search, self.look_timer = None, random.uniform(1.5, 3.0)
+                if self.role == "flank":
+                    self.role, self.flank_spot = None, None
+            else:
+                self.dir = offset.normalize()
+                move_with_collision(self.pos, self.dir * t["speed"] * dt)
+                self.stuck_timer = self.stuck_timer + dt if self.pos.distance_to(before) < t["speed"] * dt * 0.3 else 0.0
+                if self.stuck_timer > 0.8:                      # 막혔어요: 포기하고 두리번
+                    self.search, self.stuck_timer, self.look_timer = None, 0.0, 1.5
+                    self.dir = self.dir.rotate(random.choice((-90, 90)))
+        elif self.look_timer > 0:
+            self.look_timer -= dt
+            self.dir = self.dir.rotate(dt * 140 * (1 if int(self.look_timer * 1.5) % 2 else -1))   # 두리번
+        elif self.pause_timer > 0:
+            self.pause_timer -= dt
+        else:
+            if self.waypoint is None:
+                self.waypoint = self.pick_waypoint(player.pos)
+            if self.waypoint is not None:
+                offset = self.waypoint - self.pos
+                if offset.length() < 0.4:
+                    self.waypoint, self.pause_timer = None, random.uniform(0.5, 1.8)
+                else:
+                    self.dir = offset.normalize()
+                    move_with_collision(self.pos, self.dir * t["speed"] * 0.65 * dt)
+                    if self.pos.distance_to(before) < t["speed"] * dt * 0.1:
+                        self.waypoint = None
+        self.facing = pygame.Vector2(self.dir)
+
+    def pick_waypoint(self, target):
+        """순찰할 다음 곳: 3~7칸 떨어진, 막히지 않고 곧장 걸어갈 수 있는 곳.
+        대체로 플레이어가 있는 쪽으로 순찰해요 (가만히 숨어 있어도 언젠가 마주쳐요)"""
+        toward = math.degrees(math.atan2(target.y - self.pos.y, target.x - self.pos.x))
+        for k in range(8):
+            angle = toward + random.uniform(-70, 70) if k < 5 and random.random() < 0.7 else random.uniform(0, 360)
+            spot = self.pos + pygame.Vector2(random.uniform(3, 7), 0).rotate(angle)
+            if not is_blocked(spot.x, spot.y) and can_see(self.pos, spot):
+                return spot
+        return None
 
     def shoot_at(self, dt, player, dist):
         """쏠 수 있으면 쏴요. 플레이어에게 준 피해를 돌려줘요."""
@@ -2768,12 +2837,13 @@ class Enemy:
         self.shoot_timer -= dt
         if self.shoot_timer > 0:
             return 0
-        self.shoot_timer = random.uniform(*t["fire"])
+        self.shoot_timer = random.uniform(*t["fire"]) * (0.6 if self.role == "suppress" else 1.0)
         self.flash_timer = 0.08
         if self.mag:
             self.ammo -= 1
             if self.ammo <= 0:
                 self.reload_left = self.reload_time   # 탄창이 비었어요: 재장전
+                self.shout = "RELOADING!"
         # 멀수록, 플레이어가 움직이거나 점프 중일수록 잘 안 맞아요
         chance = t["accuracy"] - dist * t["falloff"]
         if player.moving:
@@ -2787,6 +2857,8 @@ class Enemy:
         if self.suppressed > 0:
             chance *= 0.5                         # 제압당해서 머리를 숙이고 쏴요
             self.shoot_timer += 0.25
+        if self.role == "suppress":
+            chance *= 0.7                         # 제압 사격: 많이 쏘지만 덜 정확해요
         if random.random() < max(0.08, chance):
             return random.randint(*t["damage"])
         return 0
@@ -3762,6 +3834,10 @@ class Game:
 
     def reset_round_state(self):
         """라운드(웨이브)마다 새로 시작하는 것들"""
+        self.contact_timer = 0.0       # 적이 나를 보고 있었던 뒤로 지난 시간 (CONTACT! 외침용)
+        self.callout_cooldown = 0.0
+        self.squad_timer = 0.0
+        self.last_known = None
         self.projectiles = []
         self.effects = []
         self.tracers = []          # 내 총알 궤적: [x0, y0, x1, y1, 남은 시간]
@@ -3910,6 +3986,68 @@ class Game:
             self.sounds.play("streak")
             if self.mode == "mission":
                 self.advance_stage()
+
+    def update_squad(self, dt):
+        """분대 AI: 한 명이 나를 보면 무전으로 동료에게 알리고, 여럿이면 제압조와 측면조로 나눠요"""
+        p = self.player
+        soldiers = [e for e in self.enemies if "melee" not in e.t]
+        seers = [e for e in soldiers if e.sees]
+        self.callout_cooldown -= dt
+        for e in self.enemies:
+            if e.callout:
+                e.callout[1] -= dt
+                if e.callout[1] <= 0:
+                    e.callout = None
+        if seers:
+            if self.contact_timer <= 0:
+                self.shout(seers[0], "CONTACT!")
+            self.contact_timer = 6.0
+            self.last_known = pygame.Vector2(p.pos)
+            for e in soldiers:                       # 무전: 가까운 동료가 내 위치로 와요
+                if not e.sees and e.search is None and e.role != "flank" and e.pos.distance_to(seers[0].pos) < 11:
+                    e.search = pygame.Vector2(self.last_known)
+        else:
+            self.contact_timer -= dt
+        for e in soldiers:
+            if e.shout:
+                self.shout(e, e.shout)
+                e.shout = None
+        self.squad_timer -= dt
+        if self.squad_timer > 0 or len(seers) < 2 or self.mode == "zombies":
+            return
+        self.squad_timer = 1.0
+        # 제압조: 가장 멀리서 보고 있는 적 한 명이 자주 쏴서 나를 묶어 둬요
+        if not any(e.role == "suppress" for e in soldiers):
+            gunners = [e for e in seers if e.kind not in ("SNIPER",) and e.role is None]
+            if gunners:
+                e = max(gunners, key=lambda e: e.pos.distance_to(p.pos))
+                e.role, e.role_timer = "suppress", 6.0
+                self.shout(e, "SUPPRESSING!")
+                self.squad_timer = 1.8              # 측면조는 조금 뒤에 (외침이 겹치지 않게)
+                return
+        # 측면조: 다른 한 명이 내 옆으로 돌아 들어와요
+        if len(seers) >= 2 and not any(e.role == "flank" for e in soldiers):
+            movers = [e for e in soldiers if e.role is None and e.kind not in ("SNIPER", "HEAVY", "BOSS", "GUNNER")
+                      and e.mode == "fight" and e.pos.distance_to(p.pos) > 3]
+            for e in sorted(movers, key=lambda e: e.pos.distance_to(p.pos)):
+                to_me = p.pos - e.pos
+                if to_me.length() == 0:
+                    continue
+                side = pygame.Vector2(-to_me.y, to_me.x).normalize()
+                for sign in random.sample((1, -1), 2):
+                    spot = p.pos + side * sign * 4 - to_me.normalize() * 1.5
+                    if in_map(int(spot.x), int(spot.y)) and not is_blocked(spot.x, spot.y):
+                        e.role, e.role_timer, e.flank_spot = "flank", 6.0, spot
+                        self.shout(e, "FLANKING!")
+                        return
+
+    def shout(self, enemy, text):
+        """적의 외침: 머리 위 말풍선 + 무전 소리 (너무 자주는 안 해요)"""
+        if self.callout_cooldown > 0 or enemy.pos.distance_to(self.player.pos) > 20:
+            return
+        self.callout_cooldown = 1.6
+        enemy.callout = [text, 1.4]
+        self.play_at("radio", enemy.pos, 18, 0.8)
 
     def punish_camping(self, dt):
         """한자리에 7초 넘게 숨어 있으면, 나를 보는 적이 수류탄을 던져요"""
@@ -4286,6 +4424,7 @@ class Game:
             self.update_zombies(edt)
         else:
             self.punish_camping(dt)
+            self.update_squad(dt)
 
         for enemy in self.enemies:
             if self.mode == "mission" and enemy.pos.distance_to(p.pos) > 28 and enemy.hp >= enemy.t["hp"]:
@@ -5241,6 +5380,15 @@ class Game:
                 if 0 <= col < self.num_rays and box[4] < self.zbuffer[col]:
                     label = self.fonts["tiny"].render("RELOADING", True, YELLOW)
                     screen.blit(label, label.get_rect(midbottom=(box[0], box[1] - 14 * UI)))
+            if enemy and enemy.callout and box[4] < 18:     # 적의 외침 말풍선
+                col = int(box[0] // self.col_w)
+                if 0 <= col < self.num_rays and box[4] < self.zbuffer[col] + 0.3:
+                    label = self.fonts["tiny"].render(enemy.callout[0], True, BLACK)
+                    bubble = label.get_rect(midbottom=(box[0], box[1] - 30 * UI)).inflate(10 * UI, 6 * UI)
+                    pygame.draw.rect(screen, WHITE, bubble, border_radius=int(5 * UI))
+                    pygame.draw.polygon(screen, WHITE, [(box[0] - 4 * UI, bubble.bottom - 1), (box[0] + 4 * UI, bubble.bottom - 1),
+                                                        (box[0], bubble.bottom + 6 * UI)])
+                    screen.blit(label, label.get_rect(center=bubble.center))
             if enemy and enemy.heal_flash > 0:     # 치료받는 중: 머리 위에 초록 +
                 sx, top = box[0], box[1]
                 size = max(4, int(10 * UI))
