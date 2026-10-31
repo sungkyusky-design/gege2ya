@@ -92,6 +92,7 @@ async def menus():
         for screen_fn, args in ((shooter.settings_screen, (save,)), (shooter.skills_screen, (save,)),
                                 (shooter.mission_screen, (save,)), (shooter.controls_screen, (save,)),
                                 (shooter.achievements_screen, (save,)),
+                                (shooter.stats_screen, (save,)), (shooter.gunsmith_screen, (save, "RIFLE")),
                                 (shooter.loadout_screen, (save, dict(mode="campaign", round=1)))):
             script[:] = [[], []]
             await screen_fn(*args)
@@ -99,7 +100,7 @@ async def menus():
         await shooter.intro_screen(save)
     finally:
         shooter.menu_events = real
-    print("OK  menus (settings, skills, missions, controls, achievements, loadout, intro)")
+    print("OK  menus (settings, skills, missions, controls, achievements, stats, gunsmith, loadout, intro)")
 
 
 def main():
