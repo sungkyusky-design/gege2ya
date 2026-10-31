@@ -366,6 +366,11 @@ class GameTest(unittest.TestCase):
         shooter.apply_keys({})                                           # 처음대로
         self.assertEqual(shooter.kl(pygame.K_g), "G")
 
+    def test_every_setting_is_in_one_tab(self):
+        in_tabs = [key for _, keys in shooter.SETTING_TABS for key in keys]
+        self.assertEqual(sorted(in_tabs), sorted(row[0] for row in shooter.SETTING_ROWS))
+        self.assertEqual(len(in_tabs), len(set(in_tabs)))
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

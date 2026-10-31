@@ -26,7 +26,8 @@ description: Develop, test and ship the Strike Zone pygame FPS (shooter.py) in t
 
 - **메뉴 화면은 공통 부품으로**: 배경 `draw_backdrop`, 제목 `draw_title`, 칸 `draw_panel(screen, rect, selected)`,
   아래 키 안내 `draw_hint_bar(screen, fonts, "↑↓ 고르기   Enter 시작   ESC 뒤로")` (세 칸 이상 띄우면 항목이 나뉘어요),
-  키 상자 `draw_keycap`. 칸보다 길 수 있는 글자는 `fit_text(font, 글자, 최대너비)` 로 잘라요 (겹침 방지).
+  키 상자 `draw_keycap`, 게임 화면 키 안내는 `draw_key_text` + `kl(pygame.K_g)` (바꾼 키로 보여줘요).
+  한글 메뉴: `tr(fonts, "SETTINGS")` + `KO_TEXT` 에 이름 추가 (게임 HUD 는 `make_fonts(korean_ui=False)`). 칸보다 길 수 있는 글자는 `fit_text(font, 글자, 최대너비)` 로 잘라요 (겹침 방지).
 
 ## 데이터 파일 (strike/)
 
@@ -45,7 +46,7 @@ description: Develop, test and ship the Strike Zone pygame FPS (shooter.py) in t
 
 | 부분 | 찾는 이름 |
 | --- | --- |
-| 화면/조작 설정, 설정 메뉴 값 | `WIDTH`, `SETTINGS`, `DIFFICULTIES`, `apply_settings` |
+| 화면/조작 설정, 설정 메뉴 값 | `WIDTH`, `SETTINGS`, `DIFFICULTIES`, `apply_settings`, 설정 화면 `SETTING_ROWS` + 탭 `SETTING_TABS` (새 설정은 두 곳 모두) |
 | 게임 수치 | `REGEN_*`, `GRENADE_*`, `KNIFE_*`, `XP`, `STREAKS`, `HORIZONTAL_KICK` |
 | 라운드 목표 / 무기 성장 / RPG | `OBJECTIVES`, `OBJECTIVE_ORDER`, `WEAPON_LEVELS`, `UNLOCKS`, `SKILLS`, `ACTIVE_SKILLS`, `apply_mods` |
 | 로드아웃 / 무기 | `PERKS`, `WEAPON_INFO`, `WEAPONS`, `WEAPON_BY_NAME` |
