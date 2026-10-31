@@ -1851,6 +1851,12 @@ def step_sound_at(pos):
     return STEP_SOUNDS.get(floor, "step_hard")
 
 
+# 상황 따라 바뀌는 음악: 같은 박자의 네 겹을 같이 틀고 크기만 바꿔요
+MUSIC_LAYERS = ["music", "music_drums", "music_bass", "music_lead"]   # 잔잔한 패드, 드럼, 베이스, 리드
+MUSIC_MIX = {"calm": (1.0, 0.0, 0.0, 0.0), "relax": (0.9, 0.3, 0.0, 0.0), "alert": (1.0, 0.65, 0.8, 0.0),
+             "peak": (1.0, 1.0, 1.0, 0.7), "boss": (1.0, 1.0, 1.0, 1.0), "over": (0.5, 0.0, 0.0, 0.0)}
+
+
 class Sounds:
     """효과음. 소리를 낼 수 없는 환경이면 조용히 아무것도 안 해요. M 키로 끄고 켜요."""
 
@@ -1864,7 +1870,7 @@ class Sounds:
             if size != -16:
                 return                       # 16비트 소리만 만들 줄 알아요
             pygame.mixer.set_num_channels(24)
-            pygame.mixer.set_reserved(2)         # 0번: 배경 소리, 1번: 음악 (효과음이 빼앗지 않게)
+            pygame.mixer.set_reserved(2 + len(MUSIC_LAYERS) - 1)   # 0번: 배경 소리, 1~4번: 음악 겹 (효과음이 빼앗지 않게)
             rng = random.Random(1)
             for name, recipe in SOUND_RECIPES.items():
                 self.bank[name] = self.synth(freq, channels, rng, *recipe)
@@ -1879,13 +1885,14 @@ class Sounds:
         self.loops = {}            # 배경 소리 (한 번 만들면 계속 써요)
         self.background = None     # 지금 나오는 배경 소리 이름
         self.music_on = False
+        self.levels = [1.0] + [0.0] * (len(MUSIC_LAYERS) - 1)   # 음악 겹마다 지금 크기 (0~1)
 
     def make_loop(self, kind):
         """끊김 없이 반복되는 배경 소리. wind 바람 / rain 빗소리 / night 밤벌레 / music 낮게 깔리는 음악"""
         freq, channels = self.format
         rng = random.Random(7)
-        seconds = 8.0 if kind == "music" else 3.0
-        step = 4 if kind in ("wind", "music") else 1      # 낮은 소리는 4칸마다 한 번만 계산 (빠르게)
+        seconds = 8.0 if kind.startswith("music") else 3.0
+        step = 4 if kind == "wind" or kind.startswith("music") else 1      # 낮은 소리는 4칸마다 한 번만 계산 (빠르게)
         n = int(seconds * freq) // step
         fade = n // 8
         rate = freq / step
@@ -1904,6 +1911,24 @@ class Sounds:
                 low += 0.01 * (rng.uniform(-1, 1) - low)
                 chirp = (t * 6) % 1 < 0.06 and int(t * 6) % 5 in (0, 1)
                 v = low * 3 + (0.18 * math.sin(2 * math.pi * 4300 * t) if chirp else 0)
+            elif kind == "music_drums":            # 쿵(킥) - 탁(스네어) - 츠츠(하이햇), 1초에 2박
+                kick = t % 0.5
+                v = 0.55 * math.sin(2 * math.pi * (60 - 40 * kick) * kick) * math.exp(-kick * 22)
+                snare = (t - 0.5) % 1.0
+                v += 0.45 * rng.uniform(-1, 1) * math.exp(-snare * 28)
+                hat = t % 0.25
+                v += 0.12 * rng.uniform(-1, 1) * math.exp(-hat * 90)
+            elif kind == "music_bass":             # 8분음표로 뛰는 낮은 베이스 (코드 바뀌는 대로)
+                note = notes[int((t % seconds) / 2.0)] * 2
+                pulse = t % 0.25
+                saw = 2 * ((note * t) % 1.0) - 1
+                v = 0.42 * saw * math.exp(-pulse * 7)
+            elif kind == "music_lead":             # 클라이맥스/보스: 빠른 아르페지오
+                note = notes[int((t % seconds) / 2.0)] * 4
+                step16 = int(t / 0.125) % 4
+                hz = note * (1.0, 1.25, 1.5, 2.0)[step16]
+                env = math.exp(-(t % 0.125) * 14)
+                v = 0.22 * env * (math.sin(2 * math.pi * hz * t) + 0.3 * math.sin(2 * math.pi * hz * 3 * t))
             else:   # music
                 beat = (t % seconds) % 2.0
                 note = notes[int((t % seconds) / 2.0)]
@@ -1925,18 +1950,51 @@ class Sounds:
         if not self.bank:
             return
         self.music_on = music and not IN_BROWSER     # 웹에서는 음악을 만드는 데 오래 걸려서 빼요
-        for name, channel_no, on in ((kind, 0, True), ("music", 1, self.music_on)):
-            channel = pygame.mixer.Channel(channel_no)
-            if not on:
-                channel.stop()
-                continue
-            if name not in self.loops:
-                self.loops[name] = self.make_loop(name)
-            if channel_no == 1 or self.background != kind or not channel.get_busy():
-                if not (channel_no == 1 and channel.get_busy()):
-                    channel.play(self.loops[name], loops=-1)
+        channel = pygame.mixer.Channel(0)
+        if kind not in self.loops:
+            self.loops[kind] = self.make_loop(kind)
+        if self.background != kind or not channel.get_busy():
+            channel.play(self.loops[kind], loops=-1)
+        # 음악 겹들은 길이가 같아서 한꺼번에 틀면 박자가 계속 맞아요
+        layers = [pygame.mixer.Channel(1 + i) for i in range(len(MUSIC_LAYERS))]
+        if not self.music_on:
+            for layer in layers:
+                layer.stop()
+        elif not layers[0].get_busy():
+            for name in MUSIC_LAYERS:
+                if name not in self.loops:
+                    self.loops[name] = self.make_loop(name)
+            for name, layer in zip(MUSIC_LAYERS, layers):
+                layer.play(self.loops[name], loops=-1)
         self.background = kind
         self.refresh_background()
+
+    def mix_music(self, targets, dt):
+        """음악 겹 크기를 targets 쪽으로 부드럽게 (올릴 땐 빠르게, 내릴 땐 천천히)"""
+        for i, goal in enumerate(targets):
+            now = self.levels[i]
+            speed = 1.6 if goal > now else 0.45
+            self.levels[i] = now + max(-speed * dt, min(speed * dt, goal - now))
+        self.refresh_background()
+
+    def play_sting(self):
+        """라운드를 깨면 짧은 승리 소리 (도-미-솔-도)"""
+        if not self.bank or self.muted:
+            return
+        if "sting" not in self.loops:
+            freq, channels = self.format
+            samples = array.array("h")
+            for k, hz in enumerate((261.6, 329.6, 392.0, 523.3)):
+                length = 0.11 if k < 3 else 0.5
+                for i in range(int(length * freq)):
+                    t = i / freq
+                    v = 0.35 * math.exp(-t * (9 if k < 3 else 3)) * (math.sin(2 * math.pi * hz * t)
+                                                                      + 0.4 * math.sin(4 * math.pi * hz * t))
+                    samples.extend([int(v * 32767)] * channels)
+            self.loops["sting"] = pygame.mixer.Sound(buffer=samples.tobytes())
+        sound = self.loops["sting"]
+        sound.set_volume(SETTINGS["volume"] / 100 * max(0.3, SETTINGS.get("music", 40) / 100))
+        sound.play()
 
     def refresh_background(self):
         """소리 끄기(M)나 설정의 소리 크기를 배경 소리에도 반영해요"""
@@ -1944,12 +2002,14 @@ class Sounds:
             return
         volume = 0.0 if self.muted else SETTINGS["volume"] / 100
         pygame.mixer.Channel(0).set_volume(0.35 * volume)
-        pygame.mixer.Channel(1).set_volume(0.5 * volume * SETTINGS.get("music", 40) / 100 if self.music_on else 0)
+        music = 0.5 * volume * SETTINGS.get("music", 40) / 100 if self.music_on else 0
+        for i, level in enumerate(self.levels):
+            pygame.mixer.Channel(1 + i).set_volume(music * level)
 
     def stop_background(self):
         if self.bank:
-            pygame.mixer.Channel(0).stop()
-            pygame.mixer.Channel(1).stop()
+            for i in range(1 + len(MUSIC_LAYERS)):
+                pygame.mixer.Channel(i).stop()
         self.background = None
 
     @staticmethod
@@ -4962,6 +5022,23 @@ class Game:
                     self.play_at("door", center, 14, 0.7)
                 self.doors[(cx, cy)] = max(0.0, timer)
 
+    def music_state(self):
+        """지금 음악 분위기: calm / relax / alert / peak / boss / over"""
+        if self.game_over:
+            return "over"
+        if self.mode == "training":
+            return "calm"
+        if any(e.kind in ("BOSS", "TITAN") for e in self.enemies):
+            return "boss"
+        d = self.director
+        if d.phase == "peak":
+            return "peak"
+        if d.phase == "relax":
+            return "relax"
+        if d.intensity > 0.3 or any(e.sees for e in self.enemies):
+            return "alert"
+        return "calm"
+
     def update_director(self, dt):
         """디렉터: 긴장감 계산, 숨 돌리기에 들어가면 체력/탄약이 모자랄 때 보급 상자 하나"""
         d = self.director
@@ -5360,6 +5437,7 @@ class Game:
 
     def update(self, dt, keys, mouse_dx, mouse_dy, buttons):
         self.frame_dt = dt
+        self.sounds.mix_music(MUSIC_MIX[self.music_state()], dt)
         keys = self.update_wheel(dt, keys)
         if self.wheel and self.wheel["open"]:
             dt *= WHEEL_SLOW                       # 휠을 보는 동안 시간이 느려져요
@@ -6133,6 +6211,7 @@ class Game:
     def count_round(self):
         """라운드/웨이브/미션 단계를 깰 때마다 누적 기록"""
         self.director.on_clear()
+        self.sounds.play_sting()
         life = self.save.setdefault("lifetime", {})
         life["rounds"] = life.get("rounds", 0) + 1
         self.check_achievements()
