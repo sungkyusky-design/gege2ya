@@ -121,8 +121,11 @@ README 무기 표 / 얻는 조건 표. 포물선 유탄은 `lobbed=True`, 로켓
 5. 바뀐 기능만 따로: 위 스크립트처럼 `shooter.Game(save, round, mode=..., loadout=...)` 을 만들고
    `game.update(1/60, Keys({...}), 0, 0, (False, False, False))` 로 장면을 진행하며 값을 출력해요.
 6. 웹: `bash .claude/skills/strike-zone-dev/scripts/web_smoke.sh [z|o]` → `browser errors: none` 이어야 해요.
+6-1. 글자 겹침: `python .claude/skills/strike-zone-dev/scripts/layout_check.py --all` → `결과: 겹침 없음` 이어야 해요.
+   (메뉴 13개 + HUD·휠·배너·일시정지·결과 카드를 해상도 4개 x UI SIZE 3개로 그려서 글자끼리 겹치거나 화면 밖으로 잘리는 곳을 찾아요.
+   `--shots 폴더` 로 사진도 저장. 새 화면을 만들면 스크립트의 `menus` 에 한 줄 추가)
 7. 밸런스: `python .claude/skills/strike-zone-dev/scripts/balance.py` (무기 처치 시간, 적 초당 피해). 숫자를 바꿨으면 전후 비교.
-8. PR을 만들면 `.github/workflows/test.yml` 이 1~4번과 단위 테스트를 GitHub에서 자동으로 돌려요. 병합 전에 결과(초록 체크)를 확인하세요.
+8. PR을 만들면 `.github/workflows/test.yml` 이 1~4번, 글자 겹침 검사와 단위 테스트를 GitHub에서 자동으로 돌려요. 병합 전에 결과(초록 체크)를 확인하세요.
 
 ## 테스트할 때 함정 (실제로 겪은 것)
 

@@ -29,5 +29,7 @@ jobs:
         run: python .claude/skills/strike-zone-dev/scripts/check_maps.py
       - name: Auto-play every mode
         run: python .claude/skills/strike-zone-dev/scripts/smoke_test.py --seconds 6
+      - name: Text overlap check (every menu and HUD, 4 resolutions x 3 UI sizes)
+        run: python .claude/skills/strike-zone-dev/scripts/layout_check.py --all
       - name: Balance report
         run: python .claude/skills/strike-zone-dev/scripts/balance.py
