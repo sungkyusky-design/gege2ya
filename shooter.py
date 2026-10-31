@@ -109,12 +109,13 @@ JUMP_SPEED = 4.2                  # 점프 힘
 GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
 # 설정 (시작 화면에서 S): 저장돼서 다음에도 그대로예요
-SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=1)
+SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=2, v2=True)
 ASSIST_LEVELS = ["OFF", "LOW", "NORMAL", "HIGH"]
 ASSIST_PAD = [0.0, 0.6, 1.0, 1.5]          # 아깝게 빗나간 총알을 몸통에 맞혀 주는 정도
 ASSIST_STICKY = [1.0, 0.75, 0.55, 0.4]     # 조준점이 적 위에 있을 때 시점이 느려지는 정도
 # 난이도: (이름, 적 실력 배율, 내가 받는 피해 배율)
-DIFFICULTIES = [("EASY", 0.8, 0.6), ("NORMAL", 1.0, 1.0), ("HARD", 1.25, 1.4)]
+DIFFICULTIES = [("RECRUIT", 0.7, 0.45), ("EASY", 0.85, 0.65), ("NORMAL", 1.0, 1.0),
+                ("HARD", 1.2, 1.35), ("VETERAN", 1.4, 1.8)]
 
 
 def apply_settings(settings):
@@ -811,9 +812,6 @@ MAPS = [
     ),
 ]
 
-# 캠페인에서 라운드마다 돌아가며 나오는 맵 (좀비 맵은 빼고)
-CAMPAIGN_MAPS = [i for i, m in enumerate(MAPS) if not m.get("zombie")]
-ZOMBIE_MAP = next(i for i, m in enumerate(MAPS) if m.get("zombie"))
 
 # 건물 종류: 글자 -> (색, 높이, 무늬, 네온사인 색 또는 None)
 #   무늬: True = 창문, "ribs" = 컨테이너/창고 세로 골, False = 무늬 없음
@@ -861,6 +859,220 @@ FLOORS = {
 CAR_COLORS = [(255, 90, 170), (60, 210, 230), (245, 245, 245), (220, 40, 50), (255, 210, 60)]
 PICKUP_TILES = {"a": "ammo", "h": "health", "n": "grenade"}
 
+# ---------------------------------------------------------------
+# 맵 자동 생성기: 도시 블록(건물, 공원, 주차장, 컨테이너, 시장...)을 이어 붙여 맵을 지어요.
+# 같은 seed면 언제나 같은 맵이 나와요. 모든 빈칸이 서로 이어지도록 스스로 검사하고 고쳐요.
+# ---------------------------------------------------------------
+# 스타일: floor 블록 바닥, road 길 바닥, walls 건물 글자들, cover 엄폐물, tree 나무, green 잔디,
+#         block (블록 가로, 세로), road_w 길 폭, kinds 블록 종류와 비율, border 맵 테두리 건물(없으면 None)
+MAP_STYLES = {
+    "suburb": dict(floor=":", road="=", walls="JCB", cover="KQV", tree="I", green="g", block=(6, 4), road_w=1,
+                   kinds=[("house", 5), ("park", 2), ("parking", 1), ("plaza", 1)], border=None),
+    "airfield": dict(floor=",", road="-", walls="WO", cover="ZKr", tree=None, green=",", block=(7, 5), road_w=1,
+                     kinds=[("hangar", 4), ("yard", 2), ("compound", 2), ("plaza", 1)], border=None),
+    "canyon": dict(floor=";", road="#", walls="MO", cover="ZKv", tree="T", green=";", block=(6, 4), road_w=1,
+                   kinds=[("house", 3), ("compound", 3), ("ruins", 2)], border="M"),
+    "trainyard": dict(floor=",", road="=", walls="WU", cover="ZKQ", tree=None, green=",", block=(7, 4), road_w=1,
+                      kinds=[("yard", 5), ("hangar", 1), ("compound", 1)], border=None),
+    "ruins": dict(floor="#", road="g", walls="RV", cover="VZ", tree="I", green="g", block=(6, 4), road_w=1,
+                  kinds=[("ruins", 5), ("park", 2), ("house", 1)], border=None),
+    "ski": dict(floor="*", road="-", walls="JO", cover="ZK", tree="I", green="*", block=(6, 4), road_w=1,
+                kinds=[("lodge", 4), ("park", 3), ("compound", 1)], border=None),
+    "jungle": dict(floor="g", road="#", walls="JM", cover="KZ", tree="T", green="g", block=(6, 4), road_w=1,
+                   kinds=[("park", 4), ("lodge", 3), ("compound", 2)], border=None),
+    "market": dict(floor="x", road=":", walls="NCA", cover="KQ", tree="T", green="x", block=(6, 4), road_w=1,
+                   kinds=[("market", 4), ("house", 3), ("plaza", 2)], border="S"),
+    "city": dict(floor=":", road="=", walls="GSDRAB", cover="KQZ", tree="T", green="g", block=(9, 7), road_w=2,
+                 kinds=[("house", 6), ("plaza", 2), ("parking", 2), ("park", 2), ("yard", 1), ("compound", 1)],
+                 border="S"),
+    "desert": dict(floor=";", road="#", walls="MO", cover="ZKv", tree="T", green=";", block=(9, 7), road_w=2,
+                   kinds=[("house", 5), ("compound", 3), ("ruins", 2), ("market", 2)], border="M"),
+    "arctic": dict(floor="*", road="-", walls="OWU", cover="ZK", tree="I", green="*", block=(9, 7), road_w=2,
+                   kinds=[("compound", 4), ("hangar", 3), ("lodge", 2), ("park", 2), ("yard", 1)], border="O"),
+}
+GEN_BLOCKERS = set("~TcXIv")
+
+
+def generate_map(style_name, width, height, seed, spawns=10, pickups=2):
+    """스타일대로 맵 줄들(rows)을 만들어 돌려줘요"""
+    style = MAP_STYLES[style_name]
+    rng = random.Random(seed)
+    grid = [[style["floor"]] * width for _ in range(height)]
+    bw, bh = style["block"]
+    rw = style["road_w"]
+
+    def is_road(i, size):
+        return i % (size + rw) < rw
+
+    def put(x, y, ch):
+        if 0 <= x < width and 0 <= y < height:
+            grid[y][x] = ch
+
+    # 길
+    for y in range(height):
+        for x in range(width):
+            if is_road(x, bw) or is_road(y, bh):
+                grid[y][x] = style["road"]
+    # 블록 채우기
+    for by in range(rw, height, bh + rw):
+        for bx in range(rw, width, bw + rw):
+            w, h = min(bw, width - bx), min(bh, height - by)
+            if w < 3 or h < 3:
+                continue
+            kind = rng.choices([k for k, _ in style["kinds"]], weights=[n for _, n in style["kinds"]])[0]
+            fill_block(grid, style, kind, bx, by, w, h, rng)
+    # 큰 맵: 넓은 길에 가로등과 자동차
+    if rw >= 2:
+        for y in range(height):
+            for x in range(width):
+                if grid[y][x] == style["road"] and rng.random() < 0.012:
+                    grid[y][x] = "c" if style["road"] == "=" else rng.choice(style["cover"])
+                elif grid[y][x] == style["road"] and rng.random() < 0.006:
+                    grid[y][x] = "L"
+    # 테두리
+    if style["border"]:
+        for x in range(width):
+            grid[0][x] = grid[height - 1][x] = style["border"]
+        for y in range(height):
+            grid[y][0] = grid[y][width - 1] = style["border"]
+    # 시작 위치: 왼쪽 위 근처의 길
+    start = None
+    for d in range(2 * max(width, height)):
+        for x in range(0, d + 1):
+            y = d - x
+            if 0 < x < width - 1 and 0 < y < height - 1 and grid[y][x] == style["road"]:
+                start = (x, y)
+                break
+        if start:
+            break
+    # 이어지지 않은 빈칸은 막아요 (갇힌 안뜰 등)
+    walkable = lambda x, y: grid[y][x] not in WALLS and grid[y][x] not in GEN_BLOCKERS
+    seen = {start}
+    queue = deque([start])
+    while queue:
+        x, y = queue.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in seen and walkable(nx, ny):
+                seen.add((nx, ny))
+                queue.append((nx, ny))
+    for y in range(height):
+        for x in range(width):
+            if walkable(x, y) and (x, y) not in seen:
+                grid[y][x] = style["walls"][0]
+    # 적 출현 위치와 상자: 시작에서 멀리, 서로 떨어지게
+    cells = [c for c in seen if c != start and grid[c[1]][c[0]] in FLOORS]
+    rng.shuffle(cells)
+    chosen = []
+    for c in cells:
+        if len(chosen) >= spawns:
+            break
+        if math.dist(c, start) > 9 and all(math.dist(c, o) > 3 for o in chosen):
+            chosen.append(c)
+    for x, y in chosen:
+        grid[y][x] = "E"
+    for letter in "ahn":
+        placed = 0
+        for x, y in cells:
+            if placed >= pickups:
+                break
+            if grid[y][x] in FLOORS and math.dist((x, y), start) > 3:
+                grid[y][x] = letter
+                placed += 1
+    grid[start[1]][start[0]] = "P"
+    return ["".join(row) for row in grid]
+
+
+def fill_block(grid, style, kind, bx, by, w, h, rng):
+    """블록 하나를 종류대로 채워요 (가장자리 한 칸은 인도로 비워 둬요)"""
+    floor, wall = style["floor"], rng.choice(style["walls"])
+
+    def put(x, y, ch):
+        if by <= y < by + h and bx <= x < bx + w:
+            grid[y][x] = ch
+
+    x0, y0, x1, y1 = bx + 1, by + 1, bx + w - 2, by + h - 2       # 안쪽 사각형
+    if kind in ("house", "hangar", "lodge"):
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                put(x, y, wall if kind != "lodge" else "J")
+        big = x1 - x0 >= 3 and y1 - y0 >= 2
+        if big and (kind == "hangar" or rng.random() < 0.6):
+            # 안이 빈 건물: 문 1~2개, 안에 엄폐물
+            for y in range(y0 + 1, y1):
+                for x in range(x0 + 1, x1):
+                    put(x, y, floor)
+            doors = [((x0 + x1) // 2, y0), ((x0 + x1) // 2, y1), (x0, (y0 + y1) // 2), (x1, (y0 + y1) // 2)]
+            for door in rng.sample(doors, 2 if kind == "hangar" else rng.randint(1, 2)):
+                put(*door, floor)
+            if x1 - x0 >= 4:
+                put(rng.randint(x0 + 1, x1 - 1), rng.randint(y0 + 1, y1 - 1), rng.choice(style["cover"]))
+    elif kind == "park":
+        for y in range(by, by + h):
+            for x in range(bx, bx + w):
+                put(x, y, style["green"])
+        for _ in range(w * h // 6):
+            if style["tree"]:
+                put(rng.randint(x0, x1), rng.randint(y0, y1), style["tree"])
+    elif kind == "plaza":
+        for y in range(by, by + h):
+            for x in range(bx, bx + w):
+                put(x, y, "x" if style["floor"] in ":x" else floor)
+        cx, cy = bx + w // 2, by + h // 2
+        put(cx, cy, "F")
+        for _ in range(3):
+            put(rng.randint(x0, x1), rng.randint(y0, y1), rng.choice(style["cover"]))
+        put(x0, y0, "L")
+    elif kind == "parking":
+        for y in range(y0, y1 + 1, 2):
+            for x in range(x0, x1 + 1, 2):
+                if rng.random() < 0.7:
+                    put(x, y, "c" if style["road"] == "=" else rng.choice(style["cover"]))
+    elif kind == "yard":
+        containers = "ruoY"
+        for y in range(y0, y1 + 1, 2):
+            x = x0
+            while x <= x1:
+                length = rng.randint(2, 3)
+                ch = rng.choice(containers)
+                for k in range(length):
+                    if x + k <= x1:
+                        put(x + k, y, ch)
+                x += length + 1
+    elif kind == "compound":
+        low = rng.choice([c for c in style["cover"] if c in "VZ"] or ["Z"])
+        for x in range(x0, x1 + 1):
+            put(x, y0, low)
+            put(x, y1, low)
+        for y in range(y0, y1 + 1):
+            put(x0, y, low)
+            put(x1, y, low)
+        for _ in range(3 if x1 - x0 >= 2 and y1 - y0 >= 2 else 0):   # 틈(출입구)
+            if rng.random() < 0.5:
+                put(rng.randint(x0 + 1, x1 - 1), rng.choice((y0, y1)), floor)
+            else:
+                put(rng.choice((x0, x1)), rng.randint(y0 + 1, y1 - 1), floor)
+        if x1 - x0 >= 3 and y1 - y0 >= 2:
+            put((x0 + x1) // 2, (y0 + y1) // 2, wall)          # 가운데 벙커
+    elif kind == "ruins":
+        for _ in range(w * h // 4):
+            x, y = rng.randint(x0, x1), rng.randint(y0, y1)
+            if rng.random() < 0.5:
+                for k in range(rng.randint(1, 3)):
+                    put(x + k, y, rng.choice("VV" + wall))
+            else:
+                for k in range(rng.randint(1, 2)):
+                    put(x, y + k, rng.choice("VV" + wall))
+    elif kind == "market":
+        for y in range(by, by + h):
+            for x in range(bx, bx + w):
+                put(x, y, "x" if style["floor"] in ":x" else floor)
+        for y in range(y0, y1 + 1, 2):
+            for x in range(x0, x1 + 1, 3):
+                put(x, y, rng.choice("KC" if "C" in style["walls"] else "KQ"))
+                put(x + 1, y, rng.choice("KC" if "C" in style["walls"] else "KQ"))
+        put(x0, y1, "L")
+
 WHITE = (240, 240, 240)
 RED = (230, 50, 50)
 YELLOW = (255, 220, 90)
@@ -885,10 +1097,11 @@ def floor_of(col, row):
     return "."
 
 
-def load_map(index):
-    """index번째 맵으로 바꿔요. 다른 함수들이 쓰는 맵 정보(전역 변수)를 새로 채워요."""
+def load_map(index, theme=None):
+    """index번째 맵으로 바꿔요. 다른 함수들이 쓰는 맵 정보(전역 변수)를 새로 채워요.
+    theme: 분위기를 바꾼 맵 정보 (세트마다 밤/폭풍우 등). 없으면 원래 맵"""
     global GAME_MAP, MAP_W, MAP_H, FLOOR_GRID, WALL_GRID, MAX_WALL, HAZE, LIT, FLOOR_COLORS
-    theme = MAPS[index]
+    theme = theme or MAPS[index]
     GAME_MAP = theme["rows"]
     MAP_W, MAP_H = len(GAME_MAP[0]), len(GAME_MAP)
     # 매번 계산하지 않도록 칸마다 바닥/건물 정보를 미리 만들어 둬요
@@ -1046,6 +1259,83 @@ def fog(color, dist, fog_dist):
 
 def shade(color, amount):
     return tuple(int(c * amount) for c in color)
+
+
+# 생성기로 만든 캠페인 맵 8개 (모두 합쳐 20개)
+def sky(top, mid, low, horizon):
+    return [(0.0, top), (0.6, mid), (0.9, low), (1.0, horizon)]
+
+
+DESERT_CAMO = dict(uniform=(185, 160, 110), vest=(150, 125, 85), pants=(165, 140, 100))
+GENERATED_MAPS = [
+    dict(name="SUBURB", sky=sky((70, 130, 210), (140, 185, 230), (215, 225, 230), (230, 235, 235)),
+         haze=(220, 228, 232), sun=-1.0, stars=False, ground=":", lit=7, fog=1.0, snow=False, camo=None,
+         op="OPERATION PICKET FENCE", brief="Hostiles holed up in a quiet neighborhood. Clear the houses.",
+         rows=generate_map("suburb", 26, 18, 11)),
+    dict(name="AIRFIELD", sky=sky((50, 50, 110), (170, 100, 120), (250, 160, 100), (255, 200, 140)),
+         haze=(245, 180, 140), sun=math.pi * 0.8, stars=False, ground=",", lit=6, fog=1.1, snow=False, camo=None,
+         op="OPERATION RUNWAY", brief="Take the airfield. Hangars and fuel depots - watch the open tarmac.",
+         rows=generate_map("airfield", 26, 18, 12)),
+    dict(name="CANYON OUTPOST", sky=sky((60, 110, 190), (130, 175, 225), (235, 205, 170), (245, 220, 185)),
+         haze=(240, 215, 180), sun=-math.pi / 2, stars=False, ground=";", lit=9, fog=1.1, snow=False,
+         camo=DESERT_CAMO, op="OPERATION RED ROCK", brief="An outpost hidden in the canyon. Sandbags everywhere.",
+         rows=generate_map("canyon", 26, 18, 13)),
+    dict(name="TRAINYARD", sky=sky((95, 100, 110), (150, 150, 155), (185, 180, 175), (195, 190, 185)),
+         haze=(185, 180, 172), sun=None, stars=False, ground=",", lit=9, fog=0.85, snow=False,
+         camo=dict(uniform=(90, 85, 70), vest=(60, 58, 50), pants=(70, 65, 55)),
+         op="OPERATION IRON HORSE", brief="Rows of freight cars. Fight down the narrow lanes.",
+         rows=generate_map("trainyard", 26, 18, 14)),
+    dict(name="CASTLE RUINS", sky=sky((90, 115, 145), (150, 168, 180), (200, 205, 200), (210, 215, 208)),
+         haze=(195, 202, 196), sun=None, stars=False, ground="g", lit=9, fog=0.6, snow=False,
+         camo=dict(uniform=(70, 95, 55), vest=(50, 70, 40), pants=(60, 70, 50)),
+         op="OPERATION OLD STONE", brief="Fog over the old ruins. Low walls - shoot over them.",
+         rows=generate_map("ruins", 26, 18, 15)),
+    dict(name="SKI LODGE", sky=sky((60, 120, 200), (140, 185, 230), (220, 230, 240), (235, 240, 248)),
+         haze=(225, 232, 242), sun=0.4, stars=False, ground="*", lit=5, fog=0.9, snow=True,
+         camo=dict(uniform=(225, 228, 232), vest=(165, 170, 180), pants=(200, 205, 212)),
+         op="OPERATION POWDER", brief="Mountain lodges in fresh snow. They blend in - look closely.",
+         rows=generate_map("ski", 26, 18, 16)),
+    dict(name="JUNGLE CAMP", sky=sky((70, 110, 100), (130, 165, 140), (185, 200, 170), (195, 210, 180)),
+         haze=(170, 190, 160), sun=None, stars=False, ground="g", lit=9, fog=0.5, snow=False,
+         camo=dict(uniform=(60, 90, 45), vest=(45, 70, 35), pants=(55, 70, 45)),
+         op="OPERATION GREEN HELL", brief="Thick jungle and hidden huts. Listen before you look.",
+         rows=generate_map("jungle", 26, 18, 17)),
+    dict(name="NIGHT MARKET", sky=sky((10, 8, 30), (40, 20, 70), (100, 40, 110), (140, 60, 130)),
+         haze=(70, 40, 95), sun=None, stars=True, ground="x", lit=2, fog=0.9, snow=False, dark=0.8, camo=None,
+         op="OPERATION LANTERN", brief="Crowded night market under neon. Stalls give cover to both sides.",
+         rows=generate_map("market", 26, 18, 18)),
+]
+MAPS[-1:-1] = GENERATED_MAPS          # 좀비 맵(마지막) 앞에 넣어요
+
+# 캠페인에서 라운드마다 돌아가며 나오는 맵 (좀비 맵은 빼고) - 20개
+CAMPAIGN_MAPS = [i for i, m in enumerate(MAPS) if not m.get("zombie")]
+ZOMBIE_MAP = next(i for i, m in enumerate(MAPS) if m.get("zombie"))
+
+# 캠페인 100라운드 = 맵 20개 x 5세트. 세트마다 분위기가 바뀌고 적이 강해져요
+CAMPAIGN_ROUNDS = 100
+SET_SIZE = 20
+SETS = ["RECON", "ASSAULT", "NIGHT OPS", "STORM", "VETERAN"]
+
+
+def set_of(round_no):
+    return min(len(SETS), (round_no - 1) // SET_SIZE + 1)
+
+
+def variant_theme(theme, set_no):
+    """세트에 따라 맵 분위기를 바꿔요: 3세트 밤, 4세트 폭풍우, 5세트 붉은 하늘"""
+    theme = dict(theme)
+    if set_no == 3:
+        theme.update(sky=[(t, shade(c, 0.3)) for t, c in theme["sky"]], haze=shade(theme["haze"], 0.35),
+                     sun=None, stars=True, lit=2, dark=min(theme.get("dark", 1.0), 0.55), fog=theme["fog"] * 0.8)
+    elif set_no == 4:
+        theme.update(sky=[(t, shade(c, 0.5)) for t, c in theme["sky"]], haze=shade(theme["haze"], 0.55),
+                     sun=None, dark=min(theme.get("dark", 1.0), 0.72), fog=theme["fog"] * 0.7,
+                     rain=not theme["snow"])
+    elif set_no == 5:
+        theme.update(sky=[(t, (min(255, int(c[0] * 1.1) + 40), int(c[1] * 0.55), int(c[2] * 0.5)))
+                          for t, c in theme["sky"]],
+                     haze=(200, 110, 90), dark=min(theme.get("dark", 1.0), 0.85))
+    return theme
 
 
 load_map(0)       # 처음엔 첫 번째 맵
@@ -2702,11 +2992,12 @@ class Game:
               and frame_time * self.col_w / (self.col_w - 1) < FRAME_BUDGET * 0.75):
             self.set_col_w(self.col_w - 1)
 
-    def setup_map(self, index):
+    def setup_map(self, index, set_no=1):
         """맵 바꾸기: 맵 정보, 장식물, 적 출현 위치, 미니맵, 하늘을 새로 만들어요."""
-        load_map(index)
+        self.theme = variant_theme(MAPS[index], set_no)
+        load_map(index, self.theme)
         self.map_index = index
-        self.theme = MAPS[index]
+        self.map_key = (index, set_no)
         self.decor = []
         images = dict(self.decor_images)
         if self.theme["snow"]:
@@ -2798,8 +3089,13 @@ class Game:
 
     @property
     def skill(self):
-        """적 실력: 라운드마다 8%씩 올라가요 (최대 2배). 난이도 설정에 따라 더 쉽거나 어렵게"""
-        return min(2.0, 1 + 0.08 * (self.round - 1)) * DIFFICULTIES[SETTINGS["difficulty"]][1]
+        """적 실력: 캠페인은 라운드마다 1.5%씩 (100라운드에 약 250%, 최대 260%).
+        좀비 모드는 웨이브마다 8%. 난이도 설정에 따라 더 쉽거나 어렵게"""
+        if self.mode == "campaign":
+            base = 1 + 0.015 * (self.round - 1)
+        else:
+            base = 1 + 0.08 * (self.round - 1)
+        return min(2.6, base) * DIFFICULTIES[SETTINGS["difficulty"]][1]
 
     def pick_enemy_kind(self):
         """라운드가 올라갈수록 새로운 적이 섞여 나와요"""
@@ -2850,19 +3146,21 @@ class Game:
             self.sub_banners.append(("BRUTE INCOMING!", (255, 120, 40)))
 
     def start_battle(self):
+        set_no = set_of(self.round)
         index = CAMPAIGN_MAPS[(self.round - 1) % len(CAMPAIGN_MAPS)]
-        if index != self.map_index:
-            self.setup_map(index)
+        if (index, set_no) != getattr(self, "map_key", None):
+            self.setup_map(index, set_no)
         start = find_cells("P")[0]
         self.player = Player(*start)
         self.player.hp = self.max_hp
         self.arsenal = self.make_arsenal()
         far = [p for p in self.spawn_points if self.player.pos.distance_to(p) > SAFE_SPAWN]
-        count = min(len(far), 2 + self.round)
+        in_set = (self.round - 1) % SET_SIZE
+        count = min(len(far), 3 + in_set // 4 + set_no - 1)
         self.enemies = [Enemy(*p, self.pick_enemy_kind(), self.skill) for p in random.sample(far, count)]
         # 새로운 적이 처음 나오는 라운드에는 그 적이 꼭 한 명은 있게. 5라운드마다 보스
         news = {2: "SNIPER", 3: "HEAVY", 4: "BOMBER", 6: "SHIELD", 7: "FLANKER", 8: "MEDIC", 9: "GUNNER"}
-        special = "BOSS" if self.round % 5 == 0 else news.get(self.round)
+        special = "BOSS" if self.round % 10 == 0 else news.get(self.round)
         if special:
             first = self.enemies[0]
             self.enemies[0] = Enemy(first.pos.x, first.pos.y, special, self.skill)
@@ -2870,8 +3168,9 @@ class Game:
         self.pickups = [Pickup(x, y, kind) for letter, kind in PICKUP_TILES.items()
                         for x, y in find_cells(letter)]
         self.zombies_left = 0
-        self.banner = f"ROUND {self.round}"
-        self.sub_banners = [(f"{self.theme['op']}  -  {self.theme['name']}", WHITE)]
+        self.banner = f"ROUND {self.round}" + (f" / {CAMPAIGN_ROUNDS}" if self.round <= CAMPAIGN_ROUNDS else "")
+        self.sub_banners = [(f"{self.theme['op']}  -  {self.theme['name']}", WHITE),
+                            (f"SET {set_no}: {SETS[set_no - 1]}   MAP {in_set + 1} / {SET_SIZE}", (200, 200, 255))]
         if special == "BOSS":
             self.sub_banners.append(("BOSS ROUND!", RED))
         elif special:
@@ -2879,7 +3178,7 @@ class Game:
         if self.round > 1:
             self.sub_banners.append((f"ENEMY SKILL {self.skill * 100:.0f}%", (255, 160, 60)))
         # 라운드 목표
-        kind = None if special == "BOSS" else OBJECTIVE_ORDER.get(self.round % 5)
+        kind = None if special == "BOSS" or self.round % 5 == 1 else OBJECTIVE_ORDER.get(self.round % 5)
         self.objective = None
         if kind and self.round > 1:
             self.objective = dict(kind=kind, pos=self.far_spot(), progress=0.0, done=False,
@@ -3452,8 +3751,8 @@ class Game:
         elif self.mode != "zombies" and (self.objective["done"] if self.objective else not self.enemies):
             self.slowmo = 0.8                         # 마지막 한 명(또는 목표 완료): 슬로모션
             self.round_clear_timer = 4.0
-            self.banner = "ROUND CLEAR"
-            self.sub_banners = []
+            self.banner = "CAMPAIGN COMPLETE!" if self.round == CAMPAIGN_ROUNDS else "ROUND CLEAR"
+            self.sub_banners = [] if self.round != CAMPAIGN_ROUNDS else [("All 100 rounds cleared - the war goes on", YELLOW)]
             self.banner_timer = 4.0
             self.add_xp(XP["round"], f"ROUND CLEAR  +{XP['round']}")
             self.record_progress(self.round + 1)
@@ -4499,7 +4798,8 @@ class Game:
             info = (f"WAVE {self.round}   {self.theme['name']}   "
                     f"ZOMBIES {len(self.enemies) + self.zombies_left}   KILLS {self.kills}")
         else:
-            info = f"ROUND {self.round}   {self.theme['name']}   ENEMIES {len(self.enemies)}   KILLS {self.kills}"
+            info = (f"ROUND {self.round}/{CAMPAIGN_ROUNDS}   SET {set_of(self.round)}   {self.theme['name']}   "
+                    f"ENEMIES {len(self.enemies)}   KILLS {self.kills}")
         screen.blit(font.render(info, True, WHITE), (16, 12))
         # 계급과 경험치 막대
         rank_label = self.small_font.render(f"RANK {self.rank}", True, WHITE)
@@ -4925,6 +5225,9 @@ async def intro_screen(save):
     fonts = make_fonts()
     clock = pygame.time.Clock()
     continue_round = save.get("continue", 1)
+    reached = max(save.get("best", 1), continue_round)
+    set_starts = [1 + k * SET_SIZE for k in range(len(SETS)) if 1 + k * SET_SIZE <= reached]
+    start_pick = 0
     while True:
         clock.tick(30)
         for event in menu_events():
@@ -4935,7 +5238,13 @@ async def intro_screen(save):
             if event.key == pygame.K_ESCAPE:
                 return None
             if event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
-                return dict(mode="campaign", round=1)
+                return dict(mode="campaign", round=set_starts[start_pick])
+            if event.key in (pygame.K_LEFT, pygame.K_RIGHT) and len(set_starts) > 1:
+                start_pick = (start_pick + (1 if event.key == pygame.K_RIGHT else -1)) % len(set_starts)
+            if event.key == pygame.K_d:
+                SETTINGS["difficulty"] = (SETTINGS["difficulty"] + 1) % len(DIFFICULTIES)
+                save["settings"] = dict(SETTINGS)
+                write_save(save)
             if event.key == pygame.K_z:
                 return dict(mode="zombies", round=1)
             if event.key == pygame.K_c and continue_round > 1:
@@ -4954,7 +5263,15 @@ async def intro_screen(save):
                 fonts = make_fonts()
 
         ko = fonts["lang"] == "ko"
-        parts = ["Enter 캠페인" if ko else "ENTER campaign", "Z 좀비 모드" if ko else "Z zombies"]
+        first = set_starts[start_pick]
+        if ko:
+            parts = [f"Enter 캠페인 (라운드 {first})", "Z 좀비 모드"]
+        else:
+            parts = [f"ENTER campaign (round {first})", "Z zombies"]
+        if len(set_starts) > 1:
+            parts.append("←→ 시작 세트" if ko else "LEFT/RIGHT start set")
+        diff = DIFFICULTIES[SETTINGS["difficulty"]][0]
+        parts.append(f"D 난이도 {diff}" if ko else f"D difficulty {diff}")
         if continue_round > 1:
             parts.append(f"C 이어하기 (라운드 {continue_round})" if ko else f"C continue (round {continue_round})")
         if len(options) > 1:
@@ -5115,7 +5432,10 @@ async def run():
     창을 닫으면 False, ESC로 끝내면 True를 돌려줘요 (메뉴로 돌아갈지 판단용).
     """
     save = load_save()
-    apply_settings(save.get("settings", {}))
+    settings = save.get("settings", {})
+    if "difficulty" in settings and not settings.get("v2"):     # 예전 3단계 난이도 -> 새 5단계
+        settings = dict(settings, difficulty=[1, 2, 3][min(2, settings["difficulty"])], v2=True)
+    apply_settings(settings)
     while True:
         choice = await intro_screen(save)            # 모드 고르기
         if choice is None or choice == "closed":
