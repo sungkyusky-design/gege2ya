@@ -146,7 +146,7 @@ GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
 # 설정 (시작 화면에서 S): 저장돼서 다음에도 그대로예요
 SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=2, v2=True, music=40,
-                hud=100, shake=1, soundviz=0, colorblind=0, squad=2, fullscreen=0, lang=0)
+                hud=100, shake=1, soundviz=0, colorblind=0, squad=2, fullscreen=0, lang=0, gfx=1)
 ASSIST_LEVELS = ["OFF", "LOW", "NORMAL", "HIGH"]
 ASSIST_PAD = [0.0, 0.6, 1.0, 1.5]          # 아깝게 빗나간 총알을 몸통에 맞혀 주는 정도
 ASSIST_STICKY = [1.0, 0.75, 0.55, 0.4]     # 조준점이 적 위에 있을 때 시점이 느려지는 정도
@@ -867,6 +867,9 @@ def load_map(index, theme=None):
     # 밤 맵(dark)은 바닥과 건물을 어둡게 칠해요. 네온사인은 그대로 밝게
     dark = theme.get("dark", 1.0)
     FLOOR_COLORS = {k: shade(c, dark) for k, c in FLOORS.items()}
+    # 바닥 깊이감: 발밑(가까운 곳)은 조금 어둡고 멀어질수록 밝아져요 (거리 0~7칸)
+    FLOOR_DEPTH.clear()
+    FLOOR_DEPTH.update({k: [shade(c, 0.74 + 0.26 * min(1.0, d / 7)) for d in range(8)] for k, c in FLOOR_COLORS.items()})
     walls = {k: (shade(c, dark), h, pattern, neon) for k, (c, h, pattern, neon) in WALLS.items()}
     WALL_GRID = [[walls.get(ch) for ch in line] for line in GAME_MAP]
     # 이 맵에서 가장 높은 건물 (광선이 여기에 닿으면 더 멀리 안 봐도 돼요)
@@ -1038,6 +1041,14 @@ def move_with_collision(pos, delta, radius=0.2):
     side_y = new_y + math.copysign(radius, delta.y) if delta.y else new_y
     if not is_blocked(pos.x, side_y):
         pos.y = new_y
+
+
+FLOOR_DEPTH = {}                  # 바닥 글자 → 거리별 색 (load_map 에서 채워요)
+GFX_NAMES = ["LOW", "NORMAL", "HIGH"]
+# 맵 분위기별 색 보정: (곱할 색, 더할 색). 곱하면 색이 물들고, 조금 더하면 어두운 곳이 부드러워져요
+GRADES = {"snow": ((222, 234, 255), (2, 6, 14)), "night": ((216, 220, 242), (2, 3, 12)),
+          "rain": ((212, 218, 224), (6, 6, 10)), "warm": ((255, 236, 212), (12, 5, 0)),
+          "default": ((248, 244, 238), (5, 4, 2))}
 
 
 def cast_ray(px, py, angle):
@@ -2191,7 +2202,7 @@ KO_TEXT = {
     "LOOK SPEED": "시점 속도", "MOUSE SPEED": "마우스 속도", "AIM ASSIST": "조준 보정", "FIELD OF VIEW": "시야각",
     "VOLUME": "소리", "MUSIC": "음악", "FULLSCREEN": "전체 화면", "SQUADMATES": "동료", "UI SIZE": "글자 크기",
     "SCREEN SHAKE": "화면 흔들림", "SOUND MARKS": "소리 표시", "COLORBLIND": "색약 모드", "LANGUAGE": "언어",
-    "WEAPONS": "무기", "RECENT GAMES": "최근 판", "DEEP RUN": "딥 런", "DEPTH": "깊이", "DISPLAY": "화면", "SOUND": "소리", "INPUT": "조작", "GAME": "게임",
+    "WEAPONS": "무기", "RECENT GAMES": "최근 판", "DEEP RUN": "딥 런", "DEPTH": "깊이", "DISPLAY": "화면", "SOUND": "소리", "INPUT": "조작", "GAME": "게임", "GRAPHICS": "그래픽",
 }
 
 
@@ -7410,6 +7421,9 @@ class Game:
             return min(1.0, 1.25 * (1 - d / radius))
 
         self.effects.append(Effect(pos, self.explosion_frames, 0.5, radius * 0.9))
+        if pos.distance_to(self.player.pos) < 10:          # 가까운 폭발: 주변이 확 밝아져요
+            self.light_timer = max(self.light_timer, 0.14)
+            self.muzzle_glow = max(self.muzzle_glow, 230)
         self.play_at("explosion", pos, 25, 1.1)
         for row in range(int(pos.y) - 2, int(pos.y) + 3):      # 가까운 상자는 부서지고, 벽엔 그을음
             for col in range(int(pos.x) - 2, int(pos.x) + 3):
@@ -7567,6 +7581,7 @@ class Game:
         if self.flashed > 0:                              # 섬광탄에 눈부심: 하얀 화면
             self.flash_overlay.set_alpha(int(255 * min(1.0, self.flashed / 1.2)))
             screen.blit(self.flash_overlay, (0, 0))
+        self.post_process(screen)
         if self.wheel and self.wheel["open"]:
             self.draw_wheel(screen)                       # 휠을 보는 동안은 HUD 대신 휠만
         else:
@@ -7657,6 +7672,39 @@ class Game:
             x = (x0 * WIDTH - shift + y * 0.25) % WIDTH
             pygame.draw.line(screen, (150, 165, 200), (x, y), (x - length * 0.25, y + length), 1)
 
+    def mood(self):
+        """맵 분위기 이름 (색 보정용)"""
+        if self.theme.get("snow"):
+            return "snow"
+        if self.theme.get("rain"):
+            return "rain"
+        if self.night:
+            return "night"
+        if self.theme.get("ground") in (".", ";") or self.theme.get("sun") is not None:
+            return "warm"
+        return "default"
+
+    def post_process(self, screen):
+        """그래픽 품질 NORMAL: 맵 분위기 색 보정 / HIGH: + 밝은 곳이 은은하게 번지는 빛 (bloom)"""
+        gfx = SETTINGS.get("gfx", 1)
+        if gfx <= 0:
+            return
+        key = (WIDTH, HEIGHT, self.mood())
+        if getattr(self, "grade_key", None) != key:
+            self.grade_key = key
+            mult, add = GRADES[key[2]]
+            self.grade_mult = pygame.Surface((WIDTH, HEIGHT))
+            self.grade_mult.fill(mult)
+            self.grade_add = pygame.Surface((WIDTH, HEIGHT))
+            self.grade_add.fill(add)
+        if gfx >= 2:                                     # 빛 번짐: 작게 줄여 밝은 부분만 남기고 키워서 더해요
+            small = pygame.transform.scale(screen, (WIDTH // 8, HEIGHT // 8))
+            small.fill((150, 150, 150), special_flags=pygame.BLEND_SUB)
+            glow = pygame.transform.smoothscale(small, (WIDTH // 4, HEIGHT // 4))
+            screen.blit(pygame.transform.scale(glow, (WIDTH, HEIGHT)), (0, 0), special_flags=pygame.BLEND_ADD)
+        screen.blit(self.grade_mult, (0, 0), special_flags=pygame.BLEND_MULT)
+        screen.blit(self.grade_add, (0, 0), special_flags=pygame.BLEND_ADD)
+
     def draw_sky(self, screen):
         horizon = self.horizon
         screen.blit(self.sky, (0, horizon - self.sky.get_height()))
@@ -7692,6 +7740,7 @@ class Game:
         px, py, angle = p.pos.x, p.pos.y, p.angle
         textured = col_w <= MAX_TEXTURE_COL
         light = self.light_timer > 0
+        depth_floor = SETTINGS.get("gfx", 1) >= 1 and FLOOR_DEPTH
         for i, (offset, fix) in enumerate(self.ray_table):
             # i번째 세로 줄이 바라보는 방향. 화면에 평평하게 펼쳐지도록 tan으로 계산해요
             floors, walls = cast_ray(px, py, angle + offset)
@@ -7703,7 +7752,8 @@ class Game:
                 y_far = horizon if d1 == math.inf else horizon + eye * proj / (max(d1, 0.01) * fix)
                 if y_near > y_far and y_far < HEIGHT:
                     # 바닥은 벽보다 안개를 약하게 (바다가 회색으로 안 보이게)
-                    color = fog(FLOOR_COLORS[kind], (min(d1, fog_dist) + d0) * 0.3, fog_dist)
+                    base = FLOOR_DEPTH[kind][min(7, int(d0))] if depth_floor else FLOOR_COLORS[kind]
+                    color = fog(base, (min(d1, fog_dist) + d0) * 0.3, fog_dist)
                     draw_rect(screen, color, (x, y_far, col_w, min(HEIGHT, y_near) - y_far + 1))
                 if kind == "z" and self.trap_timer > 0 and y_near > y_far:      # 켜진 전기 함정: 파랗게 번쩍
                     glow = 140 + int(100 * abs(math.sin(self.time * 25)))
@@ -8977,6 +9027,7 @@ SETTING_ROWS = [
     ("soundviz", "SOUND MARKS", "발소리·총소리 방향을 조준점 둘레에 표시", "Show footstep/gunshot directions"),
     ("colorblind", "COLORBLIND", "빨강/초록 대신 주황/파랑", "Orange/blue instead of red/green"),
     ("lang", "LANGUAGE", "메뉴 글자: 한국어 / 영어", "Menu language: Korean / English"),
+    ("gfx", "GRAPHICS", "LOW 가장 빠르게 / NORMAL 색감 / HIGH 색감 + 빛 번짐", "LOW fastest / NORMAL color grade / HIGH + bloom"),
     ("controls", "CONTROLS", "키 바꾸기 (Enter 로 열기)", "Rebind keys (press Enter)"),
 ]
 
@@ -9004,6 +9055,8 @@ def change_setting(key, step):
         SETTINGS[key] = (SETTINGS[key] + step) % len(DIFFICULTIES)
     elif key == "lang":
         SETTINGS[key] = 1 - SETTINGS[key]
+    elif key == "gfx":
+        SETTINGS[key] = (SETTINGS.get(key, 1) + step) % len(GFX_NAMES)
     apply_settings({})
 
 
@@ -9025,6 +9078,8 @@ def setting_text(key):
         return "BROWSER" if IN_BROWSER else ("ON" if value else "OFF")
     if key == "squad":
         return str(value)
+    if key == "gfx":
+        return GFX_NAMES[value]
     if key == "lang":
         if value == 1:
             return "ENGLISH"
@@ -9033,7 +9088,7 @@ def setting_text(key):
 
 
 # 설정 화면 탭: (탭 이름, 그 탭의 설정 키들). 새 설정을 만들면 여기 한 곳에 꼭 넣어요
-SETTING_TABS = [("DISPLAY", ("fullscreen", "fov", "hud", "shake", "colorblind", "lang")),
+SETTING_TABS = [("DISPLAY", ("fullscreen", "gfx", "fov", "hud", "shake", "colorblind", "lang")),
                 ("SOUND", ("volume", "music", "soundviz")),
                 ("INPUT", ("look", "mouse", "assist", "controls")),
                 ("GAME", ("difficulty", "squad"))]
@@ -9114,7 +9169,7 @@ async def settings_screen(save):
             num = fonts["tiny"].render(str(i + 1), True, YELLOW)
             screen.blit(num, num.get_rect(midleft=(rect.x + 10 * UI, rect.centery)))
         # 고른 탭의 설정들
-        step = HEIGHT * 0.075
+        step = HEIGHT * min(0.075, 0.5 / max(len(k) for _, k in SETTING_TABS))
         for i, key in enumerate(keys):
             _, name, desc_ko, desc_en = rows_by_key[key]
             rect = pygame.Rect(WIDTH * 0.06, HEIGHT * 0.25 + i * step, WIDTH * 0.88, step * 0.86)
@@ -9128,8 +9183,9 @@ async def settings_screen(save):
         # 아래: 고른 설정 설명 + 미리보기
         key = keys[row]
         _, name, desc_ko, desc_en = rows_by_key[key]
-        box = pygame.Rect(WIDTH * 0.06, HEIGHT * 0.25 + 6 * step + HEIGHT * 0.01, WIDTH * 0.88,
-                          HEIGHT - 44 * UI - (HEIGHT * 0.26 + 6 * step) - HEIGHT * 0.01)
+        most = max(len(k) for _, k in SETTING_TABS)              # 가장 긴 탭 아래에 설명 칸
+        box = pygame.Rect(WIDTH * 0.06, HEIGHT * 0.25 + most * step + HEIGHT * 0.01, WIDTH * 0.88,
+                          HEIGHT - 44 * UI - (HEIGHT * 0.26 + most * step) - HEIGHT * 0.01)
         draw_panel(screen, box, False)
         desc = fit_text(fonts["help"], desc_ko if ko else desc_en, box.w * 0.62)
         screen.blit(fonts["help"].render(desc, True, (200, 230, 255)),
