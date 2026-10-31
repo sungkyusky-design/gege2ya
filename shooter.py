@@ -1,9 +1,13 @@
 """
 스트라이크 존 - 1인칭 총게임 (레이캐스팅 FPS)
 
-두 가지 모드:
-    캠페인    : 라운드마다 맵이 바뀌어요 (작고 빠른 맵 9개). 라운드가 오를수록 적이 강해져요.
+세 가지 모드:
+    캠페인    : 100라운드 (맵 20개 x 5세트: 기본/강습/밤/폭풍우/베테랑). 라운드가 오를수록 적이 강해져요.
     좀비 모드 : 핏빛 달이 뜬 마을에서 좀비 웨이브를 버텨요. 점수로 탄약과 총 강화를 사요.
+    미션      : 아주 큰 맵에서 다섯 단계 장기 작전. 단계마다 체크포인트에 저장돼요.
+
+RPG: 계급이 오르면 스킬 포인트(K), 계급/점수로 새 무기를 얻고, 무기는 쓸수록 레벨이 올라요.
+    스킬 T 집중(적이 느려짐) / Y 구급상자 / J 탐지(벽 너머 적 표시)
 
 시작 전에 로드아웃(주무기 / 보조무기 / 퍼크)을 골라요.
     퍼크: HEAVY ROUNDS 피해+25%, QUICK HANDS 재장전 빠르게, LIGHTFOOT 조용한 발걸음,
@@ -109,12 +113,13 @@ JUMP_SPEED = 4.2                  # 점프 힘
 GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
 # 설정 (시작 화면에서 S): 저장돼서 다음에도 그대로예요
-SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=1)
+SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=2, v2=True)
 ASSIST_LEVELS = ["OFF", "LOW", "NORMAL", "HIGH"]
 ASSIST_PAD = [0.0, 0.6, 1.0, 1.5]          # 아깝게 빗나간 총알을 몸통에 맞혀 주는 정도
 ASSIST_STICKY = [1.0, 0.75, 0.55, 0.4]     # 조준점이 적 위에 있을 때 시점이 느려지는 정도
 # 난이도: (이름, 적 실력 배율, 내가 받는 피해 배율)
-DIFFICULTIES = [("EASY", 0.8, 0.6), ("NORMAL", 1.0, 1.0), ("HARD", 1.25, 1.4)]
+DIFFICULTIES = [("RECRUIT", 0.7, 0.45), ("EASY", 0.85, 0.65), ("NORMAL", 1.0, 1.0),
+                ("HARD", 1.2, 1.35), ("VETERAN", 1.4, 1.8)]
 
 
 def apply_settings(settings):
@@ -174,6 +179,8 @@ OBJECTIVES = {
     "HOSTAGE": dict(need=3.0, radius=1.2, title="RESCUE THE HOSTAGE", doing="RESCUING", color=(255, 160, 60)),
     "BOMB": dict(need=5.0, radius=1.2, title="DEFUSE THE BOMB", doing="DEFUSING", color=(255, 70, 70)),
     "HOLD": dict(need=20.0, radius=2.0, title="HOLD THE POINT", doing="CAPTURING", color=(80, 240, 255)),
+    "REACH": dict(need=0.3, radius=1.6, title="REACH THE MARKER", doing="ARRIVING", color=(255, 220, 90)),
+    "CACHE": dict(need=3.0, radius=1.2, title="DESTROY THE CACHES", doing="PLANTING", color=(255, 140, 40)),
 }
 BOMB_TIME = 75.0
 KILLCAM_TIME = 3.0                # 죽으면 이 시간 동안 나를 쓰러뜨린 적의 시점으로 보여줘요
@@ -182,15 +189,77 @@ WEAPON_LEVELS = [(10, "EXT MAG"), (25, "GRIP"), (45, "SUPPRESSOR"), (70, "GOLD C
 PLAYER_LOOK = dict(uniform=(60, 90, 140), vest=(40, 60, 100), pants=(40, 45, 60), head="helmet", gun=30)
 
 
+# ----- RPG: 무기 해금, 무기 레벨, 스킬 -----
+START_WEAPONS = ["RIFLE", "PISTOL"]
+# 무기를 얻는 조건: ("level", 계급) / ("score", 한 라운드 점수) / ("heads", 한 라운드 헤드샷 수)
+UNLOCKS = {
+    "SMG": ("level", 2), "SHOTGUN": ("level", 3), "BURST": ("score", 1000), "MACHINE PISTOL": ("level", 4),
+    "SNIPER": ("level", 5), "DMR": ("heads", 5), "HEAVY AR": ("level", 6), "REVOLVER": ("score", 1500),
+    "AUTO SHOTGUN": ("level", 8), "LMG": ("level", 10), "LAUNCHER": ("score", 2500), "ROCKET": ("level", 12),
+}
+WEAPON_MAX_LEVEL = 10
+KILLS_PER_WEAPON_LEVEL = 6
+# 스킬: (이름, 최대 단계, 한국어 설명, 영어 설명, 쓰는 키(액티브 스킬))
+SKILLS = [
+    ("VITALITY", 3, "최대 체력 +15", "Max health +15", None),
+    ("MARKSMAN", 3, "헤드샷 피해 +15%", "Headshot damage +15%", None),
+    ("RELOAD MASTER", 3, "재장전 10% 빠르게", "Reload 10% faster", None),
+    ("RUNNER", 3, "이동 6% 빠르게", "Move 6% faster", None),
+    ("REGEN", 3, "체력이 0.7초 일찍, 30% 더 빨리 차요", "Health regen starts sooner, 30% faster", None),
+    ("DEMOLITION", 3, "수류탄 +1, 폭발 피해 +20%", "+1 grenade, explosions +20%", None),
+    ("AMMO PACK", 3, "탄약 +25%", "Ammo +25%", None),
+    ("FOCUS", 1, "T: 5초 동안 적이 느려져요 (다시 쓰기 45초)", "T: enemies slow down for 5s (45s cooldown)", "T"),
+    ("MEDKIT", 1, "Y: 체력 60 회복 (다시 쓰기 35초)", "Y: heal 60 (35s cooldown)", "Y"),
+    ("SCAN", 1, "J: 8초 동안 벽 너머 모든 적 표시 (다시 쓰기 30초)", "J: reveal all enemies for 8s (30s cooldown)", "J"),
+]
+ACTIVE_SKILLS = {"FOCUS": (5.0, 45.0), "MEDKIT": (0.0, 35.0), "SCAN": (8.0, 30.0)}   # (지속 시간, 다시 쓰기)
+
+
+def player_level(save):
+    return 1 + save.get("xp", 0) // XP_PER_RANK
+
+
+def skill_points(save):
+    """쓸 수 있는 스킬 포인트: 계급이 오를 때마다 1점"""
+    return player_level(save) - 1 - sum(save.get("skills", {}).values())
+
+
+def unlocked_weapons(save):
+    """가진 무기 목록 (계급 조건은 여기서 바로 풀려요)"""
+    have = set(START_WEAPONS) | set(save.get("unlocked", []))
+    have |= {name for name, (kind, need) in UNLOCKS.items() if kind == "level" and player_level(save) >= need}
+    return [spec["name"] for spec in WEAPONS if spec["name"] in have]
+
+
+def unlock_text(name, ko):
+    kind, need = UNLOCKS[name]
+    if kind == "level":
+        return f"계급 {need}" if ko else f"rank {need}"
+    if kind == "score":
+        return f"한 판 {need}점" if ko else f"{need} pts/round"
+    return f"한 판 헤드샷 {need}" if ko else f"{need} heads/round"
+
+
+def weapon_level(kills):
+    return min(WEAPON_MAX_LEVEL, 1 + kills // KILLS_PER_WEAPON_LEVEL)
+
+
 def weapon_mods(kills):
     """쓰러뜨린 수로 풀린 부착물 목록"""
     return [mod for need, mod in WEAPON_LEVELS if kills >= need]
 
 
-def apply_mods(spec, mods):
-    """부착물을 단 무기 설정을 새로 만들어요
-    EXT MAG 탄창 1.5배 / GRIP 반동 30% 줄임 / SUPPRESSOR 소음기(적이 잘 못 들어요) / GOLD CAMO 금색 총"""
+def apply_mods(spec, mods, level=1):
+    """부착물과 무기 레벨을 적용한 무기 설정을 새로 만들어요
+    EXT MAG 탄창 1.5배 / GRIP 반동 30% 줄임 / SUPPRESSOR 소음기(적이 잘 못 들어요) / GOLD CAMO 금색 총
+    레벨마다 피해 +5%, 재장전 -3%, 반동 -3%"""
     spec = dict(spec)
+    up = level - 1
+    spec["level"] = level
+    spec["body"] = spec["body"] * (1 + 0.05 * up)
+    spec["head"] = spec["head"] * (1 + 0.05 * up)
+    spec["reload"] = spec["reload"] * (1 - 0.03 * up)
+    spec["kick"] = spec["kick"] * (1 - 0.03 * up)
     if "EXT MAG" in mods and not spec["projectile"]:
         spec["mag"] = int(spec["mag"] * 1.5)
         spec["reserve"] = int(spec["reserve"] * 1.25)
@@ -811,9 +880,6 @@ MAPS = [
     ),
 ]
 
-# 캠페인에서 라운드마다 돌아가며 나오는 맵 (좀비 맵은 빼고)
-CAMPAIGN_MAPS = [i for i, m in enumerate(MAPS) if not m.get("zombie")]
-ZOMBIE_MAP = next(i for i, m in enumerate(MAPS) if m.get("zombie"))
 
 # 건물 종류: 글자 -> (색, 높이, 무늬, 네온사인 색 또는 None)
 #   무늬: True = 창문, "ribs" = 컨테이너/창고 세로 골, False = 무늬 없음
@@ -861,6 +927,220 @@ FLOORS = {
 CAR_COLORS = [(255, 90, 170), (60, 210, 230), (245, 245, 245), (220, 40, 50), (255, 210, 60)]
 PICKUP_TILES = {"a": "ammo", "h": "health", "n": "grenade"}
 
+# ---------------------------------------------------------------
+# 맵 자동 생성기: 도시 블록(건물, 공원, 주차장, 컨테이너, 시장...)을 이어 붙여 맵을 지어요.
+# 같은 seed면 언제나 같은 맵이 나와요. 모든 빈칸이 서로 이어지도록 스스로 검사하고 고쳐요.
+# ---------------------------------------------------------------
+# 스타일: floor 블록 바닥, road 길 바닥, walls 건물 글자들, cover 엄폐물, tree 나무, green 잔디,
+#         block (블록 가로, 세로), road_w 길 폭, kinds 블록 종류와 비율, border 맵 테두리 건물(없으면 None)
+MAP_STYLES = {
+    "suburb": dict(floor=":", road="=", walls="JCB", cover="KQV", tree="I", green="g", block=(6, 4), road_w=1,
+                   kinds=[("house", 5), ("park", 2), ("parking", 1), ("plaza", 1)], border=None),
+    "airfield": dict(floor=",", road="-", walls="WO", cover="ZKr", tree=None, green=",", block=(7, 5), road_w=1,
+                     kinds=[("hangar", 4), ("yard", 2), ("compound", 2), ("plaza", 1)], border=None),
+    "canyon": dict(floor=";", road="#", walls="MO", cover="ZKv", tree="T", green=";", block=(6, 4), road_w=1,
+                   kinds=[("house", 3), ("compound", 3), ("ruins", 2)], border="M"),
+    "trainyard": dict(floor=",", road="=", walls="WU", cover="ZKQ", tree=None, green=",", block=(7, 4), road_w=1,
+                      kinds=[("yard", 5), ("hangar", 1), ("compound", 1)], border=None),
+    "ruins": dict(floor="#", road="g", walls="RV", cover="VZ", tree="I", green="g", block=(6, 4), road_w=1,
+                  kinds=[("ruins", 5), ("park", 2), ("house", 1)], border=None),
+    "ski": dict(floor="*", road="-", walls="JO", cover="ZK", tree="I", green="*", block=(6, 4), road_w=1,
+                kinds=[("lodge", 4), ("park", 3), ("compound", 1)], border=None),
+    "jungle": dict(floor="g", road="#", walls="JM", cover="KZ", tree="T", green="g", block=(6, 4), road_w=1,
+                   kinds=[("park", 4), ("lodge", 3), ("compound", 2)], border=None),
+    "market": dict(floor="x", road=":", walls="NCA", cover="KQ", tree="T", green="x", block=(6, 4), road_w=1,
+                   kinds=[("market", 4), ("house", 3), ("plaza", 2)], border="S"),
+    "city": dict(floor=":", road="=", walls="GSDRAB", cover="KQZ", tree="T", green="g", block=(9, 7), road_w=2,
+                 kinds=[("house", 6), ("plaza", 2), ("parking", 2), ("park", 2), ("yard", 1), ("compound", 1)],
+                 border="S"),
+    "desert": dict(floor=";", road="#", walls="MO", cover="ZKv", tree="T", green=";", block=(9, 7), road_w=2,
+                   kinds=[("house", 5), ("compound", 3), ("ruins", 2), ("market", 2)], border="M"),
+    "arctic": dict(floor="*", road="-", walls="OWU", cover="ZK", tree="I", green="*", block=(9, 7), road_w=2,
+                   kinds=[("compound", 4), ("hangar", 3), ("lodge", 2), ("park", 2), ("yard", 1)], border="O"),
+}
+GEN_BLOCKERS = set("~TcXIv")
+
+
+def generate_map(style_name, width, height, seed, spawns=10, pickups=2):
+    """스타일대로 맵 줄들(rows)을 만들어 돌려줘요"""
+    style = MAP_STYLES[style_name]
+    rng = random.Random(seed)
+    grid = [[style["floor"]] * width for _ in range(height)]
+    bw, bh = style["block"]
+    rw = style["road_w"]
+
+    def is_road(i, size):
+        return i % (size + rw) < rw
+
+    def put(x, y, ch):
+        if 0 <= x < width and 0 <= y < height:
+            grid[y][x] = ch
+
+    # 길
+    for y in range(height):
+        for x in range(width):
+            if is_road(x, bw) or is_road(y, bh):
+                grid[y][x] = style["road"]
+    # 블록 채우기
+    for by in range(rw, height, bh + rw):
+        for bx in range(rw, width, bw + rw):
+            w, h = min(bw, width - bx), min(bh, height - by)
+            if w < 3 or h < 3:
+                continue
+            kind = rng.choices([k for k, _ in style["kinds"]], weights=[n for _, n in style["kinds"]])[0]
+            fill_block(grid, style, kind, bx, by, w, h, rng)
+    # 큰 맵: 넓은 길에 가로등과 자동차
+    if rw >= 2:
+        for y in range(height):
+            for x in range(width):
+                if grid[y][x] == style["road"] and rng.random() < 0.012:
+                    grid[y][x] = "c" if style["road"] == "=" else rng.choice(style["cover"])
+                elif grid[y][x] == style["road"] and rng.random() < 0.006:
+                    grid[y][x] = "L"
+    # 테두리
+    if style["border"]:
+        for x in range(width):
+            grid[0][x] = grid[height - 1][x] = style["border"]
+        for y in range(height):
+            grid[y][0] = grid[y][width - 1] = style["border"]
+    # 시작 위치: 왼쪽 위 근처의 길
+    start = None
+    for d in range(2 * max(width, height)):
+        for x in range(0, d + 1):
+            y = d - x
+            if 0 < x < width - 1 and 0 < y < height - 1 and grid[y][x] == style["road"]:
+                start = (x, y)
+                break
+        if start:
+            break
+    # 이어지지 않은 빈칸은 막아요 (갇힌 안뜰 등)
+    walkable = lambda x, y: grid[y][x] not in WALLS and grid[y][x] not in GEN_BLOCKERS
+    seen = {start}
+    queue = deque([start])
+    while queue:
+        x, y = queue.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in seen and walkable(nx, ny):
+                seen.add((nx, ny))
+                queue.append((nx, ny))
+    for y in range(height):
+        for x in range(width):
+            if walkable(x, y) and (x, y) not in seen:
+                grid[y][x] = style["walls"][0]
+    # 적 출현 위치와 상자: 시작에서 멀리, 서로 떨어지게
+    cells = [c for c in seen if c != start and grid[c[1]][c[0]] in FLOORS]
+    rng.shuffle(cells)
+    chosen = []
+    for c in cells:
+        if len(chosen) >= spawns:
+            break
+        if math.dist(c, start) > 9 and all(math.dist(c, o) > 3 for o in chosen):
+            chosen.append(c)
+    for x, y in chosen:
+        grid[y][x] = "E"
+    for letter in "ahn":
+        placed = 0
+        for x, y in cells:
+            if placed >= pickups:
+                break
+            if grid[y][x] in FLOORS and math.dist((x, y), start) > 3:
+                grid[y][x] = letter
+                placed += 1
+    grid[start[1]][start[0]] = "P"
+    return ["".join(row) for row in grid]
+
+
+def fill_block(grid, style, kind, bx, by, w, h, rng):
+    """블록 하나를 종류대로 채워요 (가장자리 한 칸은 인도로 비워 둬요)"""
+    floor, wall = style["floor"], rng.choice(style["walls"])
+
+    def put(x, y, ch):
+        if by <= y < by + h and bx <= x < bx + w:
+            grid[y][x] = ch
+
+    x0, y0, x1, y1 = bx + 1, by + 1, bx + w - 2, by + h - 2       # 안쪽 사각형
+    if kind in ("house", "hangar", "lodge"):
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                put(x, y, wall if kind != "lodge" else "J")
+        big = x1 - x0 >= 3 and y1 - y0 >= 2
+        if big and (kind == "hangar" or rng.random() < 0.6):
+            # 안이 빈 건물: 문 1~2개, 안에 엄폐물
+            for y in range(y0 + 1, y1):
+                for x in range(x0 + 1, x1):
+                    put(x, y, floor)
+            doors = [((x0 + x1) // 2, y0), ((x0 + x1) // 2, y1), (x0, (y0 + y1) // 2), (x1, (y0 + y1) // 2)]
+            for door in rng.sample(doors, 2 if kind == "hangar" else rng.randint(1, 2)):
+                put(*door, floor)
+            if x1 - x0 >= 4:
+                put(rng.randint(x0 + 1, x1 - 1), rng.randint(y0 + 1, y1 - 1), rng.choice(style["cover"]))
+    elif kind == "park":
+        for y in range(by, by + h):
+            for x in range(bx, bx + w):
+                put(x, y, style["green"])
+        for _ in range(w * h // 6):
+            if style["tree"]:
+                put(rng.randint(x0, x1), rng.randint(y0, y1), style["tree"])
+    elif kind == "plaza":
+        for y in range(by, by + h):
+            for x in range(bx, bx + w):
+                put(x, y, "x" if style["floor"] in ":x" else floor)
+        cx, cy = bx + w // 2, by + h // 2
+        put(cx, cy, "F")
+        for _ in range(3):
+            put(rng.randint(x0, x1), rng.randint(y0, y1), rng.choice(style["cover"]))
+        put(x0, y0, "L")
+    elif kind == "parking":
+        for y in range(y0, y1 + 1, 2):
+            for x in range(x0, x1 + 1, 2):
+                if rng.random() < 0.7:
+                    put(x, y, "c" if style["road"] == "=" else rng.choice(style["cover"]))
+    elif kind == "yard":
+        containers = "ruoY"
+        for y in range(y0, y1 + 1, 2):
+            x = x0
+            while x <= x1:
+                length = rng.randint(2, 3)
+                ch = rng.choice(containers)
+                for k in range(length):
+                    if x + k <= x1:
+                        put(x + k, y, ch)
+                x += length + 1
+    elif kind == "compound":
+        low = rng.choice([c for c in style["cover"] if c in "VZ"] or ["Z"])
+        for x in range(x0, x1 + 1):
+            put(x, y0, low)
+            put(x, y1, low)
+        for y in range(y0, y1 + 1):
+            put(x0, y, low)
+            put(x1, y, low)
+        for _ in range(3 if x1 - x0 >= 2 and y1 - y0 >= 2 else 0):   # 틈(출입구)
+            if rng.random() < 0.5:
+                put(rng.randint(x0 + 1, x1 - 1), rng.choice((y0, y1)), floor)
+            else:
+                put(rng.choice((x0, x1)), rng.randint(y0 + 1, y1 - 1), floor)
+        if x1 - x0 >= 3 and y1 - y0 >= 2:
+            put((x0 + x1) // 2, (y0 + y1) // 2, wall)          # 가운데 벙커
+    elif kind == "ruins":
+        for _ in range(w * h // 4):
+            x, y = rng.randint(x0, x1), rng.randint(y0, y1)
+            if rng.random() < 0.5:
+                for k in range(rng.randint(1, 3)):
+                    put(x + k, y, rng.choice("VV" + wall))
+            else:
+                for k in range(rng.randint(1, 2)):
+                    put(x, y + k, rng.choice("VV" + wall))
+    elif kind == "market":
+        for y in range(by, by + h):
+            for x in range(bx, bx + w):
+                put(x, y, "x" if style["floor"] in ":x" else floor)
+        for y in range(y0, y1 + 1, 2):
+            for x in range(x0, x1 + 1, 3):
+                put(x, y, rng.choice("KC" if "C" in style["walls"] else "KQ"))
+                put(x + 1, y, rng.choice("KC" if "C" in style["walls"] else "KQ"))
+        put(x0, y1, "L")
+
 WHITE = (240, 240, 240)
 RED = (230, 50, 50)
 YELLOW = (255, 220, 90)
@@ -885,10 +1165,11 @@ def floor_of(col, row):
     return "."
 
 
-def load_map(index):
-    """index번째 맵으로 바꿔요. 다른 함수들이 쓰는 맵 정보(전역 변수)를 새로 채워요."""
+def load_map(index, theme=None):
+    """index번째 맵으로 바꿔요. 다른 함수들이 쓰는 맵 정보(전역 변수)를 새로 채워요.
+    theme: 분위기를 바꾼 맵 정보 (세트마다 밤/폭풍우 등). 없으면 원래 맵"""
     global GAME_MAP, MAP_W, MAP_H, FLOOR_GRID, WALL_GRID, MAX_WALL, HAZE, LIT, FLOOR_COLORS
-    theme = MAPS[index]
+    theme = theme or MAPS[index]
     GAME_MAP = theme["rows"]
     MAP_W, MAP_H = len(GAME_MAP[0]), len(GAME_MAP)
     # 매번 계산하지 않도록 칸마다 바닥/건물 정보를 미리 만들어 둬요
@@ -1046,6 +1327,110 @@ def fog(color, dist, fog_dist):
 
 def shade(color, amount):
     return tuple(int(c * amount) for c in color)
+
+
+# 생성기로 만든 캠페인 맵 8개 (모두 합쳐 20개)
+def sky(top, mid, low, horizon):
+    return [(0.0, top), (0.6, mid), (0.9, low), (1.0, horizon)]
+
+
+DESERT_CAMO = dict(uniform=(185, 160, 110), vest=(150, 125, 85), pants=(165, 140, 100))
+GENERATED_MAPS = [
+    dict(name="SUBURB", sky=sky((70, 130, 210), (140, 185, 230), (215, 225, 230), (230, 235, 235)),
+         haze=(220, 228, 232), sun=-1.0, stars=False, ground=":", lit=7, fog=1.0, snow=False, camo=None,
+         op="OPERATION PICKET FENCE", brief="Hostiles holed up in a quiet neighborhood. Clear the houses.",
+         rows=generate_map("suburb", 26, 18, 11)),
+    dict(name="AIRFIELD", sky=sky((50, 50, 110), (170, 100, 120), (250, 160, 100), (255, 200, 140)),
+         haze=(245, 180, 140), sun=math.pi * 0.8, stars=False, ground=",", lit=6, fog=1.1, snow=False, camo=None,
+         op="OPERATION RUNWAY", brief="Take the airfield. Hangars and fuel depots - watch the open tarmac.",
+         rows=generate_map("airfield", 26, 18, 12)),
+    dict(name="CANYON OUTPOST", sky=sky((60, 110, 190), (130, 175, 225), (235, 205, 170), (245, 220, 185)),
+         haze=(240, 215, 180), sun=-math.pi / 2, stars=False, ground=";", lit=9, fog=1.1, snow=False,
+         camo=DESERT_CAMO, op="OPERATION RED ROCK", brief="An outpost hidden in the canyon. Sandbags everywhere.",
+         rows=generate_map("canyon", 26, 18, 13)),
+    dict(name="TRAINYARD", sky=sky((95, 100, 110), (150, 150, 155), (185, 180, 175), (195, 190, 185)),
+         haze=(185, 180, 172), sun=None, stars=False, ground=",", lit=9, fog=0.85, snow=False,
+         camo=dict(uniform=(90, 85, 70), vest=(60, 58, 50), pants=(70, 65, 55)),
+         op="OPERATION IRON HORSE", brief="Rows of freight cars. Fight down the narrow lanes.",
+         rows=generate_map("trainyard", 26, 18, 14)),
+    dict(name="CASTLE RUINS", sky=sky((90, 115, 145), (150, 168, 180), (200, 205, 200), (210, 215, 208)),
+         haze=(195, 202, 196), sun=None, stars=False, ground="g", lit=9, fog=0.6, snow=False,
+         camo=dict(uniform=(70, 95, 55), vest=(50, 70, 40), pants=(60, 70, 50)),
+         op="OPERATION OLD STONE", brief="Fog over the old ruins. Low walls - shoot over them.",
+         rows=generate_map("ruins", 26, 18, 15)),
+    dict(name="SKI LODGE", sky=sky((60, 120, 200), (140, 185, 230), (220, 230, 240), (235, 240, 248)),
+         haze=(225, 232, 242), sun=0.4, stars=False, ground="*", lit=5, fog=0.9, snow=True,
+         camo=dict(uniform=(225, 228, 232), vest=(165, 170, 180), pants=(200, 205, 212)),
+         op="OPERATION POWDER", brief="Mountain lodges in fresh snow. They blend in - look closely.",
+         rows=generate_map("ski", 26, 18, 16)),
+    dict(name="JUNGLE CAMP", sky=sky((70, 110, 100), (130, 165, 140), (185, 200, 170), (195, 210, 180)),
+         haze=(170, 190, 160), sun=None, stars=False, ground="g", lit=9, fog=0.5, snow=False,
+         camo=dict(uniform=(60, 90, 45), vest=(45, 70, 35), pants=(55, 70, 45)),
+         op="OPERATION GREEN HELL", brief="Thick jungle and hidden huts. Listen before you look.",
+         rows=generate_map("jungle", 26, 18, 17)),
+    dict(name="NIGHT MARKET", sky=sky((10, 8, 30), (40, 20, 70), (100, 40, 110), (140, 60, 130)),
+         haze=(70, 40, 95), sun=None, stars=True, ground="x", lit=2, fog=0.9, snow=False, dark=0.8, camo=None,
+         op="OPERATION LANTERN", brief="Crowded night market under neon. Stalls give cover to both sides.",
+         rows=generate_map("market", 26, 18, 18)),
+]
+MAPS[-1:-1] = GENERATED_MAPS          # 좀비 맵(마지막) 앞에 넣어요
+
+# 장기 미션: 아주 큰 맵(64x44칸)에서 다섯 단계 작전. 단계를 마칠 때마다 체크포인트에 저장돼요
+MISSION_STAGES = [("REACH", "INFILTRATE - REACH THE RALLY POINT"), ("HOSTAGE", "RESCUE THE DOWNED PILOT"),
+                  ("CACHE", "DESTROY 3 WEAPON CACHES"), ("HOLD", "HOLD THE LANDING ZONE"),
+                  ("REACH", "REACH EXTRACTION")]
+MISSIONS = [
+    dict(name="IRON CITY", style="city", seed=21,
+         desc=("해 질 녘 거대한 도시. 마천루와 광장, 주차장 사이를 뚫고 나가요.",
+               "A huge city at dusk. Fight through towers, plazas and parking lots."),
+         theme=dict(sky=sky((40, 30, 90), (150, 70, 140), (245, 120, 120), (250, 170, 140)), haze=(240, 160, 140),
+                    sun=math.pi, stars=False, ground=":", lit=3, fog=0.9, snow=False, camo=None)),
+    dict(name="DUST STORM", style="desert", seed=22,
+         desc=("모래바람이 부는 사막 도시. 흙벽돌 골목과 진지를 지나요.",
+               "A desert town in a sandstorm. Mud-brick alleys and fortified compounds."),
+         theme=dict(sky=sky((150, 130, 100), (200, 175, 135), (225, 200, 160), (230, 210, 170)), haze=(215, 190, 150),
+                    sun=None, stars=False, ground=";", lit=9, fog=0.55, snow=False, camo=DESERT_CAMO)),
+    dict(name="FROSTBITE", style="arctic", seed=23,
+         desc=("눈보라 치는 밤의 북극 기지. 격납고와 벙커를 차례로 장악해요.",
+               "An arctic base on a snowy night. Take hangars and bunkers one by one."),
+         theme=dict(sky=sky((10, 15, 35), (35, 50, 80), (90, 110, 140), (150, 165, 185)), haze=(150, 165, 185),
+                    sun=None, stars=True, ground="*", lit=3, fog=0.7, snow=True, dark=0.7,
+                    camo=dict(uniform=(225, 228, 232), vest=(165, 170, 180), pants=(200, 205, 212)))),
+]
+for _m in MISSIONS:
+    MAPS.append(dict(_m["theme"], name=_m["name"], mission=True, op=f"MISSION {_m['name']}",
+                     brief=_m["desc"][1], rows=generate_map(_m["style"], 64, 44, _m["seed"], spawns=55, pickups=10)))
+    _m["map"] = len(MAPS) - 1
+
+# 캠페인에서 라운드마다 돌아가며 나오는 맵 (좀비, 미션 맵은 빼고) - 20개
+CAMPAIGN_MAPS = [i for i, m in enumerate(MAPS) if not m.get("zombie") and not m.get("mission")]
+ZOMBIE_MAP = next(i for i, m in enumerate(MAPS) if m.get("zombie"))
+
+# 캠페인 100라운드 = 맵 20개 x 5세트. 세트마다 분위기가 바뀌고 적이 강해져요
+CAMPAIGN_ROUNDS = 100
+SET_SIZE = 20
+SETS = ["RECON", "ASSAULT", "NIGHT OPS", "STORM", "VETERAN"]
+
+
+def set_of(round_no):
+    return min(len(SETS), (round_no - 1) // SET_SIZE + 1)
+
+
+def variant_theme(theme, set_no):
+    """세트에 따라 맵 분위기를 바꿔요: 3세트 밤, 4세트 폭풍우, 5세트 붉은 하늘"""
+    theme = dict(theme)
+    if set_no == 3:
+        theme.update(sky=[(t, shade(c, 0.3)) for t, c in theme["sky"]], haze=shade(theme["haze"], 0.35),
+                     sun=None, stars=True, lit=2, dark=min(theme.get("dark", 1.0), 0.55), fog=theme["fog"] * 0.8)
+    elif set_no == 4:
+        theme.update(sky=[(t, shade(c, 0.5)) for t, c in theme["sky"]], haze=shade(theme["haze"], 0.55),
+                     sun=None, dark=min(theme.get("dark", 1.0), 0.72), fog=theme["fog"] * 0.7,
+                     rain=not theme["snow"])
+    elif set_no == 5:
+        theme.update(sky=[(t, (min(255, int(c[0] * 1.1) + 40), int(c[1] * 0.55), int(c[2] * 0.5)))
+                          for t, c in theme["sky"]],
+                     haze=(200, 110, 90), dark=min(theme.get("dark", 1.0), 0.85))
+    return theme
 
 
 load_map(0)       # 처음엔 첫 번째 맵
@@ -1352,7 +1737,7 @@ def make_objective_image(kind):
         pygame.draw.circle(img, (230, 200, 170), (30, 52), 11)                       # 머리
         pygame.draw.rect(img, BLACK, (19, 48, 22, 5))                                # 눈가리개
         pygame.draw.line(img, (200, 180, 120), (14, 76), (46, 76), 3)                # 밧줄
-    elif kind == "BOMB":
+    elif kind in ("BOMB", "CACHE"):
         pygame.draw.rect(img, (60, 75, 50), (6, 74, 48, 44), border_radius=4)        # 상자
         for x in range(6, 54, 12):                                                   # 노랑/검정 줄무늬
             pygame.draw.polygon(img, (230, 200, 40), [(x, 118), (x + 6, 118), (x + 12, 108), (x + 6, 108)])
@@ -1619,7 +2004,7 @@ HELP_TEXT = {
         keys=[("W A S D", "이동"), ("Shift", "달리기 (W와 함께)"), ("C", "앉기 / 달리다가: 슬라이딩"),
               ("← → ↑ ↓", "시점 (마우스도 돼요)"), ("스페이스바", "점프"),
               ("F,  왼쪽 클릭", "사격 (꾹 누르면 연사)"), ("E,  오른쪽 클릭", "정조준 / 저격총 조준경"), ("Z", "조준경 배율 3·6·12배"),
-              ("G", "수류탄"), ("V", "칼"), ("X", "킬스트릭 쓰기"), ("1, 2,  Q", "주무기 / 보조무기 바꾸기"),
+              ("G", "수류탄"), ("V", "칼"), ("X", "킬스트릭 쓰기"), ("1~9, 0, Tab, Q", "무기 바꾸기 (가진 무기 전부)"), ("T,  Y,  J", "스킬: 집중 / 구급상자 / 탐지"),
               ("R,  B,  U", "재장전,  좀비 상점 (탄약 / 강화)"), ("H,  M", "도움말 (일시정지),  소리 끄기"), ("P,  Enter", "FPS 표시,  전체 화면"),
               ("ESC", "메뉴로")],
         tips=["적을 모두 쓰러뜨리면 다음 라운드! 라운드마다 맵이 바뀌어요.",
@@ -1637,7 +2022,7 @@ HELP_TEXT = {
         keys=[("W A S D", "move"), ("SHIFT", "sprint (with W)"), ("C", "crouch / slide while sprinting"),
               ("ARROWS", "look (or mouse)"), ("SPACE", "jump"),
               ("F, LEFT CLICK", "fire (hold for auto)"), ("E, RIGHT CLICK", "aim / sniper scope"), ("Z", "scope zoom 3/6/12x"),
-              ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1, 2, Q", "primary / secondary"),
+              ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1-9, 0, TAB, Q", "switch weapon (whole inventory)"), ("T, Y, J", "skills: focus / medkit / scan"),
               ("R, B, U", "reload, zombie shop"), ("H, M", "help (pause), mute"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "menu")],
         tips=["Kill every enemy to clear the round. The map changes each round.",
               "Killstreaks without dying: 3 radar, 5 airstrike, 7 sentry turret (X).",
@@ -2613,14 +2998,22 @@ class Effect:
 # 게임 전체
 # ---------------------------------------------------------------
 class Game:
-    def __init__(self, save, start_round=1, mode="campaign", loadout=None):
+    def __init__(self, save, start_round=1, mode="campaign", loadout=None, mission=0, stage=0):
         """save: 저장 정보(dict). 라운드를 깨거나 죽을 때마다 고쳐서 파일에 써요.
         mode: "campaign"(라운드마다 맵이 바뀌는 전투) 또는 "zombies"(좀비 웨이브 버티기)
         loadout: 고른 주무기/보조무기/퍼크 (없으면 모든 무기를 들고 시작)"""
         self.mode = mode
         self.loadout = loadout
+        self.mission = mission     # 미션 모드: 몇 번째 미션인지
+        self.stage = stage         # 미션 모드: 지금 단계 (0부터)
+        self.mission_time = 0.0
+        self.mission_complete = False
         self.perk = loadout["perk"] if loadout else None
-        self.max_hp = 130 if self.perk == "IRON SKIN" else 100
+        ranks = save.get("skills", {})
+        self.max_hp = (130 if self.perk == "IRON SKIN" else 100) + 15 * ranks.get("VITALITY", 0)
+        self.cooldowns = {}        # 액티브 스킬 다시 쓰기까지 남은 시간
+        self.focus = 0.0           # FOCUS: 적이 느려지는 남은 시간
+        self.scan = 0.0            # SCAN: 적이 다 보이는 남은 시간
         self.pickup_images = {kind: make_pickup_image(kind) for kind in DROP_WEIGHTS}
         self.decor_images = {
             "T": make_palm_image(), "L": make_lamp_image(),
@@ -2702,11 +3095,12 @@ class Game:
               and frame_time * self.col_w / (self.col_w - 1) < FRAME_BUDGET * 0.75):
             self.set_col_w(self.col_w - 1)
 
-    def setup_map(self, index):
+    def setup_map(self, index, set_no=1):
         """맵 바꾸기: 맵 정보, 장식물, 적 출현 위치, 미니맵, 하늘을 새로 만들어요."""
-        load_map(index)
+        self.theme = variant_theme(MAPS[index], set_no)
+        load_map(index, self.theme)
         self.map_index = index
-        self.theme = MAPS[index]
+        self.map_key = (index, set_no)
         self.decor = []
         images = dict(self.decor_images)
         if self.theme["snow"]:
@@ -2779,27 +3173,104 @@ class Game:
         if self.mode == "zombies":
             self.reset(1)
             return
+        if self.mode == "mission":
+            if self.mission_complete:              # 다 깼으면 처음부터 다시
+                self.stage = 0
+                self.mission_time = 0.0
+                self.reset(1)
+            else:
+                self.respawn_checkpoint()
+            return
         self.game_over = False
         self.reset_streak()
         self.start_round()
 
+    def rank_of(self, skill):
+        """스킬 단계 (안 배웠으면 0)"""
+        return self.save.get("skills", {}).get(skill, 0)
+
+    def weapon_spec(self, name):
+        """그 무기의 지금 성능 (처치 수에 따른 레벨과 부착물 적용)"""
+        kills = self.save.get("wkills", {}).get(name, 0)
+        return apply_mods(WEAPON_BY_NAME[name], weapon_mods(kills), weapon_level(kills))
+
     def make_arsenal(self):
-        """로드아웃대로 무기를 챙겨요. 퍼크도 적용해요."""
-        specs = None
+        """가진 무기를 모두 챙겨요 (인벤토리). 로드아웃의 시작 무기를 들고, 퍼크와 스킬도 적용해요."""
+        specs, start, second = None, 0, 1
         if self.loadout:
-            kills = self.save.get("wkills", {})
-            specs = [apply_mods(WEAPON_BY_NAME[name], weapon_mods(kills.get(name, 0)))
-                     for name in (self.loadout["primary"], self.loadout["secondary"])]
-        arsenal = Arsenal(specs, reload_mult=0.6 if self.perk == "QUICK HANDS" else 1.0,
-                          ammo_mult=1.5 if self.perk == "SCAVENGER" else 1.0)
+            names = unlocked_weapons(self.save)
+            specs = [self.weapon_spec(name) for name in names]
+            start = names.index(self.loadout["primary"]) if self.loadout["primary"] in names else 0
+            second = names.index(self.loadout["secondary"]) if self.loadout["secondary"] in names else 1 % len(names)
+        reload_mult = (0.6 if self.perk == "QUICK HANDS" else 1.0) * (1 - 0.1 * self.rank_of("RELOAD MASTER"))
+        ammo_mult = (1.5 if self.perk == "SCAVENGER" else 1.0) * (1 + 0.25 * self.rank_of("AMMO PACK"))
+        arsenal = Arsenal(specs, reload_mult=reload_mult, ammo_mult=ammo_mult)
+        arsenal.index, arsenal.last_index = start, second
         if self.perk == "SCAVENGER":
             arsenal.grenades += 2
+        arsenal.grenades += self.rank_of("DEMOLITION")
         return arsenal
+
+    def check_unlocks(self):
+        """조건을 채운 무기를 얻어요. 얻는 순간 바로 들고 쓸 수 있어요."""
+        if not self.loadout:
+            return
+        earned = self.save.setdefault("unlocked", [])
+        for name, (kind, need) in UNLOCKS.items():
+            if name in earned or kind == "level":
+                continue
+            if (kind == "score" and self.stats["score"] >= need) or (kind == "heads" and self.stats["heads"] >= need):
+                earned.append(name)
+                write_save(self.save)
+        for name in unlocked_weapons(self.save):      # 계급 조건 무기도 여기서 손에 들어와요
+            self.add_to_inventory(name)
+
+    def add_to_inventory(self, name):
+        if any(w.spec["name"] == name for w in self.arsenal.weapons):
+            return
+        self.arsenal.weapons.append(Weapon(self.weapon_spec(name), self.arsenal.ammo_mult))
+        slot = len(self.arsenal.weapons)
+        key = str(slot) if slot <= 9 else ("0" if slot == 10 else "TAB")
+        self.popups.append([f"NEW WEAPON: {name}!  press {key}", (255, 200, 60), 3.5])
+        self.sounds.play("streak")
+
+    def refresh_weapon(self, name):
+        """무기 레벨이 오르거나 부착물이 풀리면 들고 있는 그 무기에 바로 적용해요"""
+        for w in self.arsenal.weapons:
+            if w.spec["name"] == name and not w.upgraded:
+                w.spec = self.weapon_spec(name)
+                w.mag = min(w.mag, w.spec["mag"])
+
+    def use_skill(self, name):
+        """액티브 스킬 (T 집중 / Y 구급상자 / J 탐지)"""
+        if not self.rank_of(name) or self.game_over:
+            return
+        if self.cooldowns.get(name, 0) > 0:
+            self.popups.append([f"{name} READY IN {self.cooldowns[name]:.0f}s", WHITE, 1.0])
+            return
+        duration, cooldown = ACTIVE_SKILLS[name]
+        self.cooldowns[name] = cooldown
+        if name == "FOCUS":
+            self.focus = duration
+        elif name == "MEDKIT":
+            self.player.hp = min(self.max_hp, self.player.hp + 60)
+        elif name == "SCAN":
+            self.scan = duration
+            self.radar_timer = max(self.radar_timer, duration)
+        self.popups.append([name + "!", (80, 240, 255), 1.2])
+        self.sounds.play("heal" if name == "MEDKIT" else "streak")
 
     @property
     def skill(self):
-        """적 실력: 라운드마다 8%씩 올라가요 (최대 2배). 난이도 설정에 따라 더 쉽거나 어렵게"""
-        return min(2.0, 1 + 0.08 * (self.round - 1)) * DIFFICULTIES[SETTINGS["difficulty"]][1]
+        """적 실력: 캠페인은 라운드마다 1.5%씩 (100라운드에 약 250%, 최대 260%).
+        좀비 모드는 웨이브마다 8%. 미션은 단계마다 10%. 난이도 설정에 따라 더 쉽거나 어렵게"""
+        if self.mode == "campaign":
+            base = 1 + 0.015 * (self.round - 1)
+        elif self.mode == "mission":
+            base = 1.2 + 0.1 * self.stage
+        else:
+            base = 1 + 0.08 * (self.round - 1)
+        return min(2.6, base) * DIFFICULTIES[SETTINGS["difficulty"]][1]
 
     def pick_enemy_kind(self):
         """라운드가 올라갈수록 새로운 적이 섞여 나와요"""
@@ -2823,9 +3294,126 @@ class Game:
     def start_round(self):
         if self.mode == "zombies":
             self.start_wave()
+        elif self.mode == "mission":
+            self.start_mission()
         else:
             self.start_battle()
         self.reset_round_state()
+        if self.mode == "mission":
+            self.banner_timer = 5.0
+
+    def start_mission(self):
+        """장기 미션 시작 (또는 저장된 단계부터 이어하기). 맵 곳곳에 적이 배치돼 있어요."""
+        m = MISSIONS[self.mission]
+        if self.map_index != m["map"]:
+            self.setup_map(m["map"])
+        self.stage_points = self.mission_points()
+        start = pygame.Vector2(find_cells("P")[0])
+        if self.stage > 0:                                # 체크포인트: 앞 단계 목표 자리에서 시작
+            start = pygame.Vector2(self.stage_points[self.stage - 1][0])
+        self.checkpoint = start
+        self.player = Player(start.x, start.y)
+        self.player.hp = self.max_hp
+        self.arsenal = self.make_arsenal()
+        rng = random.Random(m["seed"] * 7 + self.stage)
+        self.enemies = [Enemy(x, y, self.mission_enemy_kind(rng), self.skill)
+                        for x, y in self.spawn_points if pygame.Vector2(x, y).distance_to(start) > 10]
+        self.pickups = [Pickup(x, y, kind) for letter, kind in PICKUP_TILES.items() for x, y in find_cells(letter)]
+        self.zombies_left = 0
+        self.mission_complete = False
+        self.banner = f"MISSION: {m['name']}"
+        self.sub_banners = []
+        self.set_stage_objective()
+        self.face_objective()
+
+    def face_objective(self):
+        """목표 쪽을 바라보게 (시작, 이어하기, 체크포인트 부활)"""
+        offset = self.objective["pos"] - self.player.pos
+        if offset.length() > 0:
+            self.player.angle = math.atan2(offset.y, offset.x)
+
+    @staticmethod
+    def mission_enemy_kind(rng):
+        kinds = ["GRUNT"] * 4 + ["RUSHER", "RUSHER", "SNIPER", "SNIPER", "HEAVY", "BOMBER", "SHIELD",
+                                 "FLANKER", "MEDIC", "GUNNER"]
+        return rng.choice(kinds)
+
+    def mission_points(self):
+        """단계마다 목표 자리: 시작에서 걸어서 먼 순서로 차례차례 (같은 미션이면 늘 같은 자리)"""
+        start = tuple(int(v) for v in find_cells("P")[0])
+        dist = {start: 0}
+        queue = deque([start])
+        while queue:
+            col, row = queue.popleft()
+            for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                cell = (col + dc, row + dr)
+                if cell not in dist and in_map(*cell) and not is_blocked(cell[0] + 0.5, cell[1] + 0.5):
+                    dist[cell] = dist[(col, row)] + 1
+                    queue.append(cell)
+        cells = sorted((c for c in dist if GAME_MAP[c[1]][c[0]] in FLOORS), key=lambda c: dist[c])
+        rng = random.Random(MISSIONS[self.mission]["seed"])
+
+        def at(fraction, avoid=()):
+            for k in range(200):
+                c = cells[min(len(cells) - 1, int(len(cells) * fraction) + rng.randint(-30, 30))]
+                if all(math.dist(c, a) > 6 for a in avoid):
+                    return c
+            return cells[int(len(cells) * fraction)]
+
+        center = lambda c: (c[0] + 0.5, c[1] + 0.5)
+        caches = []
+        for f in (0.55, 0.65, 0.75):
+            caches.append(at(f, caches))
+        return [[center(at(0.22))], [center(at(0.42))], [center(c) for c in caches],
+                [center(at(0.86))], [center(cells[-1])]]
+
+    def set_stage_objective(self):
+        kind, title = MISSION_STAGES[self.stage]
+        points = list(self.stage_points[self.stage])
+        self.objective = dict(kind=kind, pos=pygame.Vector2(points[0]), points=points, progress=0.0, done=False,
+                              timer=BOMB_TIME, spawn=7.0, beep=0.0, title=title)
+        self.sub_banners = [(f"STAGE {self.stage + 1} / {len(MISSION_STAGES)}:  {title}", OBJECTIVES[kind]["color"])]
+        self.banner_timer = 4.0
+
+    def advance_stage(self):
+        """미션 단계 완료: 체크포인트 저장, 다음 목표 근처에 적 지원군"""
+        self.stage += 1
+        self.checkpoint = pygame.Vector2(self.player.pos)
+        if self.stage >= len(MISSION_STAGES):
+            self.mission_complete = True
+            self.game_over = True
+            self.save.pop("mission", None)
+            done = self.save.setdefault("missions_done", [])
+            if MISSIONS[self.mission]["name"] not in done:
+                done.append(MISSIONS[self.mission]["name"])
+            self.add_xp(2000, "MISSION COMPLETE  +2000", (80, 240, 255))
+            write_save(self.save)
+            return
+        self.save["mission"] = dict(id=self.mission, stage=self.stage)
+        write_save(self.save)
+        self.popups.append(["CHECKPOINT SAVED", (80, 240, 255), 2.0])
+        self.set_stage_objective()
+        target = self.objective["pos"]
+        near = [pt for pt in self.spawn_points if 4 < pygame.Vector2(pt).distance_to(target) < 12
+                and pygame.Vector2(pt).distance_to(self.player.pos) > 8]
+        for x, y in random.sample(near, min(4, len(near))):
+            self.enemies.append(Enemy(x, y, self.mission_enemy_kind(random), self.skill))
+
+    def respawn_checkpoint(self):
+        """미션에서 죽으면: 마지막 체크포인트에서 다시 (쓰러뜨린 적은 그대로)"""
+        self.game_over = False
+        self.fail_reason = ""
+        self.killcam_from = None
+        self.player = Player(self.checkpoint.x, self.checkpoint.y)
+        self.player.hp = self.max_hp
+        self.arsenal = self.make_arsenal()
+        self.enemies = [e for e in self.enemies if e.pos.distance_to(self.checkpoint) > 7]
+        if self.objective:
+            self.objective["progress"] = 0.0
+            self.face_objective()
+        self.reset_streak()
+        self.reset_round_state()
+        self.banner_timer = 0.0
 
     def start_wave(self):
         """좀비 웨이브: 1웨이브에서만 새로 시작하고, 다음 웨이브는 체력과 무기를 그대로 이어가요."""
@@ -2850,19 +3438,21 @@ class Game:
             self.sub_banners.append(("BRUTE INCOMING!", (255, 120, 40)))
 
     def start_battle(self):
+        set_no = set_of(self.round)
         index = CAMPAIGN_MAPS[(self.round - 1) % len(CAMPAIGN_MAPS)]
-        if index != self.map_index:
-            self.setup_map(index)
+        if (index, set_no) != getattr(self, "map_key", None):
+            self.setup_map(index, set_no)
         start = find_cells("P")[0]
         self.player = Player(*start)
         self.player.hp = self.max_hp
         self.arsenal = self.make_arsenal()
         far = [p for p in self.spawn_points if self.player.pos.distance_to(p) > SAFE_SPAWN]
-        count = min(len(far), 2 + self.round)
+        in_set = (self.round - 1) % SET_SIZE
+        count = min(len(far), 3 + in_set // 4 + set_no - 1)
         self.enemies = [Enemy(*p, self.pick_enemy_kind(), self.skill) for p in random.sample(far, count)]
         # 새로운 적이 처음 나오는 라운드에는 그 적이 꼭 한 명은 있게. 5라운드마다 보스
         news = {2: "SNIPER", 3: "HEAVY", 4: "BOMBER", 6: "SHIELD", 7: "FLANKER", 8: "MEDIC", 9: "GUNNER"}
-        special = "BOSS" if self.round % 5 == 0 else news.get(self.round)
+        special = "BOSS" if self.round % 10 == 0 else news.get(self.round)
         if special:
             first = self.enemies[0]
             self.enemies[0] = Enemy(first.pos.x, first.pos.y, special, self.skill)
@@ -2870,8 +3460,9 @@ class Game:
         self.pickups = [Pickup(x, y, kind) for letter, kind in PICKUP_TILES.items()
                         for x, y in find_cells(letter)]
         self.zombies_left = 0
-        self.banner = f"ROUND {self.round}"
-        self.sub_banners = [(f"{self.theme['op']}  -  {self.theme['name']}", WHITE)]
+        self.banner = f"ROUND {self.round}" + (f" / {CAMPAIGN_ROUNDS}" if self.round <= CAMPAIGN_ROUNDS else "")
+        self.sub_banners = [(f"{self.theme['op']}  -  {self.theme['name']}", WHITE),
+                            (f"SET {set_no}: {SETS[set_no - 1]}   MAP {in_set + 1} / {SET_SIZE}", (200, 200, 255))]
         if special == "BOSS":
             self.sub_banners.append(("BOSS ROUND!", RED))
         elif special:
@@ -2879,7 +3470,7 @@ class Game:
         if self.round > 1:
             self.sub_banners.append((f"ENEMY SKILL {self.skill * 100:.0f}%", (255, 160, 60)))
         # 라운드 목표
-        kind = None if special == "BOSS" else OBJECTIVE_ORDER.get(self.round % 5)
+        kind = None if special == "BOSS" or self.round % 5 == 1 else OBJECTIVE_ORDER.get(self.round % 5)
         self.objective = None
         if kind and self.round > 1:
             self.objective = dict(kind=kind, pos=self.far_spot(), progress=0.0, done=False,
@@ -2892,7 +3483,7 @@ class Game:
         self.effects = []
         self.tracers = []          # 내 총알 궤적: [x0, y0, x1, y1, 남은 시간]
         self.camp_pos = pygame.Vector2(self.player.pos)   # 한자리에 오래 있으면 적이 수류탄을 던져요
-        self.stats = dict(shots=0, hits=0, heads=0, kills=0, best=0, weapons={})   # 라운드 결과 화면용
+        self.stats = dict(shots=0, hits=0, heads=0, kills=0, best=0, weapons={}, score=0)   # 라운드 결과 화면용
         self.camp_timer = 0.0
         self.camp_nade = 5.0
         self.enemy_tracers = []    # 적 총알 궤적: [적, 남은 시간, 끝점 흔들림]
@@ -3012,18 +3603,30 @@ class Game:
                 return
         if o["kind"] == "HOLD":                                # 지원군
             o["spawn"] -= dt
-            if o["spawn"] <= 0 and len(self.enemies) < 6:
+            close = sum(1 for e in self.enemies if e.pos.distance_to(o["pos"]) < 15)
+            if o["spawn"] <= 0 and close < 6:
                 o["spawn"] = 7.0
                 far = [pt for pt in self.spawn_points if self.player.pos.distance_to(pt) > SAFE_SPAWN]
                 if far:
                     x, y = random.choice(far)
                     self.enemies.append(Enemy(x, y, self.pick_enemy_kind(), self.skill))
+        if o["progress"] >= info["need"] and o["kind"] == "CACHE" and len(o["points"]) > 1:
+            # 캐시 하나 폭파! 다음 캐시로
+            self.explode(pygame.Vector2(o["points"].pop(0)), 2.6, 200, owner="streak")
+            o["pos"], o["progress"] = pygame.Vector2(o["points"][0]), 0.0
+            self.popups.append([f"CACHE DESTROYED  ({3 - len(o['points'])}/3)", (255, 140, 40), 2.0])
+            return
         if o["progress"] >= info["need"]:
             o["done"] = True
-            done_text = {"HOSTAGE": "HOSTAGE RESCUED", "BOMB": "BOMB DEFUSED", "HOLD": "POINT SECURED"}[o["kind"]]
+            if o["kind"] == "CACHE":
+                self.explode(pygame.Vector2(o["pos"]), 2.6, 200, owner="streak")
+            done_text = {"HOSTAGE": "HOSTAGE RESCUED", "BOMB": "BOMB DEFUSED", "HOLD": "POINT SECURED",
+                         "REACH": "ARRIVED", "CACHE": "ALL CACHES DESTROYED"}[o["kind"]]
             self.popups.append([f"{done_text}  +{XP['round']}", (80, 240, 255), 2.5])
             self.add_xp(XP["round"])
             self.sounds.play("streak")
+            if self.mode == "mission":
+                self.advance_stage()
 
     def punish_camping(self, dt):
         """한자리에 7초 넘게 숨어 있으면, 나를 보는 적이 수류탄을 던져요"""
@@ -3138,10 +3741,12 @@ class Game:
         before = self.rank
         self.xp += amount
         self.save["xp"] = self.xp
+        self.stats["score"] = self.stats.get("score", 0) + amount
         if text:
             self.popups.append([text, color, 1.4])
         if self.rank > before:
-            self.popups.append([f"RANK UP!  RANK {self.rank}", (255, 80, 200), 2.5])
+            self.popups.append([f"RANK UP!  RANK {self.rank}  (+1 SKILL POINT)", (255, 80, 200), 2.5])
+            self.check_unlocks()
 
     def record_progress(self, next_round):
         """저장: 다음에 이어할 라운드와 최고 기록"""
@@ -3220,6 +3825,16 @@ class Game:
                 self.popups.append(["SOUND OFF" if self.sounds.muted else "SOUND ON", WHITE, 1.0])
             elif pygame.K_1 <= event.key <= pygame.K_9 and event.key - pygame.K_1 < len(a.weapons):
                 a.switch(event.key - pygame.K_1)
+            elif event.key == pygame.K_0 and len(a.weapons) >= 10:
+                a.switch(9)
+            elif event.key == pygame.K_TAB:          # 다음 무기
+                a.switch(a.index + 1)
+            elif event.key == pygame.K_t:
+                self.use_skill("FOCUS")
+            elif event.key == pygame.K_y:
+                self.use_skill("MEDKIT")
+            elif event.key == pygame.K_j:
+                self.use_skill("SCAN")
             elif event.key == pygame.K_q:
                 a.switch(a.last_index)
             elif event.key == pygame.K_r:
@@ -3279,6 +3894,8 @@ class Game:
             effect.age += dt
         self.effects = [e for e in self.effects if not e.done]
         self.killcam_time += dt
+        if self.mode == "mission" and not self.game_over:
+            self.mission_time += dt
         if self.game_over:
             return
 
@@ -3305,6 +3922,7 @@ class Game:
         speed = (AIM_MOVE if self.aiming else 1.0) * spec.get("move", 1.0)
         if self.perk == "LIGHTFOOT":
             speed *= 1.12
+        speed *= 1 + 0.06 * self.rank_of("RUNNER")
         # 조준점이 적 위에 있으면 시점이 살짝 느리게 돌아요 (키보드로도 적을 놓치지 않게)
         self.on_target = self.enemy_at(WIDTH / 2, HEIGHT / 2) is not None
         sticky = ASSIST_STICKY[SETTINGS["assist"]] if self.on_target and not self.scoped else 1.0
@@ -3360,6 +3978,12 @@ class Game:
                 self.burst_left -= 1
                 self.burst_timer = spec["burst_delay"]
 
+        # 액티브 스킬 시간
+        for name in list(self.cooldowns):
+            self.cooldowns[name] = max(0.0, self.cooldowns[name] - dt)
+        self.focus = max(0.0, self.focus - dt)
+        self.scan = max(0.0, self.scan - dt)
+        edt = dt * (0.35 if self.focus > 0 else 1.0)   # FOCUS 중엔 적과 총알이 느려져요
         # 내 소리가 들리는 거리: 걸으면 4.5칸, 달리면 9칸, 앉으면 안 들려요. 총을 쏘면 16칸
         p = self.player
         step_noise = 0.0
@@ -3368,13 +3992,15 @@ class Game:
         self.gun_noise = max(0.0, self.gun_noise - dt)
         p.noise = max(step_noise, self.gun_noise_radius if self.gun_noise > 0 else 0.0)
         if self.mode == "zombies":
-            self.update_zombies(dt)
+            self.update_zombies(edt)
         else:
             self.punish_camping(dt)
 
         for enemy in self.enemies:
+            if self.mode == "mission" and enemy.pos.distance_to(p.pos) > 28 and enemy.hp >= enemy.t["hp"]:
+                continue                            # 큰 맵: 멀리 있는 적은 가만히 (계산 아끼기)
             before = pygame.Vector2(enemy.pos)
-            damage = enemy.update(dt, self.player)
+            damage = enemy.update(edt, self.player)
             # 걷는 적의 군화 소리: 멀수록 작게, 소리 나는 방향(왼쪽/오른쪽)에서 들려요
             if enemy.pos != before and enemy.pos.distance_to(p.pos) < 13:
                 enemy.step_timer -= dt * enemy.t["speed"] / 1.4
@@ -3423,14 +4049,14 @@ class Game:
             if not self.pending_blasts:
                 break
             self.explode(self.pending_blasts.pop(0), *EXPLODER_SHOT_BLAST)
-        self.update_projectiles(dt)
+        self.update_projectiles(edt)
         self.update_streaks(dt)
         self.update_effects(dt)
         self.collect_pickups()
         if self.mode != "zombies":
             self.update_objective(dt)
 
-        if self.player.hp <= 0:
+        if self.player.hp <= 0 and not self.game_over:
             self.player.hp = 0
             self.game_over = True
             self.start_killcam()
@@ -3449,11 +4075,11 @@ class Game:
             self.add_xp(XP["round"], f"WAVE CLEAR  +{ZOMBIE_POINTS['wave']} POINTS")
             self.save["zbest"] = max(self.save.get("zbest", 0), self.round + 1)
             write_save(self.save)
-        elif self.mode != "zombies" and (self.objective["done"] if self.objective else not self.enemies):
+        elif self.mode == "campaign" and (self.objective["done"] if self.objective else not self.enemies):
             self.slowmo = 0.8                         # 마지막 한 명(또는 목표 완료): 슬로모션
             self.round_clear_timer = 4.0
-            self.banner = "ROUND CLEAR"
-            self.sub_banners = []
+            self.banner = "CAMPAIGN COMPLETE!" if self.round == CAMPAIGN_ROUNDS else "ROUND CLEAR"
+            self.sub_banners = [] if self.round != CAMPAIGN_ROUNDS else [("All 100 rounds cleared - the war goes on", YELLOW)]
             self.banner_timer = 4.0
             self.add_xp(XP["round"], f"ROUND CLEAR  +{XP['round']}")
             self.record_progress(self.round + 1)
@@ -3650,13 +4276,22 @@ class Game:
             if self.loadout:
                 kills = self.save.setdefault("wkills", {})
                 kills[name] = kills.get(name, 0) + 1
+                changed = False
                 for need, mod in WEAPON_LEVELS:
                     if kills[name] == need:
                         self.popups.append([f"{name}: {mod} UNLOCKED!", (255, 200, 60), 3.0])
                         self.sounds.play("streak")
+                        changed = True
+                level = weapon_level(kills[name])
+                if level > weapon_level(kills[name] - 1):
+                    self.popups.append([f"{name} LEVEL {level}  (DAMAGE +{5 * (level - 1)}%)", (255, 200, 60), 2.5])
+                    changed = True
+                if changed:
+                    self.refresh_weapon(name)
         if self.mode == "zombies":
             key = {"HEADSHOT!": "headshot", "KNIFE!": "knife"}.get(how, "kill")
             self.points += ZOMBIE_POINTS[key]
+        self.check_unlocks()
         xp = XP["kill"]
         if how == "HEADSHOT!":
             xp += XP["headshot"]
@@ -3739,8 +4374,9 @@ class Game:
         self.was_airborne = p.z > 0
         self.since_hurt += dt
         self.light_timer = max(0.0, self.light_timer - dt)
-        if self.since_hurt > REGEN_DELAY and 0 < p.hp < self.max_hp:
-            p.hp = min(self.max_hp, p.hp + REGEN_RATE * dt)
+        regen = self.rank_of("REGEN")
+        if self.since_hurt > REGEN_DELAY - 0.7 * regen and 0 < p.hp < self.max_hp:
+            p.hp = min(self.max_hp, p.hp + REGEN_RATE * (1 + 0.3 * regen) * dt)
         if 0 < p.hp < 30:                       # 체력이 낮으면 심장 소리
             self.heart_timer -= dt
             if self.heart_timer <= 0:
@@ -3827,7 +4463,7 @@ class Game:
             if not target:
                 self.add_impact(ax, ay)           # 벽이나 바닥에 맞으면 먼지와 불똥
             if target:
-                amount = spec["head"] if head else spec["body"]
+                amount = spec["head"] * (1 + 0.15 * self.rank_of("MARKSMAN")) if head else spec["body"]
                 if self.perk == "HEAVY ROUNDS":
                     amount *= 1.25
                 if found[5]:                      # 관통: 피해가 줄어요
@@ -3963,7 +4599,8 @@ class Game:
             for enemy in list(self.enemies):
                 d = enemy.pos.distance_to(pos)
                 if d < radius and can_see(pos, enemy.pos):
-                    self.damage_enemy(enemy, damage * power(d), how)
+                    boost = 1 + 0.2 * self.rank_of("DEMOLITION") if owner == "player" else 1.0
+                    self.damage_enemy(enemy, damage * power(d) * boost, how)
                     self.add_splat(enemy.pos, 0.7)
         d = self.player.pos.distance_to(pos)
         if owner != "streak" and d < radius and can_see(pos, self.player.pos):
@@ -4243,7 +4880,8 @@ class Game:
                 items.append((box, self.sentry_images[1 if sentry.flash > 0 else 0], None))
         o = self.objective
         if o and not (o["done"] and o["kind"] == "HOSTAGE"):
-            height, width = {"HOSTAGE": (0.6, 0.45), "BOMB": (0.45, 0.4), "HOLD": (1.4, 0.6)}[o["kind"]]
+            height, width = {"HOSTAGE": (0.6, 0.45), "BOMB": (0.45, 0.4), "HOLD": (1.4, 0.6),
+                             "REACH": (1.4, 0.6), "CACHE": (0.45, 0.4)}[o["kind"]]
             box = self.project(o["pos"], height, width)
             if box:
                 items.append((box, self.objective_images[o["kind"]], None))
@@ -4440,6 +5078,30 @@ class Game:
         if danger and pygame.time.get_ticks() // 150 % 2 == 0:
             self.center_text(screen, big_font, "GRENADE!", RED, HEIGHT * 0.38)
 
+        # FOCUS: 화면이 푸르스름해져요 / SCAN: 벽 너머 적 위치 표시
+        if self.focus > 0:
+            tint = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            tint.fill((60, 120, 255, 45))
+            screen.blit(tint, (0, 0))
+        if self.scan > 0:
+            for enemy in self.enemies:
+                box = self.project(enemy.pos, enemy.t["height"], enemy.t["width"])
+                if box:
+                    sx, top = box[0], box[1]
+                    size = 7 * UI
+                    pygame.draw.polygon(screen, RED, [(sx, top - 2 * size), (sx + size, top - size),
+                                                      (sx, top), (sx - size, top - size)], 2)
+        # 액티브 스킬 (오른쪽 가운데)
+        y_skill = HEIGHT * 0.45
+        for name, (duration, cooldown) in ACTIVE_SKILLS.items():
+            if not self.rank_of(name):
+                continue
+            key = next(k for n, _, _, _, k in SKILLS if n == name)
+            left = self.cooldowns.get(name, 0)
+            text = f"[{key}] {name}" + (f"  {left:.0f}s" if left > 0 else "  READY")
+            image = self.fonts["tiny"].render(text, True, (120, 120, 130) if left > 0 else (80, 240, 255))
+            screen.blit(image, image.get_rect(topright=(WIDTH - 16, y_skill)))
+            y_skill += 20 * UI
         # 왼쪽 아래: 킬스트릭 (받은 것 / 다음 것까지)
         y = HEIGHT - 100 * UI
         if self.streaks_ready:
@@ -4486,7 +5148,8 @@ class Game:
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 220, 90, 200) if selected else (0, 0, 0, 120))
             screen.blit(panel, rect)
-            name = weapon.spec["name"] + (" +" if weapon.upgraded else "")
+            level = weapon.spec.get("level", 1)
+            name = weapon.spec["name"] + (" +" if weapon.upgraded else "") + (f" L{level}" if level > 1 else "")
             color = BLACK if selected else ((255, 200, 60) if weapon.upgraded else WHITE)
             label = self.fonts["tiny"].render(f"{i + 1} {name}", True, color)
             screen.blit(label, label.get_rect(center=rect.center))
@@ -4495,11 +5158,16 @@ class Game:
             screen.blit(label, label.get_rect(center=(WIDTH / 2, HEIGHT - 54 * UI)))
 
         # 위쪽 정보
-        if self.mode == "zombies":
+        if self.mode == "mission":
+            t = int(self.mission_time)
+            info = (f"MISSION {self.theme['name']}   STAGE {min(self.stage + 1, len(MISSION_STAGES))}/"
+                    f"{len(MISSION_STAGES)}   ENEMIES {len(self.enemies)}   KILLS {self.kills}   {t // 60}:{t % 60:02d}")
+        elif self.mode == "zombies":
             info = (f"WAVE {self.round}   {self.theme['name']}   "
                     f"ZOMBIES {len(self.enemies) + self.zombies_left}   KILLS {self.kills}")
         else:
-            info = f"ROUND {self.round}   {self.theme['name']}   ENEMIES {len(self.enemies)}   KILLS {self.kills}"
+            info = (f"ROUND {self.round}/{CAMPAIGN_ROUNDS}   SET {set_of(self.round)}   {self.theme['name']}   "
+                    f"ENEMIES {len(self.enemies)}   KILLS {self.kills}")
         screen.blit(font.render(info, True, WHITE), (16, 12))
         # 계급과 경험치 막대
         rank_label = self.small_font.render(f"RANK {self.rank}", True, WHITE)
@@ -4532,7 +5200,17 @@ class Game:
                 typed = self.theme["brief"][:int(self.brief_age * 40)]
                 y = HEIGHT / 3 + (45 + len(self.sub_banners) * 32) * UI
                 self.center_text(screen, self.small_font, typed, (200, 230, 255), y)
-        if self.game_over and self.mode == "zombies":
+        if self.game_over and self.mission_complete:
+            t = int(self.mission_time)
+            self.center_text(screen, big_font, "MISSION COMPLETE", (80, 240, 255), HEIGHT / 2 - 40 * UI)
+            self.center_text(screen, font, f"{self.theme['name']}   Time {t // 60}:{t % 60:02d}   Kills {self.kills}",
+                             WHITE, HEIGHT / 2 + 10 * UI)
+            self.center_text(screen, font, "R: play again    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
+        elif self.game_over and self.mode == "mission":
+            self.center_text(screen, big_font, self.fail_reason or "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
+            self.center_text(screen, font, f"Stage {self.stage + 1}  /  Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
+            self.center_text(screen, font, "R: back to last checkpoint    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
+        elif self.game_over and self.mode == "zombies":
             self.center_text(screen, big_font, "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
             self.center_text(screen, font, f"Survived to wave {self.round}  /  Kills {self.kills}  /  "
                                            f"Best wave {self.save.get('zbest', self.round)}", WHITE, HEIGHT / 2 + 10 * UI)
@@ -4561,6 +5239,9 @@ class Game:
         pygame.draw.polygon(screen, info["color"], [(x, y - size), (x + size, y), (x, y + size), (x - size, y)])
         pygame.draw.polygon(screen, BLACK, [(x, y - size), (x + size, y), (x, y + size), (x - size, y)], 2)
         label = self.fonts["tiny"].render(f"{o['kind']}  {dist:.0f}m", True, info["color"])
+        if self.mode == "mission":
+            self.center_text(screen, self.small_font, f"STAGE {self.stage + 1}/{len(MISSION_STAGES)}:  {o['title']}",
+                             info["color"], HEIGHT * 0.085)
         screen.blit(label, label.get_rect(midtop=(x, y + size + 3)))
         if o["kind"] == "BOMB":
             t = max(0, o["timer"])
@@ -4610,8 +5291,13 @@ class Game:
     def draw_minimap(self, screen):
         """오른쪽 위 작은 지도. 지도 아래쪽 y좌표를 돌려줘요."""
         cell = self.minimap_cell
-        ox, oy = WIDTH - MAP_W * cell - 12, 12
-        screen.blit(self.minimap, (ox, oy))
+        view_w, view_h = min(MAP_W, 34), min(MAP_H, 24)            # 큰 맵은 내 주변만 보여줘요
+        left = max(0, min(MAP_W - view_w, int(self.player.pos.x - view_w / 2)))
+        top = max(0, min(MAP_H - view_h, int(self.player.pos.y - view_h / 2)))
+        x0, y0 = WIDTH - view_w * cell - 12, 12
+        screen.blit(self.minimap, (x0, y0), area=pygame.Rect(left * cell, top * cell, view_w * cell, view_h * cell))
+        ox, oy = x0 - left * cell, y0 - top * cell
+        screen.set_clip(pygame.Rect(x0, y0, view_w * cell, view_h * cell))
         # 빨간 점: 방금 총을 쏜 적 (레이더를 켜면 모든 적)
         for enemy in self.enemies:
             if self.radar_timer > 0 or enemy.flash_timer > -0.6:
@@ -4621,14 +5307,15 @@ class Game:
         if self.objective and not self.objective["done"]:     # 목표 위치
             color = OBJECTIVES[self.objective["kind"]]["color"]
             pygame.draw.circle(screen, color, self.objective["pos"] * cell + (ox, oy), max(3, cell))
-        if self.radar_timer > 0:
-            label = self.fonts["tiny"].render(f"RADAR {self.radar_timer:.0f}", True, (80, 240, 255))
-            screen.blit(label, (ox, oy + MAP_H * cell + 2))
         p = self.player.pos * cell + (ox, oy)
         look = p + pygame.Vector2(math.cos(self.player.angle), math.sin(self.player.angle)) * 12
         pygame.draw.line(screen, BLACK, p, look, 2)
         pygame.draw.circle(screen, BLACK, p, 3)
-        return oy + MAP_H * cell + (16 * UI if self.radar_timer > 0 else 0)
+        screen.set_clip(None)
+        if self.radar_timer > 0:
+            label = self.fonts["tiny"].render(f"RADAR {self.radar_timer:.0f}", True, (80, 240, 255))
+            screen.blit(label, (x0, y0 + view_h * cell + 2))
+        return y0 + view_h * cell + (16 * UI if self.radar_timer > 0 else 0)
 
     @staticmethod
     def center_text(screen, font, text, color, y):
@@ -4640,13 +5327,13 @@ class Game:
 # 게임패드 (Xbox / PlayStation 컨트롤러를 블루투스로 연결하면 돼요)
 # ---------------------------------------------------------------
 # 버튼 -> 키보드 키 (게임 중). A 점프와 왼쪽 스틱 이동, 트리거는 따로 처리해요
-PAD_GAME_KEYS = {"b": pygame.K_c, "x": pygame.K_r, "y": pygame.K_q, "rb": pygame.K_g, "lb": pygame.K_v,
+PAD_GAME_KEYS = {"b": pygame.K_c, "x": pygame.K_r, "y": pygame.K_TAB, "rb": pygame.K_g, "lb": pygame.K_j,
                  "r3": pygame.K_v, "up": pygame.K_x, "down": pygame.K_b, "left": pygame.K_u, "start": pygame.K_h,
-                 "back": pygame.K_m}
+                 "right": pygame.K_t, "back": pygame.K_y}
 # 메뉴 화면에서: A 확인, B 뒤로, 십자키 이동, X 좀비 모드, Y 이어하기, 시작 버튼 설정
 PAD_MENU_KEYS = {"a": pygame.K_RETURN, "b": pygame.K_ESCAPE, "up": pygame.K_UP, "down": pygame.K_DOWN,
                  "left": pygame.K_LEFT, "right": pygame.K_RIGHT, "x": pygame.K_z, "y": pygame.K_c,
-                 "start": pygame.K_s}
+                 "start": pygame.K_s, "back": pygame.K_k, "lb": pygame.K_o}
 PAD_LOOK_YAW = 3.2                # 오른쪽 스틱 끝까지 밀었을 때 1초에 도는 각도(라디안)
 PAD_LOOK_PITCH = 520              # 1초에 위아래로 움직이는 px (화면 크기 비율을 곱해요)
 
@@ -4925,6 +5612,9 @@ async def intro_screen(save):
     fonts = make_fonts()
     clock = pygame.time.Clock()
     continue_round = save.get("continue", 1)
+    reached = max(save.get("best", 1), continue_round)
+    set_starts = [1 + k * SET_SIZE for k in range(len(SETS)) if 1 + k * SET_SIZE <= reached]
+    start_pick = 0
     while True:
         clock.tick(30)
         for event in menu_events():
@@ -4935,15 +5625,30 @@ async def intro_screen(save):
             if event.key == pygame.K_ESCAPE:
                 return None
             if event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
-                return dict(mode="campaign", round=1)
+                return dict(mode="campaign", round=set_starts[start_pick])
+            if event.key in (pygame.K_LEFT, pygame.K_RIGHT) and len(set_starts) > 1:
+                start_pick = (start_pick + (1 if event.key == pygame.K_RIGHT else -1)) % len(set_starts)
+            if event.key == pygame.K_d:
+                SETTINGS["difficulty"] = (SETTINGS["difficulty"] + 1) % len(DIFFICULTIES)
+                save["settings"] = dict(SETTINGS)
+                write_save(save)
             if event.key == pygame.K_z:
                 return dict(mode="zombies", round=1)
+            if event.key == pygame.K_o:
+                picked = await mission_screen(save)
+                if picked == "closed" or picked:
+                    return picked
+                continue
             if event.key == pygame.K_c and continue_round > 1:
                 return dict(mode="campaign", round=continue_round)
             if event.key == pygame.K_s:
                 if await settings_screen(save) == "closed":
                     return "closed"
                 fonts = make_fonts()
+                continue
+            if event.key == pygame.K_k:
+                if await skills_screen(save) == "closed":
+                    return "closed"
                 continue
             if event.key == pygame.K_t and len(options) > 1:
                 res_index = (res_index + 1) % len(options)
@@ -4954,13 +5659,23 @@ async def intro_screen(save):
                 fonts = make_fonts()
 
         ko = fonts["lang"] == "ko"
-        parts = ["Enter 캠페인" if ko else "ENTER campaign", "Z 좀비 모드" if ko else "Z zombies"]
+        first = set_starts[start_pick]
+        if ko:
+            parts = [f"Enter 캠페인 (라운드 {first})", "Z 좀비 모드"]
+        else:
+            parts = [f"ENTER campaign (round {first})", "Z zombies"]
+        if len(set_starts) > 1:
+            parts.append("←→ 시작 세트" if ko else "LEFT/RIGHT start set")
+        diff = DIFFICULTIES[SETTINGS["difficulty"]][0]
+        parts.append(f"D 난이도 {diff}" if ko else f"D difficulty {diff}")
         if continue_round > 1:
             parts.append(f"C 이어하기 (라운드 {continue_round})" if ko else f"C continue (round {continue_round})")
         if len(options) > 1:
             w, h = options[res_index]
             note = "" if fits_desktop(w, h) else (" 전체 화면" if ko else " fullscreen")
             parts.append(f"T 해상도 {w}x{h}{note}" if ko else f"T resolution {w}x{h}{note}")
+        parts.append("O 미션" if ko else "O missions")
+        parts.append("K 스킬" if ko else "K skills")
         parts.append("S 설정" if ko else "S settings")
         parts.append("ESC 메뉴" if ko else "ESC menu")
         screen.fill((15, 10, 35))
@@ -4995,6 +5710,121 @@ def weapon_stats(spec):
             ("MOBILITY", spec.get("move", 1.0) * (0.85 if spec["scope"] else 1.0))]
 
 
+async def mission_screen(save):
+    """미션 고르기: ↑↓ 고르기, Enter 시작, C 저장된 단계부터 이어하기, ESC 뒤로"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    saved = save.get("mission")
+    row = saved["id"] if saved else 0
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key == pygame.K_ESCAPE:
+                return None
+            if event.key in (pygame.K_UP, pygame.K_w):
+                row = (row - 1) % len(MISSIONS)
+            elif event.key in (pygame.K_DOWN, pygame.K_s):
+                row = (row + 1) % len(MISSIONS)
+            elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                return dict(mode="mission", mission=row, stage=0, round=1)
+            elif event.key == pygame.K_c and saved and saved["id"] == row:
+                return dict(mode="mission", mission=row, stage=saved["stage"], round=1)
+        screen.fill((14, 10, 30))
+        title = fonts["big"].render("MISSIONS", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
+        sub = "큰 맵에서 다섯 단계로 이어지는 긴 작전. 단계마다 체크포인트에 저장돼요." if ko else \
+            "Long operations on huge maps: five stages, checkpoint saved after each one."
+        screen.blit(fonts["help"].render(sub, True, (80, 240, 255)), (WIDTH * 0.06, HEIGHT * 0.15))
+        done = save.get("missions_done", [])
+        for i, m in enumerate(MISSIONS):
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.22 + i * 0.17), WIDTH * 0.88, HEIGHT * 0.15)
+            selected = i == row
+            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+            panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
+            screen.blit(panel, rect)
+            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1)
+            name = m["name"] + ("   [COMPLETE]" if m["name"] in done else "")
+            screen.blit(fonts["big"].render(name, True, YELLOW if selected else WHITE), (rect.x + 16, rect.y + 8))
+            screen.blit(fonts["help"].render(m["desc"][0 if ko else 1], True, (200, 230, 255)),
+                        (rect.x + 16, rect.y + rect.h * 0.62))
+            if saved and saved["id"] == i:
+                text = f"C 이어하기: {saved['stage'] + 1}단계부터" if ko else f"C continue from stage {saved['stage'] + 1}"
+                image = fonts["small"].render(text, True, (255, 200, 60))
+                screen.blit(image, image.get_rect(topright=(rect.right - 16, rect.y + 12)))
+        stages = "   >   ".join(title for _, title in MISSION_STAGES)
+        screen.blit(fonts["tiny"].render(stages, True, (180, 180, 200)), (WIDTH * 0.06, HEIGHT * 0.75))
+        hint = "↑↓ 고르기     Enter 처음부터     C 이어하기     ESC 뒤로" if ko else \
+            "UP/DOWN choose     ENTER start     C continue     ESC back"
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
+async def skills_screen(save):
+    """스킬 트리: 계급이 오를 때마다 받는 포인트로 스킬을 배워요. ↑↓ 고르기, → 배우기, ← 되돌리기, ESC 돌아가기"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    row = 0
+    ranks = save.setdefault("skills", {})
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            name, top = SKILLS[row][0], SKILLS[row][1]
+            if event.key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_k):
+                write_save(save)
+                return None
+            if event.key in (pygame.K_UP, pygame.K_w):
+                row = (row - 1) % len(SKILLS)
+            elif event.key in (pygame.K_DOWN, pygame.K_s):
+                row = (row + 1) % len(SKILLS)
+            elif event.key in (pygame.K_RIGHT, pygame.K_d) and skill_points(save) > 0 and ranks.get(name, 0) < top:
+                ranks[name] = ranks.get(name, 0) + 1
+            elif event.key in (pygame.K_LEFT, pygame.K_a) and ranks.get(name, 0) > 0:
+                ranks[name] -= 1                           # 언제든 되돌려서 다시 고를 수 있어요
+        screen.fill((14, 10, 30))
+        title = fonts["big"].render("SKILLS", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.08)))
+        level = player_level(save)
+        into = save.get("xp", 0) % XP_PER_RANK
+        info = f"RANK {level}   XP {into} / {XP_PER_RANK}   SKILL POINTS {skill_points(save)}"
+        screen.blit(fonts["normal"].render(info, True, (80, 240, 255)), (WIDTH * 0.06, HEIGHT * 0.14))
+        for i, (name, top, desc_ko, desc_en, key) in enumerate(SKILLS):
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.2 + i * 0.071), WIDTH * 0.88, HEIGHT * 0.062)
+            selected = i == row
+            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+            panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
+            screen.blit(panel, rect)
+            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 2 if selected else 1)
+            kind = "ACTIVE" if key else "PASSIVE"
+            screen.blit(fonts["small"].render(f"{name}  ({kind})", True, YELLOW if key else WHITE),
+                        (rect.x + 12, rect.y + rect.h * 0.12))
+            screen.blit(fonts["help"].render(desc_ko if ko else desc_en, True, (200, 230, 255)),
+                        (rect.x + rect.w * 0.33, rect.y + rect.h * 0.18))
+            have = ranks.get(name, 0)
+            for k in range(top):                           # 배운 단계는 채운 칸
+                box = pygame.Rect(rect.right - (top - k) * 26 * UI - 10, rect.centery - 8 * UI, 20 * UI, 16 * UI)
+                pygame.draw.rect(screen, (255, 200, 60) if k < have else (60, 55, 80), box)
+        hint = ("↑↓ 고르기     → 배우기     ← 되돌리기     ESC 돌아가기   (계급이 오를 때마다 포인트 1)" if ko
+                else "UP/DOWN choose     RIGHT learn     LEFT undo     ESC back   (1 point per rank)")
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
 async def loadout_screen(save, choice):
     """로드아웃: 주무기 / 보조무기 / 퍼크를 골라요. ↑↓ 줄 고르기, ←→ 바꾸기, Enter 시작, ESC 뒤로.
     고른 로드아웃(dict)을 돌려줘요. ESC면 None, 창 닫기면 "closed"."""
@@ -5003,8 +5833,9 @@ async def loadout_screen(save, choice):
     ko = fonts["lang"] == "ko"
     clock = pygame.time.Clock()
     perk_names = [name for name, _, _ in PERKS]
-    options = [PRIMARIES, SECONDARIES, perk_names]
-    labels = ["PRIMARY", "SECONDARY", "PERK"]
+    owned = unlocked_weapons(save)
+    options = [owned, owned, perk_names]
+    labels = ["START WEAPON", "SECOND WEAPON (Q)", "PERK"]
     saved = dict(DEFAULT_LOADOUT, **save.get("loadout", {}))
     picks = [options[0].index(saved["primary"]) if saved["primary"] in options[0] else 0,
              options[1].index(saved["secondary"]) if saved["secondary"] in options[1] else 0,
@@ -5028,6 +5859,9 @@ async def loadout_screen(save, choice):
                 picks[row] = (picks[row] - 1) % len(options[row])
             elif event.key in (pygame.K_RIGHT, pygame.K_d):
                 picks[row] = (picks[row] + 1) % len(options[row])
+            elif event.key == pygame.K_k:
+                if await skills_screen(save) == "closed":
+                    return "closed"
             elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
                 loadout = dict(primary=options[0][picks[0]], secondary=options[1][picks[1]],
                                perk=options[2][picks[2]])
@@ -5044,15 +5878,18 @@ async def loadout_screen(save, choice):
         screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
         if choice["mode"] == "zombies":
             mode_text = "ZOMBIES  -  BLOOD MOON"
+        elif choice["mode"] == "mission":
+            mode_text = f"MISSION  -  {MISSIONS[choice['mission']]['name']}"
         else:
             mode_text = f"CAMPAIGN  -  ROUND {choice['round']}"
+        mode_text += f"     RANK {player_level(save)}   SKILL POINTS {skill_points(save)}"
         label = fonts["normal"].render(mode_text, True, (80, 240, 255))
         screen.blit(label, label.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.16)))
 
-        # 왼쪽: 세 줄 (주무기 / 보조무기 / 퍼크)
-        card_w, card_h = WIDTH * 0.44, HEIGHT * 0.19
+        # 왼쪽: 세 줄 (시작 무기 / 두 번째 무기 / 퍼크)
+        card_w, card_h = WIDTH * 0.44, HEIGHT * 0.14
         for i in range(3):
-            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.23 + i * 0.22), card_w, card_h)
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.21 + i * 0.155), card_w, card_h)
             selected = i == row
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
@@ -5068,7 +5905,23 @@ async def loadout_screen(save, choice):
             else:
                 desc = PERKS[picks[2]][1 if ko else 2]
             image = fonts["help"].render(desc, True, (200, 230, 255))
-            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.72))
+            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.7))
+        # 왼쪽 아래: 무기 인벤토리 (가진 무기는 레벨, 없는 무기는 얻는 조건)
+        title = fonts["small"].render(f"INVENTORY  {len(owned)} / {len(WEAPONS)}   (in game: 1-9, 0, TAB)", True, WHITE)
+        screen.blit(title, (WIDTH * 0.06, HEIGHT * 0.685))
+        kills_all = save.get("wkills", {})
+        for k, spec in enumerate(WEAPONS):
+            name = spec["name"]
+            x = WIDTH * (0.06 + (k % 2) * 0.235)
+            y = HEIGHT * (0.72 + (k // 2) * 0.031)
+            if name in owned:
+                text = f"{name}  LV {weapon_level(kills_all.get(name, 0))}"
+                color = (255, 200, 60) if name in (options[0][picks[0]], options[1][picks[1]]) else WHITE
+            else:
+                text = f"[LOCKED] {name}: {unlock_text(name, ko)}"
+                color = (120, 120, 135)
+            font = fonts["help"] if ko else fonts["tiny"]
+            screen.blit(font.render(text, True, color), (x, y))
 
         # 오른쪽: 고른 무기 모습과 성능 막대
         weapon = options[1][picks[1]] if row == 1 else options[0][picks[0]]
@@ -5077,7 +5930,7 @@ async def loadout_screen(save, choice):
             scale = min(WIDTH * 0.4 / image.get_width(), HEIGHT * 0.4 / image.get_height())
             previews[weapon] = pygame.transform.smoothscale(
                 image, (int(image.get_width() * scale), int(image.get_height() * scale)))
-        box = pygame.Rect(WIDTH * 0.54, HEIGHT * 0.23, WIDTH * 0.40, HEIGHT * 0.41)
+        box = pygame.Rect(WIDTH * 0.54, HEIGHT * 0.21, WIDTH * 0.40, HEIGHT * 0.41)
         pygame.draw.rect(screen, (0, 0, 0), box)
         pygame.draw.rect(screen, (70, 60, 100), box, 1)
         preview = previews[weapon]
@@ -5086,14 +5939,16 @@ async def loadout_screen(save, choice):
         kills = save.get("wkills", {}).get(weapon, 0)
         mods = weapon_mods(kills)
         upcoming = [(need, mod) for need, mod in WEAPON_LEVELS if kills < need]
-        level = f"LV {len(mods) + 1}   {kills} kills"
+        level = f"LV {weapon_level(kills)} / {WEAPON_MAX_LEVEL}  (DMG +{5 * (weapon_level(kills) - 1)}%)   {kills} kills"
         if upcoming:
             level += f"   next: {upcoming[0][1]} at {upcoming[0][0]}"
         screen.blit(fonts["tiny"].render(level, True, (255, 200, 60)), (box.x + 12, box.y + 10 + 30 * UI))
         if mods:
             screen.blit(fonts["tiny"].render(" + ".join(mods), True, (80, 240, 255)),
                         (box.x + 12, box.y + 10 + 50 * UI))
-        for k, (stat, value) in enumerate(weapon_stats(WEAPON_BY_NAME[weapon])):
+        kills = save.get("wkills", {}).get(weapon, 0)
+        leveled = apply_mods(WEAPON_BY_NAME[weapon], weapon_mods(kills), weapon_level(kills))
+        for k, (stat, value) in enumerate(weapon_stats(leveled)):
             y = HEIGHT * (0.69 + k * 0.045)
             screen.blit(fonts["small"].render(stat, True, (200, 200, 220)), (box.x, y))
             bar = pygame.Rect(box.x + WIDTH * 0.12, y + 4 * UI, WIDTH * 0.28, 10 * UI)
@@ -5101,8 +5956,8 @@ async def loadout_screen(save, choice):
             bar.width = int(bar.width * value)
             pygame.draw.rect(screen, (80, 240, 255), bar)
 
-        hint = ("↑↓ 고르기     ←→ 바꾸기     Enter 시작     ESC 뒤로" if ko
-                else "UP/DOWN choose     LEFT/RIGHT change     ENTER start     ESC back")
+        hint = ("↑↓ 고르기     ←→ 바꾸기     Enter 시작     K 스킬     ESC 뒤로" if ko
+                else "UP/DOWN choose     LEFT/RIGHT change     ENTER start     K skills     ESC back")
         image = fonts["help"].render(hint, True, YELLOW)
         screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
         pygame.display.flip()
@@ -5115,7 +5970,10 @@ async def run():
     창을 닫으면 False, ESC로 끝내면 True를 돌려줘요 (메뉴로 돌아갈지 판단용).
     """
     save = load_save()
-    apply_settings(save.get("settings", {}))
+    settings = save.get("settings", {})
+    if "difficulty" in settings and not settings.get("v2"):     # 예전 3단계 난이도 -> 새 5단계
+        settings = dict(settings, difficulty=[1, 2, 3][min(2, settings["difficulty"])], v2=True)
+    apply_settings(settings)
     while True:
         choice = await intro_screen(save)            # 모드 고르기
         if choice is None or choice == "closed":
@@ -5133,7 +5991,8 @@ async def run():
     pygame.mouse.set_visible(False)
     pygame.mouse.get_rel()
 
-    game = Game(save, choice["round"], mode=choice["mode"], loadout=loadout)
+    game = Game(save, choice["round"], mode=choice["mode"], loadout=loadout,
+                mission=choice.get("mission", 0), stage=choice.get("stage", 0))
     running = True
     closed = False             # 창을 닫았는지 여부
     work_time, frames, check_timer = 0.0, 0, 0.0   # 자동 해상도 조절용 기록
