@@ -480,6 +480,19 @@ GitHub 저장소 페이지에서 초록색 **Code** 버튼 → **Download ZIP** 
 
 ---
 
+## 🛠️ 개발용: Claude 전용 스킬
+
+`.claude/skills/strike-zone-dev/` 에 이 게임을 고치고 검사하는 방법을 모아 둔 **Claude Code 스킬**이 있어요.
+Claude에게 무기·적·맵 추가나 테스트를 부탁하면 자동으로 이 순서(코드 위치 → 고치기 → 검사 → 배포 확인)를 따라요.
+
+| 스크립트 | 하는 일 |
+| --- | --- |
+| `scripts/check_maps.py` | 모든 맵이 올바른지 검사 (갇힌 칸, 시작 위치, 적 출현 위치) |
+| `scripts/smoke_test.py` | 메뉴와 모든 모드를 화면 없이 무작위로 자동 플레이해서 오류·속도 확인 |
+| `scripts/screenshot.py` | 원하는 라운드/맵/미션 화면을 PNG로 찍기 |
+| `scripts/web_smoke.sh` | 웹(브라우저) 버전을 띄워서 눌러 보고 오류 확인 |
+| `scripts/release_check.sh` | 병합 뒤 새 exe/맥 앱이 다 만들어졌는지 확인 |
+
 ## 🧪 Strike Zone 3D (Godot, 만드는 중)
 
 총게임을 진짜 3D 엔진(Godot)으로 옮기는 연습 프로젝트예요. `godot_fps` 폴더에 있어요.
