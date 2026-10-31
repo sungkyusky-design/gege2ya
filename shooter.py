@@ -2139,11 +2139,21 @@ def draw_hint_bar(screen, fonts, hint):
             break
     x = max(WIDTH * 0.02, (WIDTH - width) / 2)
     for key, text in shown:
+        need = (font.size(key)[0] + 18 * UI if key else 0) + font.size(text)[0]
+        if x + need > WIDTH * 0.99:
+            break                                          # 더는 안 들어가요 (중요한 키가 앞에 있어요)
         if key:
             x = draw_keycap(screen, font, key, x, bar.centery) + 6 * UI
         image = font.render(text, True, WHITE if key else UI_DIM)
         screen.blit(image, image.get_rect(midleft=(x, bar.centery)))
         x += image.get_width() + gap
+
+
+def big_ammo_width(game):
+    """오른쪽 아래 총알 숫자(큰 글자)의 너비"""
+    w = game.arsenal.current
+    text = "RELOADING..." if game.arsenal.reload_left > 0 else f"{w.mag} / {w.reserve}"
+    return game.fonts["big"].size(text)[0]
 
 
 def make_bottom_shade():
@@ -2205,34 +2215,46 @@ def wrap_text(font, text, max_width):
 
 
 def draw_help(screen, fonts, footer):
-    """조작법과 팁을 보여주는 판. footer: 맨 아래에 보여줄 안내 문구"""
+    """조작법과 팁을 보여주는 판. footer: 맨 아래에 보여줄 안내 문구.
+    글자가 커서(UI SIZE) 화면에 다 안 들어가면 판 전체를 줄여서 보여줘요."""
     text = HELP_TEXT[fonts["lang"]]
     panel = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
     panel.fill((10, 8, 25, 215))
     screen.blit(panel, (0, 0))
     big, small = fonts["help_big"], fonts["help"]
-    title = big.render(text["title"], True, (255, 80, 200))
-    screen.blit(title, title.get_rect(center=(WIDTH / 2, HEIGHT * 0.25)))
-
     line_h = small.get_linesize() * 1.15
-    top = HEIGHT * 0.32
-    left = WIDTH * 0.08
-    tip_left = WIDTH * 0.52
+    left, tip_left = WIDTH * 0.08, WIDTH * 0.52
     key_w = max(small.size(key)[0] for key, _ in text["keys"]) + 18 * UI
-    for i, (key, desc) in enumerate(text["keys"]):
-        y = top + i * line_h
-        screen.blit(small.render(key, True, YELLOW), (left, y))
-        desc = fit_text(small, desc, tip_left - left - key_w - 16 * UI)
-        screen.blit(small.render(desc, True, WHITE), (left + key_w, y))
-    y = top
+    tip_lines = []
     for tip in text["tips"]:
         for j, line in enumerate(wrap_text(small, tip, WIDTH * 0.42)):
-            screen.blit(small.render(("-  " if j == 0 else "   ") + line, True, (200, 230, 255)), (tip_left, y))
-            y += line_h
-        y += line_h * 0.25
-
-    image = small.render(footer, True, YELLOW)
-    screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.94)))
+            tip_lines.append(("-  " if j == 0 else "   ") + line)
+        tip_lines.append(None)                                  # 팁 사이 작은 틈
+    title_h = big.get_linesize() + 20 * UI
+    body_h = max(len(text["keys"]) * line_h, sum(line_h if t else line_h * 0.25 for t in tip_lines))
+    canvas = pygame.Surface((WIDTH, int(title_h + body_h + 10)), pygame.SRCALPHA)
+    title = big.render(text["title"], True, (255, 80, 200))
+    canvas.blit(title, title.get_rect(midtop=(WIDTH / 2, 0)))
+    for i, (key, desc) in enumerate(text["keys"]):
+        y = title_h + i * line_h
+        canvas.blit(small.render(key, True, YELLOW), (left, y))
+        desc = fit_text(small, desc, tip_left - left - key_w - 16 * UI)
+        canvas.blit(small.render(desc, True, WHITE), (left + key_w, y))
+    y = title_h
+    for line in tip_lines:
+        if line is None:
+            y += line_h * 0.25
+            continue
+        canvas.blit(small.render(line, True, (200, 230, 255)), (tip_left, y))
+        y += line_h
+    room = HEIGHT * 0.78                                        # 위 여백 ~ 아래 안내 줄 사이
+    if canvas.get_height() > room:
+        scale = room / canvas.get_height()
+        canvas = pygame.transform.smoothscale(canvas, (int(WIDTH * scale), int(canvas.get_height() * scale)))
+    screen.blit(canvas, canvas.get_rect(midtop=(WIDTH / 2, max(HEIGHT * 0.08, (HEIGHT * 0.9 - canvas.get_height()) / 2))))
+    if footer:
+        image = small.render(footer, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.94)))
 
 
 def make_scope_overlay():
@@ -6440,9 +6462,10 @@ class Game:
         if self.flashed > 0:                              # 섬광탄에 눈부심: 하얀 화면
             self.flash_overlay.set_alpha(int(255 * min(1.0, self.flashed / 1.2)))
             screen.blit(self.flash_overlay, (0, 0))
-        self.draw_hud(screen)
         if self.wheel and self.wheel["open"]:
-            self.draw_wheel(screen)
+            self.draw_wheel(screen)                       # 휠을 보는 동안은 HUD 대신 휠만
+        else:
+            self.draw_hud(screen)
         if self.round_clear_timer <= 0 and not self.game_over and self.briefing is None:
             self.capture_clip(screen, self.frame_dt)
         elif self.round_clear_timer > 0:
@@ -6450,7 +6473,7 @@ class Game:
                 self.highlight, self.recording = self.recording, None
             if self.highlight:
                 self.draw_highlight(screen)
-        if self.radio_msg and not self.game_over:
+        if self.radio_msg and not self.game_over and not (self.wheel and self.wheel["open"]):
             self.draw_radio(screen)
         if self.briefing is not None:
             self.draw_briefing(screen)
@@ -6812,6 +6835,7 @@ class Game:
                     if enemy.callout:
                         label = self.fonts["tiny"].render(enemy.callout[0], True, BLACK)
                         bubble = label.get_rect(midbottom=(box[0], box[1] - 22 * UI)).inflate(10 * UI, 6 * UI)
+                        bubble.clamp_ip(screen.get_rect().inflate(-6, -6))
                         pygame.draw.rect(screen, (200, 225, 255), bubble, border_radius=int(5 * UI))
                         screen.blit(label, label.get_rect(center=bubble.center))
                 continue
@@ -6827,6 +6851,7 @@ class Game:
                 if 0 <= col < self.num_rays and box[4] < self.zbuffer[col] + 0.3:
                     label = self.fonts["tiny"].render(enemy.callout[0], True, BLACK)
                     bubble = label.get_rect(midbottom=(box[0], box[1] - 30 * UI)).inflate(10 * UI, 6 * UI)
+                    bubble.clamp_ip(screen.get_rect().inflate(-6, -6))          # 화면 가장자리에서도 다 보이게
                     pygame.draw.rect(screen, WHITE, bubble, border_radius=int(5 * UI))
                     pygame.draw.polygon(screen, WHITE, [(box[0] - 4 * UI, bubble.bottom - 1), (box[0] + 4 * UI, bubble.bottom - 1),
                                                         (box[0], bubble.bottom + 6 * UI)])
@@ -7041,7 +7066,13 @@ class Game:
         n = len(weapons)
         show = min(n, STRIP_SLOTS)
         start = max(0, min(index - show // 2, n - show))
-        slot_w = (150 if n <= 3 else 104) * UI
+        reserve = max(250 * UI, big_ammo_width(self) + 60 * UI)          # 양쪽 HUD 자리
+        room = WIDTH - 2 * reserve
+        slot_w = min((150 if n <= 3 else 104) * UI, room / show)
+        while show > 1 and slot_w < 72 * UI:                                # 너무 좁으면 칸 수를 줄여요
+            show -= 2 if show > 2 else 1
+            start = max(0, min(index - show // 2, n - show))
+            slot_w = min(104 * UI, room / show)
         left = WIDTH / 2 - slot_w * show / 2
         tiny = self.fonts["tiny"]
         top = HEIGHT - 42 * UI
@@ -7115,6 +7146,9 @@ class Game:
 
     def draw_hud(self, screen):
         font, big_font = self.font, self.big_font
+        if self.game_over:                       # 끝났으면 결과 카드만 (HUD 글자가 카드 뒤로 비치지 않게)
+            self.draw_game_over(screen, big_font, font)
+            return
         # 다치면 화면 가장자리가 붉게 (체력이 낮을수록 진하게)
         for i, (x, y, r, t) in enumerate(self.screen_blood):     # 화면에 묻은 피
             img = self.splat_images[i % len(self.splat_images)]
@@ -7360,10 +7394,7 @@ class Game:
             self.draw_summary(screen, HEIGHT * 0.5)
         if self.banner_timer > 0:
             self.draw_banner(screen, big_font, font)
-        if self.game_over:
-            self.draw_game_over(screen, big_font, font)
-        else:
-            self.over_start = None
+        self.over_start = None                  # 결과 카드가 다시 나올 때 처음부터 움직이게
 
     def game_over_text(self):
         """게임 오버 카드의 (제목, 색, 설명 줄, 누를 키들)"""
@@ -7418,7 +7449,9 @@ class Game:
         dim = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         dim.fill((5, 4, 12, int(120 * show)))
         screen.blit(dim, (0, 0))
-        card = pygame.Rect(0, 0, min(WIDTH * 0.62, 760 * UI), HEIGHT * 0.62)
+        recorded = getattr(self, "run_recorded", False)
+        need = (46 + 46 + 62 + (74 if recorded else 10) + 12 + 52 + 30 + 60) * UI      # 안에 들어갈 것들의 높이
+        card = pygame.Rect(0, 0, min(WIDTH * 0.62, 760 * UI), max(HEIGHT * 0.62, min(need, HEIGHT * 0.96)))
         card.center = (WIDTH / 2, HEIGHT * 0.47 + (1 - show) * 30 * UI)
         back = pygame.Surface(card.size, pygame.SRCALPHA)
         pygame.draw.rect(back, (14, 10, 30, int(230 * show)), back.get_rect(), border_radius=int(14 * UI))
@@ -7486,7 +7519,9 @@ class Game:
         if self.mode == "mission":
             self.center_text(screen, self.small_font, f"STAGE {self.stage + 1}/{len(MISSION_STAGES)}:  {o['title']}",
                              info["color"], HEIGHT * 0.085)
-        screen.blit(label, label.get_rect(midtop=(x, y + size + 3)))
+        spot = label.get_rect(midtop=(x, y + size + 3))
+        spot.clamp_ip(screen.get_rect().inflate(-8, -8))
+        screen.blit(label, spot)
         if o["kind"] == "BOMB":
             t = max(0, o["timer"])
             color = RED if t < 15 and pygame.time.get_ticks() // 250 % 2 else WHITE
@@ -8284,7 +8319,9 @@ async def stats_screen(save):
                  f"EXPLOSIVE {life.get('explosive', 0)}   BEST STREAK {life.get('streak', 0)}   ROUNDS {life.get('rounds', 0)}   "
                  f"ACHIEVEMENTS {len(save.get('achievements', []))}/{len(ACHIEVEMENTS)}"]
         for i, line in enumerate(lines):
-            screen.blit(fonts["small"].render(line, True, (80, 240, 255)), (WIDTH * 0.05, HEIGHT * (0.15 + i * 0.04)))
+            font = fonts["small"] if fonts["small"].size(line)[0] <= WIDTH * 0.9 else fonts["tiny"]
+            screen.blit(font.render(fit_text(font, line, WIDTH * 0.9), True, (80, 240, 255)),
+                        (WIDTH * 0.05, HEIGHT * (0.15 + i * 0.04)))
         # 왼쪽: 무기별 처치와 레벨 (많이 쓴 순서)
         screen.blit(fonts["normal"].render("WEAPONS", True, WHITE), (WIDTH * 0.05, HEIGHT * 0.26))
         kills = save.get("wkills", {})
@@ -8306,7 +8343,8 @@ async def stats_screen(save):
             y = HEIGHT * (0.32 + i * 0.045)
             text = (f"{game['date']}  {game['mode']}  R{game['round']}  KILLS {game['kills']}  "
                     f"ACC {game['acc']}%  {game['minutes']}min")
-            screen.blit(fonts["tiny"].render(text, True, (200, 200, 220)), (WIDTH * 0.52, y))
+            screen.blit(fonts["tiny"].render(fit_text(fonts["tiny"], text, WIDTH * 0.45), True, (200, 200, 220)),
+                        (WIDTH * 0.52, y))
         if message:
             image = fonts["help"].render(message, True, (80, 255, 120))
             screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.88)))
@@ -8403,17 +8441,20 @@ async def achievements_screen(save):
             pygame.draw.rect(screen, (255, 215, 80) if got else (70, 60, 100), rect, 2 if got else 1, border_radius=6)
             mark = fonts["normal"].render(("* " if got else "- ") + name, True, (255, 215, 80) if got else (140, 140, 160))
             screen.blit(mark, mark.get_rect(midleft=(rect.x + 10, rect.centery)))
-            desc = fonts["help"].render(desc_ko if ko else desc_en, True, WHITE if got else (150, 150, 170))
+            room = rect.w - mark.get_width() - 34
+            desc = fonts["help"].render(fit_text(fonts["help"], desc_ko if ko else desc_en, room), True,
+                                        WHITE if got else (150, 150, 170))
             screen.blit(desc, desc.get_rect(midright=(rect.right - 10, rect.centery)))
         totals = (f"KILLS {life.get('kills', 0)}   HEADSHOTS {life.get('heads', 0)}   KNIFE {life.get('knife', 0)}   "
                   f"EXPLOSIVE {life.get('explosive', 0)}   BEST STREAK {life.get('streak', 0)}   ROUNDS {life.get('rounds', 0)}")
-        image = fonts["small"].render(totals, True, (80, 240, 255))
+        image = fonts["small"].render(fit_text(fonts["small"], totals, WIDTH * 0.92), True, (80, 240, 255))
         screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.73)))
         # 위장 무늬 고르기 + 미리보기
         names = []
         for name, need, body, accent in CAMOS:
             names.append(f"[{name}]" if name == current else (name if name in camos else f"{name}({need})"))
-        image = fonts["normal"].render("CAMO:  " + "   ".join(names), True, WHITE)
+        camo_text = fit_text(fonts["normal"], "CAMO:  " + "   ".join(names), WIDTH * 0.7)
+        image = fonts["normal"].render(camo_text, True, WHITE)
         screen.blit(image, image.get_rect(midleft=(WIDTH * 0.05, HEIGHT * 0.8)))
         if current not in previews:
             previews[current] = make_viewmodel("RIFLE", False, None if current == "NONE" else current)[0]
@@ -8702,25 +8743,25 @@ async def mission_screen(save):
         draw_title(screen, fonts, "MISSIONS", (WIDTH * 0.06, HEIGHT * 0.09))
         sub = "큰 맵에서 다섯 단계로 이어지는 긴 작전. 단계마다 체크포인트에 저장돼요." if ko else \
             "Long operations on huge maps: five stages, checkpoint saved after each one."
+        sub = fit_text(fonts["help"], sub, WIDTH * 0.88)
         screen.blit(fonts["help"].render(sub, True, (80, 240, 255)), (WIDTH * 0.06, HEIGHT * 0.15))
         done = save.get("missions_done", [])
         for i, m in enumerate(MISSIONS):
             rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.22 + i * 0.17), WIDTH * 0.88, HEIGHT * 0.15)
             selected = i == row
-            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
-            panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
-            screen.blit(panel, rect)
-            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1)
+            draw_panel(screen, rect, selected)
             name = m["name"] + ("   [COMPLETE]" if m["name"] in done else "")
             screen.blit(fonts["big"].render(name, True, YELLOW if selected else WHITE), (rect.x + 16, rect.y + 8))
-            screen.blit(fonts["help"].render(m["desc"][0 if ko else 1], True, (200, 230, 255)),
-                        (rect.x + 16, rect.y + rect.h * 0.62))
+            desc = fit_text(fonts["help"], m["desc"][0 if ko else 1], rect.w - 32)
+            screen.blit(fonts["help"].render(desc, True, (200, 230, 255)), (rect.x + 16, rect.y + rect.h * 0.62))
             if saved and saved["id"] == i:
                 text = f"C 이어하기: {saved['stage'] + 1}단계부터" if ko else f"C continue from stage {saved['stage'] + 1}"
                 image = fonts["small"].render(text, True, (255, 200, 60))
                 screen.blit(image, image.get_rect(topright=(rect.right - 16, rect.y + 12)))
         stages = "   >   ".join(title for _, title in MISSION_STAGES)
-        screen.blit(fonts["tiny"].render(stages, True, (180, 180, 200)), (WIDTH * 0.06, HEIGHT * 0.75))
+        for k, line in enumerate(wrap_text(fonts["tiny"], stages, WIDTH * 0.88)):
+            screen.blit(fonts["tiny"].render(line, True, (180, 180, 200)),
+                        (WIDTH * 0.06, HEIGHT * 0.74 + k * fonts["tiny"].get_linesize()))
         hint = "↑↓ 고르기     Enter 처음부터     C 이어하기     ESC 뒤로" if ko else \
             "UP/DOWN choose     ENTER start     C continue     ESC back"
         draw_hint_bar(screen, fonts, hint)
@@ -8764,15 +8805,14 @@ async def skills_screen(save):
         for i, (name, top, desc_ko, desc_en, key) in enumerate(SKILLS):
             rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.2 + i * 0.071), WIDTH * 0.88, HEIGHT * 0.062)
             selected = i == row
-            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
-            panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
-            screen.blit(panel, rect)
-            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 2 if selected else 1)
+            draw_panel(screen, rect, selected, radius=6)
             kind = "ACTIVE" if key else "PASSIVE"
-            screen.blit(fonts["small"].render(f"{name}  ({kind})", True, YELLOW if key else WHITE),
-                        (rect.x + 12, rect.y + rect.h * 0.12))
-            screen.blit(fonts["help"].render(desc_ko if ko else desc_en, True, (200, 230, 255)),
-                        (rect.x + rect.w * 0.33, rect.y + rect.h * 0.18))
+            label = fit_text(fonts["small"], f"{name}  ({kind})", rect.w * 0.33 - 20)
+            screen.blit(fonts["small"].render(label, True, YELLOW if key else WHITE),
+                        fonts["small"].render(label, True, WHITE).get_rect(midleft=(rect.x + 12, rect.centery)))
+            desc = fit_text(fonts["help"], desc_ko if ko else desc_en, rect.w * 0.67 - top * 26 * UI - 30)
+            image = fonts["help"].render(desc, True, (200, 230, 255))
+            screen.blit(image, image.get_rect(midleft=(rect.x + rect.w * 0.33, rect.centery)))
             have = ranks.get(name, 0)
             for k in range(top):                           # 배운 단계는 채운 칸
                 box = pygame.Rect(rect.right - (top - k) * 26 * UI - 10, rect.centery - 8 * UI, 20 * UI, 16 * UI)
@@ -9017,7 +9057,7 @@ async def loadout_screen(save, choice):
                 if name not in WEAPON_BY_NAME:
                     continue
                 x = WIDTH * 0.06 + (k % 2) * (col_w + WIDTH * 0.005)
-                y = top + 26 * UI + (k // 2) * font.get_linesize()
+                y = top + title.get_height() + 4 * UI + (k // 2) * font.get_linesize()
                 if name in owned:
                     text = f"{name}  LV {weapon_level(kills_all.get(name, 0))}"
                     color = (255, 200, 60) if name in chosen else WHITE
