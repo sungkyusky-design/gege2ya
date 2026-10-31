@@ -269,6 +269,18 @@ class GameTest(unittest.TestCase):
         game.toggle_mount()
         self.assertEqual([w.spec["name"] for w in game.arsenal.weapons], before)
 
+    def test_custom_map_validation_and_practice(self):
+        rows = shooter.blank_map()
+        self.assertEqual(shooter.validate_map(rows), [])
+        walled = [list(r) for r in rows]
+        walled[5] = list("R" * shooter.EDIT_W)                         # 적과 나 사이를 벽으로 완전히 막기
+        self.assertTrue(shooter.validate_map(["".join(r) for r in walled]))
+        save = dict(xp=100)
+        game = shooter.Game(save, 1, mode="custom", loadout=LOADOUT, custom=dict(name="T", rows=rows))
+        game.on_kill(game.enemies[0], "HEADSHOT!")
+        self.assertEqual(save["xp"], 100)                                # 연습: 경험치 없음
+        self.assertNotIn("lifetime", save)
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

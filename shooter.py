@@ -475,6 +475,7 @@ PRIMARIES = ["RIFLE", "HEAVY AR", "BURST", "SMG", "SHOTGUN", "AUTO SHOTGUN", "LM
 SECONDARIES = ["PISTOL", "REVOLVER", "MACHINE PISTOL", "ROCKET", "LAUNCHER"]
 DEFAULT_LOADOUT = dict(primary="RIFLE", secondary="PISTOL", perk="HEAVY ROUNDS", tactical="FLASHBANG")
 TACTICAL_COUNT = 2                # 라운드마다 전술 장비 개수
+CUSTOM_INDEX = None               # 내가 만든 맵을 MAPS 의 몇 번째에 넣었는지
 # 하이라이트: 0.1초마다 작은 화면을 기억해 두었다가, 라운드의 가장 멋진 순간을 끝날 때 다시 보여줘요
 CLIP_FPS, CLIP_BEFORE, CLIP_AFTER, CLIP_SIZE = 10, 2.5, 0.8, (320, 180)
 # 좀비 모드 2탄: B 로 사는 것들 (가까이 가면 화면 아래에 이름과 가격)
@@ -3068,11 +3069,14 @@ class Effect:
 # 게임 전체
 # ---------------------------------------------------------------
 class Game:
-    def __init__(self, save, start_round=1, mode="campaign", loadout=None, mission=0, stage=0, challenge=None):
+    def __init__(self, save, start_round=1, mode="campaign", loadout=None, mission=0, stage=0, challenge=None,
+                 custom=None):
         """save: 저장 정보(dict). 라운드를 깨거나 죽을 때마다 고쳐서 파일에 써요.
         mode: "campaign"(라운드마다 맵이 바뀌는 전투) 또는 "zombies"(좀비 웨이브 버티기)
         loadout: 고른 주무기/보조무기/퍼크 (없으면 모든 무기를 들고 시작)"""
         self.mode = mode
+        self.custom = custom        # 내가 만든 맵: dict(name, rows)
+        self.practice = mode in ("training", "custom")   # 연습: 경험치·무기 성장·업적·기록이 안 바뀌어요
         self.challenge = challenge  # 도전 모드 이름 (없으면 None)
         self.allies = []           # AI 동료 (설정 SQUADMATES)
         self.squad_order = 0       # SQUAD_ORDERS 중 몇 번째
@@ -3386,7 +3390,7 @@ class Game:
 
     def check_unlocks(self):
         """조건을 채운 무기를 얻어요. 얻는 순간 바로 들고 쓸 수 있어요."""
-        if not self.loadout or self.mode == "training":
+        if not self.loadout or self.practice:
             return
         earned = self.save.setdefault("unlocked", [])
         for name, (kind, need) in UNLOCKS.items():
@@ -3477,11 +3481,38 @@ class Game:
             self.start_mission()
         elif self.challenge:
             self.start_challenge()
+        elif self.mode == "custom":
+            self.start_custom()
         else:
             self.start_battle()
         self.reset_round_state()
         if self.mode == "mission":
             self.banner_timer = 5.0
+
+    def start_custom(self):
+        """내가 만든 맵: 웨이브마다 적이 늘고 강해져요 (E 자리에서 나와요)"""
+        global CUSTOM_INDEX
+        theme = dict(MAPS[CAMPAIGN_MAPS[0]], name=self.custom["name"], rows=list(self.custom["rows"]),
+                     op="CUSTOM MAP", brief="Your own map. Clear every wave.", custom=True)
+        if CUSTOM_INDEX is None:
+            MAPS.append(theme)
+            CUSTOM_INDEX = len(MAPS) - 1
+        else:
+            MAPS[CUSTOM_INDEX] = theme
+        if self.round == 1 or getattr(self, "map_key", None) is None or self.map_index != CUSTOM_INDEX:
+            self.setup_map(CUSTOM_INDEX)
+        start = find_cells("P")[0]
+        self.player = Player(*start)
+        self.player.hp = self.max_hp
+        self.arsenal = self.make_arsenal()
+        spots = find_cells("E")
+        count = min(len(spots), 2 + self.round)
+        self.enemies = [Enemy(*q, self.pick_enemy_kind(), self.skill) for q in random.sample(spots, count)]
+        self.pickups = [Pickup(x, y, kind) for letter, kind in PICKUP_TILES.items() for x, y in find_cells(letter)]
+        self.zombies_left = 0
+        self.objective = None
+        self.banner = f"WAVE {self.round}"
+        self.sub_banners = [(f"CUSTOM MAP  -  {self.custom['name']}", WHITE), ("PRACTICE: NO XP", (200, 200, 255))]
 
     def start_challenge(self):
         """도전 모드: 정해진 라운드 하나를 규칙대로 (목표 없이 적 모두 처치)"""
@@ -3946,7 +3977,7 @@ class Game:
 
     def spawn_allies(self):
         """동료를 내 뒤에 세워요 (쓰러졌던 동료도 다시 일어나요)"""
-        count = SETTINGS.get("squad", 2) if self.mode in ("campaign", "mission", "zombies") and not self.challenge else 0
+        count = SETTINGS.get("squad", 2) if self.mode in ("campaign", "mission", "zombies", "custom") and not self.challenge else 0
         p = self.player
         back = -p.forward
         side = pygame.Vector2(-back.y, back.x)
@@ -4639,7 +4670,7 @@ class Game:
 
     def add_xp(self, amount, text=None, color=YELLOW):
         """경험치 추가. 계급이 오르면 크게 알려줘요."""
-        if self.mode == "training":
+        if self.practice:
             return                                   # 사격장: 경험치 없음
         before = self.rank
         self.xp += amount
@@ -4653,7 +4684,7 @@ class Game:
 
     def record_history(self):
         """판이 끝나면 최근 기록에 한 줄 (최근 10판만)"""
-        if self.mode == "training" or (time.time() - self.started < 20 and self.kills == 0):
+        if self.practice or (time.time() - self.started < 20 and self.kills == 0):
             return
         mode = f"CHALLENGE {self.challenge}" if self.challenge else self.mode.upper()
         if self.mode == "mission":
@@ -5114,7 +5145,7 @@ class Game:
             if self.mode == "zombies":
                 self.save["zbest"] = max(self.save.get("zbest", 0), self.round)
                 write_save(self.save)
-            elif not self.challenge:
+            elif not self.challenge and not self.practice:
                 self.record_progress(self.round)      # 다음에 이 라운드부터 이어할 수 있게
         elif self.mode == "zombies" and not self.enemies and self.zombies_left == 0 and self.round_clear_timer <= 0:
             self.slowmo = 0.8
@@ -5127,6 +5158,12 @@ class Game:
             self.count_round()
             self.save["zbest"] = max(self.save.get("zbest", 0), self.round + 1)
             write_save(self.save)
+        elif self.mode == "custom" and not self.enemies and self.round_clear_timer <= 0:
+            self.slowmo = 0.8
+            self.round_clear_timer = 4.0
+            self.banner = "WAVE CLEAR"
+            self.sub_banners = [("NEXT WAVE: MORE ENEMIES", WHITE)]
+            self.banner_timer = 4.0
         elif self.challenge and not self.enemies:
             self.slowmo = 0.8
             self.add_xp(XP["round"], f"CHALLENGE CLEAR  +{XP['round']}")
@@ -5431,7 +5468,7 @@ class Game:
     def on_kill(self, enemy, how):
         """처치 보상: 경험치, 연속 처치 메달, 킬스트릭"""
         self.sounds.play("headshot" if how == "HEADSHOT!" else "kill")
-        if self.mode != "training" and how != "ALLY":   # 누적 기록 (업적용, 내가 쓰러뜨린 것만)
+        if not self.practice and how != "ALLY":   # 누적 기록 (업적용, 내가 쓰러뜨린 것만)
             life = self.save.setdefault("lifetime", {})
             life["kills"] = life.get("kills", 0) + 1
             key = {"HEADSHOT!": "heads", "KNIFE!": "knife", "TAKEDOWN!": "knife", "BOOM!": "explosive"}.get(how)
@@ -5448,7 +5485,7 @@ class Game:
         if how in ("DOWN", "HEADSHOT!"):                 # 총으로 쓰러뜨렸으면 그 총의 경험
             name = self.arsenal.current.spec["name"]
             stats["weapons"][name] = stats["weapons"].get(name, 0) + 1
-            if self.loadout and self.mode != "training" and name in WEAPON_BY_NAME:   # 고정 기관총은 성장 없음
+            if self.loadout and not self.practice and name in WEAPON_BY_NAME:   # 고정 기관총은 성장 없음
                 kills = self.save.setdefault("wkills", {})
                 kills[name] = kills.get(name, 0) + 1
                 changed = False
@@ -5494,7 +5531,7 @@ class Game:
         if how not in STREAK_KILLS:
             self.streak += 1
             self.stats["best"] = max(self.stats["best"], self.streak)
-            if self.mode != "training":
+            if not self.practice:
                 life = self.save.setdefault("lifetime", {})
                 life["streak"] = max(life.get("streak", 0), self.streak)
             for need, name in STREAKS:
@@ -5506,7 +5543,7 @@ class Game:
 
     def score_highlight(self, enemy, how):
         """이 처치가 이번 라운드의 가장 멋진 순간인지 (연속 처치, 몰래 처치, 먼 헤드샷, 보스)"""
-        if how in STREAK_KILLS or self.mode == "training":
+        if how in STREAK_KILLS or self.practice:
             return
         multi = self.multi + 1 if self.time - self.last_kill < 3 else 1
         score, label = 1, "KILL"
@@ -5540,7 +5577,7 @@ class Game:
 
     def check_achievements(self):
         """새로 이룬 업적을 알려줘요 (위장 무늬를 새로 얻으면 그것도)"""
-        if self.mode == "training":
+        if self.practice:
             return
         done = self.save.setdefault("achievements", [])
         life = self.save.get("lifetime", {})
@@ -6850,6 +6887,8 @@ class Game:
                     f"{len(MISSION_STAGES)}   ENEMIES {len(self.enemies)}   KILLS {self.kills}   {t // 60}:{t % 60:02d}")
         elif self.mode == "training":
             info = f"TRAINING RANGE   {self.theme['name']}   TARGETS {len(self.enemies)}"
+        elif self.mode == "custom":
+            info = f"CUSTOM  {self.theme['name']}   WAVE {self.round}   ENEMIES {len(self.enemies)}   KILLS {self.kills}"
         elif self.challenge:
             t = self.challenge_time if self.challenge != "BLITZ" else max(0.0, BLITZ_TIME - self.challenge_time)
             info = (f"CHALLENGE {self.challenge}   {self.theme['name']}   ENEMIES {len(self.enemies)}   "
@@ -6914,6 +6953,11 @@ class Game:
         elif self.game_over and self.challenge:
             self.center_text(screen, big_font, self.fail_reason or "CHALLENGE FAILED", RED, HEIGHT / 2 - 40 * UI)
             self.center_text(screen, font, f"{self.challenge}   Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
+            self.center_text(screen, font, "R: try again    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
+        elif self.game_over and self.mode == "custom":
+            self.center_text(screen, big_font, "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
+            self.center_text(screen, font, f"{self.theme['name']}   Wave {self.round}   Kills {self.kills}", WHITE,
+                             HEIGHT / 2 + 10 * UI)
             self.center_text(screen, font, "R: try again    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
         elif self.game_over and self.mode == "mission":
             self.center_text(screen, big_font, self.fail_reason or "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
@@ -7411,6 +7455,250 @@ async def controls_screen(save):
         await asyncio.sleep(0)
 
 
+# ----- 맵 만들기 (에디터) -----
+EDIT_W, EDIT_H, MAP_SLOTS = 26, 18, 5
+# 붓: (글자, 한국어, 영어). 바닥 / 벽·건물 / 물건 순서
+BRUSHES = [(".", "모래", "sand"), (":", "인도", "sidewalk"), ("=", "도로", "road"), ("g", "잔디", "grass"),
+           (",", "콘크리트", "concrete"), ("*", "눈", "snow"), ("w", "실내 바닥(천장)", "indoor floor"),
+           ("R", "벽돌 건물", "brick building"), ("M", "낮은 건물", "low building"), ("S", "고층 빌딩", "tower"),
+           ("W", "창고", "warehouse"), ("i", "실내 벽", "indoor wall"), ("d", "문", "door"),
+           ("K", "나무 상자(부서짐)", "crate"), ("Z", "모래주머니(부서짐)", "sandbags"), ("V", "돌담", "stone wall"),
+           ("~", "물", "water"), ("P", "시작 위치", "player start"), ("E", "적", "enemy"), ("T", "야자수", "palm"),
+           ("I", "소나무", "pine"), ("c", "자동차", "car"), ("L", "가로등", "street lamp"),
+           ("a", "탄약 상자", "ammo"), ("h", "구급 상자", "health"), ("n", "수류탄 상자", "grenades")]
+EDIT_COLORS = {"P": (80, 255, 120), "E": (255, 70, 70), "T": (60, 150, 60), "I": (40, 110, 60), "c": (200, 60, 60),
+               "L": (250, 230, 150), "a": (230, 200, 60), "h": (240, 240, 240), "n": (90, 120, 70)}
+
+
+def blank_map():
+    """새 맵: 잔디 테두리 안에 인도, 아래 가운데 시작 위치, 위쪽에 적 몇 명"""
+    rows = []
+    for r in range(EDIT_H):
+        rows.append("".join("g" if r in (0, EDIT_H - 1) or c in (0, EDIT_W - 1) else ":" for c in range(EDIT_W)))
+    rows = [list(row) for row in rows]
+    rows[EDIT_H - 3][EDIT_W // 2] = "P"
+    for c in (4, 12, 21):
+        rows[2][c] = "E"
+    return ["".join(row) for row in rows]
+
+
+def validate_map(rows):
+    """만든 맵 검사: 문제 목록 (한국어, 영어). 비어 있으면 플레이할 수 있어요."""
+    problems = []
+    cells = [(c, r, ch) for r, row in enumerate(rows) for c, ch in enumerate(row)]
+    starts = [(c, r) for c, r, ch in cells if ch == "P"]
+    enemies = [(c, r) for c, r, ch in cells if ch == "E"]
+    if len(starts) != 1:
+        problems.append((f"시작 위치(P)가 {len(starts)}개예요. 딱 1개여야 해요", f"Need exactly 1 start (P), found {len(starts)}"))
+    if len(enemies) < 3:
+        problems.append((f"적(E)이 {len(enemies)}명이에요. 3명 이상 놓아 주세요", f"Place at least 3 enemies (E), found {len(enemies)}"))
+    if len(starts) == 1:
+        blockers = (set(WALLS) | set("~TcIv")) - set(DOORS)
+        start = starts[0]
+        seen, queue = {start}, deque([start])
+        while queue:
+            c, r = queue.popleft()
+            for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                q = (c + dc, r + dr)
+                if 0 <= q[0] < len(rows[0]) and 0 <= q[1] < len(rows) and q not in seen and rows[q[1]][q[0]] not in blockers:
+                    seen.add(q)
+                    queue.append(q)
+        stuck = [e for e in enemies if e not in seen]
+        if stuck:
+            problems.append((f"갈 수 없는 곳에 적이 {len(stuck)}명 있어요 (벽에 갇힘)", f"{len(stuck)} enemies are walled off"))
+        close = [e for e in enemies if math.dist(e, start) < 5]
+        if close:
+            problems.append((f"시작 위치에 너무 가까운 적이 {len(close)}명 (5칸 이상 떨어뜨려요)", f"{len(close)} enemies within 5 tiles of start"))
+    return problems
+
+
+async def map_slots_screen(save):
+    """내 맵 5칸: ↑↓ 고르기, Enter 만들기/고치기, P 플레이, Backspace 지우기, ESC 돌아가기"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    slots = (save.get("custom_maps") or []) + [None] * MAP_SLOTS
+    save["custom_maps"] = slots = slots[:MAP_SLOTS]
+    row, message, confirm = 0, "", False
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if confirm:
+                if event.key == pygame.K_y:
+                    slots[row] = None
+                    write_save(save)
+                    message = "지웠어요" if ko else "Deleted"
+                confirm = False
+                continue
+            if event.key == pygame.K_ESCAPE:
+                return None
+            if event.key in (pygame.K_UP, pygame.K_w):
+                row = (row - 1) % MAP_SLOTS
+            elif event.key in (pygame.K_DOWN, pygame.K_s):
+                row = (row + 1) % MAP_SLOTS
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                if slots[row] is None:
+                    slots[row] = dict(name=f"MY MAP {row + 1}", rows=blank_map())
+                result = await map_editor(save, slots[row])
+                if result == "closed":
+                    return "closed"
+                if result == "play":
+                    return dict(mode="custom", round=1, custom_map=dict(slots[row]))
+            elif event.key == pygame.K_p and slots[row]:
+                problems = validate_map(slots[row]["rows"])
+                if problems:
+                    message = problems[0][0 if ko else 1]
+                else:
+                    return dict(mode="custom", round=1, custom_map=dict(slots[row]))
+            elif event.key == pygame.K_BACKSPACE and slots[row]:
+                confirm = True
+                message = "정말 지울까요? Y = 예" if ko else "Delete this map? Y = yes"
+        screen.fill((14, 10, 30))
+        title = fonts["big"].render("MY MAPS", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
+        for i, slot in enumerate(slots):
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.2 + i * 0.13), WIDTH * 0.88, HEIGHT * 0.11)
+            selected = i == row
+            pygame.draw.rect(screen, (60, 40, 90) if selected else (24, 18, 44), rect, border_radius=8)
+            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1, border_radius=8)
+            if slot:
+                problems = validate_map(slot["rows"])
+                status = ("플레이 가능" if ko else "READY") if not problems else ("고칠 곳 있음" if ko else "NEEDS FIXES")
+                label = fonts["normal"].render(slot["name"], True, WHITE)
+                screen.blit(label, (rect.x + 16, rect.y + rect.h * 0.15))
+                screen.blit(fonts["help"].render(status, True, (80, 255, 120) if not problems else (255, 160, 90)),
+                            (rect.x + 16, rect.y + rect.h * 0.6))
+                # 작은 미리보기
+                cell = max(1, int(rect.h * 0.8 / EDIT_H))
+                ox, oy = rect.right - EDIT_W * cell - 16, rect.y + (rect.h - EDIT_H * cell) / 2
+                for r, line in enumerate(slot["rows"]):
+                    for c, ch in enumerate(line):
+                        pygame.draw.rect(screen, edit_color(ch), (ox + c * cell, oy + r * cell, cell, cell))
+            else:
+                screen.blit(fonts["normal"].render("(EMPTY)  -  Enter: NEW MAP", True, (140, 140, 160)),
+                            (rect.x + 16, rect.y + rect.h * 0.3))
+        if message:
+            image = fonts["help"].render(message, True, (80, 255, 120))
+            screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.88)))
+        hint = ("↑↓ 고르기   Enter 만들기/고치기   P 플레이   Backspace 지우기   ESC 돌아가기" if ko
+                else "UP/DOWN choose   ENTER edit   P play   BACKSPACE delete   ESC back")
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
+def edit_color(ch):
+    if ch in EDIT_COLORS:
+        return EDIT_COLORS[ch]
+    if ch in WALLS:
+        return WALLS[ch][0]
+    if ch in FLOORS:
+        return FLOORS[ch]
+    return (60, 60, 60)
+
+
+async def map_editor(save, slot):
+    """맵 그리기: 화살표 커서, 스페이스 칠하기 (누른 채 움직이면 계속), Tab/Q 붓 바꾸기, X 지우기,
+    C 검사, Enter 저장하고 플레이, ESC 저장하고 돌아가기"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    rows = [list(line) for line in slot["rows"]]
+    cx, cy, brush = EDIT_W // 2, EDIT_H // 2, 7
+    message = ""
+    cell = int(min(WIDTH * 0.62 / EDIT_W, HEIGHT * 0.8 / EDIT_H))
+    ox, oy = int(WIDTH * 0.03), int(HEIGHT * 0.12)
+
+    def paint(letter):
+        if letter == "P":                                 # 시작 위치는 하나만
+            for line in rows:
+                for k, ch in enumerate(line):
+                    if ch == "P":
+                        line[k] = ":"
+        rows[cy][cx] = letter
+
+    def store():
+        slot["rows"] = ["".join(line) for line in rows]
+        write_save(save)
+
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                store()
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            key = event.key
+            if key == pygame.K_ESCAPE:
+                store()
+                return None
+            moved = {pygame.K_LEFT: (-1, 0), pygame.K_RIGHT: (1, 0), pygame.K_UP: (0, -1), pygame.K_DOWN: (0, 1),
+                     pygame.K_a: (-1, 0), pygame.K_d: (1, 0), pygame.K_w: (0, -1), pygame.K_s: (0, 1)}.get(key)
+            if moved:
+                cx = max(0, min(EDIT_W - 1, cx + moved[0]))
+                cy = max(0, min(EDIT_H - 1, cy + moved[1]))
+                if pygame.key.get_pressed()[pygame.K_SPACE]:     # 스페이스를 누른 채 움직이면 계속 칠해요
+                    paint(BRUSHES[brush][0])
+            elif key == pygame.K_SPACE:
+                paint(BRUSHES[brush][0])
+            elif key == pygame.K_x:
+                rows[cy][cx] = ":"
+            elif key == pygame.K_TAB:
+                brush = (brush + 1) % len(BRUSHES)
+            elif key == pygame.K_q:
+                brush = (brush - 1) % len(BRUSHES)
+            elif key == pygame.K_c:
+                problems = validate_map(["".join(line) for line in rows])
+                message = problems[0][0 if ko else 1] if problems else ("문제 없어요! Enter 로 플레이" if ko else "Looks good! ENTER to play")
+            elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                store()
+                problems = validate_map(slot["rows"])
+                if problems:
+                    message = problems[0][0 if ko else 1]
+                else:
+                    return "play"
+        screen.fill((14, 10, 30))
+        title = fonts["normal"].render(f"MAP EDITOR  -  {slot['name']}", True, (255, 80, 200))
+        screen.blit(title, (ox, HEIGHT * 0.04))
+        for r, line in enumerate(rows):
+            for c, ch in enumerate(line):
+                rect = pygame.Rect(ox + c * cell, oy + r * cell, cell - 1, cell - 1)
+                pygame.draw.rect(screen, edit_color(ch), rect)
+                if ch in EDIT_COLORS:                     # 물건은 글자도
+                    label = fonts["tiny"].render(ch, True, BLACK)
+                    screen.blit(label, label.get_rect(center=rect.center))
+        cursor = pygame.Rect(ox + cx * cell - 2, oy + cy * cell - 2, cell + 3, cell + 3)
+        pygame.draw.rect(screen, YELLOW if pygame.time.get_ticks() // 300 % 2 else WHITE, cursor, 2)
+        # 오른쪽: 붓 목록
+        px = ox + EDIT_W * cell + int(WIDTH * 0.02)
+        screen.blit(fonts["small"].render("BRUSH (TAB / Q)", True, WHITE), (px, oy))
+        for i, (letter, name_ko, name_en) in enumerate(BRUSHES):
+            y = oy + 24 * UI + i * 17 * UI
+            selected = i == brush
+            pygame.draw.rect(screen, edit_color(letter), (px, y + 2, 14 * UI, 12 * UI))
+            text = f"{letter}  {name_ko if ko else name_en}"
+            font = fonts["help"] if ko else fonts["tiny"]
+            screen.blit(font.render(("> " if selected else "  ") + text, True, YELLOW if selected else (200, 200, 220)),
+                        (px + 18 * UI, y))
+        if message:
+            image = fonts["help"].render(message, True, (80, 255, 120))
+            screen.blit(image, (ox, oy + EDIT_H * cell + 8))
+        hint = ("화살표 이동  스페이스 칠하기(누른 채 움직이면 계속)  X 지우기  C 검사  Enter 저장+플레이  ESC 저장+돌아가기" if ko
+                else "ARROWS move  SPACE paint (hold to draw)  X erase  C check  ENTER save+play  ESC save+back")
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.96)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
 async def stats_screen(save):
     """기록 화면: 누적 기록, 무기별 처치·레벨, 최근 판. E 저장 코드 내보내기, I 가져오기, ESC 돌아가기"""
     screen = pygame.display.get_surface()
@@ -7654,6 +7942,11 @@ async def intro_screen(save):
                 if await stats_screen(save) == "closed":
                     return "closed"
                 continue
+            if event.key == pygame.K_e:
+                picked = await map_slots_screen(save)
+                if picked == "closed" or picked:
+                    return picked
+                continue
             if event.key == pygame.K_x:
                 picked = await challenge_screen(save)
                 if picked == "closed" or picked:
@@ -7707,6 +8000,7 @@ async def intro_screen(save):
         parts.append("R 사격장" if ko else "R training range")
         parts.append("X 도전" if ko else "X challenges")
         parts.append("V 기록/저장 옮기기" if ko else "V stats / save code")
+        parts.append("E 맵 만들기" if ko else "E map editor")
         parts.append("A 업적" if ko else "A achievements")
         parts.append("K 스킬" if ko else "K skills")
         parts.append("S 설정" if ko else "S settings")
@@ -8017,6 +8311,8 @@ async def loadout_screen(save, choice):
             mode_text = "ZOMBIES  -  BLOOD MOON"
         elif choice["mode"] == "mission":
             mode_text = f"MISSION  -  {MISSIONS[choice['mission']]['name']}"
+        elif choice["mode"] == "custom":
+            mode_text = f"CUSTOM MAP  -  {choice['custom_map']['name']}  (PRACTICE)"
         else:
             mode_text = f"CAMPAIGN  -  ROUND {choice['round']}"
         mode_text += f"     RANK {player_level(save)}   SKILL POINTS {skill_points(save)}"
@@ -8242,10 +8538,11 @@ async def run():
     pygame.mouse.set_visible(False)
     pygame.mouse.get_rel()
 
-    training = choice["mode"] == "training"
+    training = choice["mode"] in ("training", "custom")      # 연습: 진짜 저장에 남지 않아요
     # 사격장은 저장 정보의 복사본으로 (무엇을 해도 진짜 저장에는 남지 않아요)
     game = Game(copy.deepcopy(save) if training else save, choice["round"], mode=choice["mode"], loadout=loadout,
-                mission=choice.get("mission", 0), stage=choice.get("stage", 0), challenge=choice.get("challenge"))
+                mission=choice.get("mission", 0), stage=choice.get("stage", 0), challenge=choice.get("challenge"),
+                custom=choice.get("custom_map"))
     running = True
     closed = False             # 창을 닫았는지 여부
     work_time, frames, check_timer = 0.0, 0, 0.0   # 자동 해상도 조절용 기록
