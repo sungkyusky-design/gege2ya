@@ -83,10 +83,10 @@ HELP_TEXT = {
     ),
     "en": dict(
         title="HOW TO PLAY",
-        keys=[("W A S D", "move"), ("SHIFT", "sprint (with W)"), ("C", "crouch / slide while sprinting"),
+        keys=[("W A S D", "move"), ("SHIFT", "sprint (with W)"), ("C", "crouch / slide (sprinting)"),
               ("ARROWS", "look (or mouse)"), ("SPACE", "jump"),
               ("F, LEFT CLICK", "fire (hold for auto)"), ("E, RIGHT CLICK", "aim / sniper scope"), ("Z", "scope zoom 3/6/12x"),
-              ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1-9, 0, Q", "switch weapon, Q = last weapon"), ("TAB", "tap: next weapon, hold: weapon wheel"), ("T, Y, J", "skills: focus / medkit / scan"),
+              ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1-9, 0, Q", "weapons, Q = last one"), ("TAB", "next weapon, hold = wheel"), ("T, Y, J", "focus / medkit / scan"),
               ("R, B, U", "reload, zombie shop"), ("H, M", "help (pause), mute"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "pause menu")],
         tips=["Kill every enemy to clear the round. The map changes each round.",
               "Killstreaks without dying: 3 radar, 5 airstrike, 7 sentry turret (X).",
