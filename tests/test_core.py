@@ -631,6 +631,21 @@ class GameTest(unittest.TestCase):
         self.assertEqual(shooter.setting_text("gfx"), shooter.GFX_NAMES[shooter.SETTINGS["gfx"]])
         shooter.SETTINGS["gfx"] = before
 
+    def test_camera_effects(self):
+        game = shooter.Game({}, 3)
+        base = game.fov
+        game.sprint_fov = 1.0
+        self.assertGreater(game.fov, base)                               # 달리면 시야가 넓어져요
+        game.sprint_fov = 0.0
+        game.hurt_player(30)
+        self.assertGreater(game.stagger, 0.5)                            # 맞으면 휘청
+        game.explode(pygame.Vector2(game.player.pos) + pygame.Vector2(1, 0), 2.5, 10, owner="enemy")
+        self.assertLess(game.sounds.duck, 1.0)                           # 가까운 폭발: 귀 먹먹
+        for _ in range(400):
+            game.update_camera(1 / 60)
+        self.assertEqual(game.sounds.duck, 1.0)
+        self.assertEqual(game.stagger, 0.0)
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
