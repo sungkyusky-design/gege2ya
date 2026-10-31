@@ -3259,6 +3259,17 @@ IMPACT_STYLES = {
 }
 
 
+# 세트 마지막 보스 5명의 싸움 방식: (방식, 약점 안내)
+BOSS_STYLES = {1: ("barrage", "WEAK POINT: HEAD  -  DODGE THE GRENADE FANS"),
+               2: ("armored", "FRONT ARMOR  -  HIT HIM FROM THE SIDE OR BEHIND"),
+               3: ("sniper", "RED LASER = SHOT INCOMING  -  BREAK LINE OF SIGHT"),
+               4: ("storm", "RED CIRCLES = AIRSTRIKE  -  KEEP MOVING"),
+               5: ("warlord", "ALL OF THE ABOVE  -  ARMOR IN FRONT")}
+BOSS_ARMOR = 0.35                 # 앞에서 쏘면 받는 피해 비율 (armored)
+BOSS_SNIPE = (32, 1.3)            # 저격 보스: (피해, 레이저 조준 시간)
+BOSS_STRIKE = (2.2, 40, 2.0)      # 공습 표시: (반경, 피해, 터지기까지 초)
+
+
 class Director:
     """AI 디렉터: 싸움의 긴장감을 재서 '몰아치기 → 클라이맥스 → 숨 돌리기' 흐름을 만들어요.
     - intensity(0~1): 내가 맞거나 가까이서 싸우면 오르고, 조용하면 내려가요
@@ -3599,6 +3610,9 @@ class Game:
         self.slowmo = 0.0          # 라운드 마지막 적을 쓰러뜨리면 잠깐 느리게
         self.wheel = None          # 무기 휠: dict(t=누른 시간, pick=고른 칸, open=열렸는지)
         self.director = Director() # 긴장감 조절 (몰아치기 / 숨 돌리기)
+        self.boss_marks = []        # 공습 표시: [위치, 남은 시간]
+        self.boss_laser = None      # 저격 보스 레이저: [보스, 남은 시간]
+        self.boss_tip = ""
         self.impact_sound_cd = 0.0  # 맞은 곳 소리 간격
         self.vault = None           # 뛰어넘는 중: dict(start, end, t)
         self.lean = 0.0             # 몸 기울이기 (-1 왼쪽 ~ 1 오른쪽)
@@ -4491,9 +4505,15 @@ class Game:
             if finale:                                  # 세트 마지막: 더 단단한 보스 + 호위 2명
                 boss.t = dict(boss.t, hp=int(boss.t["hp"] * 1.4))
                 boss.hp = boss.t["hp"]
+                boss.style, tip = BOSS_STYLES[min(set_no, len(BOSS_STYLES))]
+                boss.pattern_timer = 4.0                # 첫 패턴까지 숨 돌릴 시간
+                boss.pattern_step = 0
+                self.boss_tip = tip
                 extra = [p for p in far if boss.pos.distance_to(p) > 2][:2]
                 self.enemies += [Enemy(*p, "GRUNT", self.skill) for p in extra]
             self.sub_banners.append((f"{'SET FINALE' if finale else 'BOSS ROUND'}: {boss.name}", RED))
+            if finale:
+                self.sub_banners.append((self.boss_tip, (255, 200, 60)))
         elif special:
             self.sub_banners.append((f"NEW ENEMY: {special}", RED))
         if self.round > 1:
@@ -4537,6 +4557,7 @@ class Game:
 
     def reset_round_state(self):
         """라운드(웨이브)마다 새로 시작하는 것들"""
+        self.boss_marks, self.boss_laser, self.armor_hint = [], None, False
         self.director.new_round()
         self.low_warned = False        # 체력 낮음 무전을 이번 라운드에 했는지
         self.tactical_left = TACTICAL_COUNT + (1 if self.perk == "SCAVENGER" else 0)
@@ -4760,6 +4781,115 @@ class Game:
                     move_with_collision(boss.pos, offset.normalize() * boss.t["speed"] * 1.8 * dt)
             elif boss.charge_timer <= -1.2:
                 boss.charge_timer = 6.0
+
+    def update_boss_pattern(self, boss, dt):
+        """세트 마지막 보스의 특별 패턴 (경고 표시가 먼저 나오고 그다음 공격)"""
+        style = boss.style
+        faster = 0.7 if getattr(boss, "phase", 1) >= 2 else 1.0           # 화나면 더 자주
+        boss.pattern_timer -= dt
+        if style == "warlord":                                          # 워로드: 세 가지를 돌아가며
+            style = ("barrage", "storm", "sniper")[boss.pattern_step % 3]
+        if boss.pattern_timer > 0:
+            return
+        boss.pattern_step += 1
+        p = self.player.pos
+        if style == "barrage":                                          # 수류탄 부채꼴 3발
+            self.callout_cooldown = 0.0
+            self.shout(boss, "FIRE IN THE HOLE!")
+            side = pygame.Vector2(-(p - boss.pos).y, (p - boss.pos).x)
+            side = side.normalize() * 2.2 if side.length() else pygame.Vector2(2.2, 0)
+            for offset in (-side, pygame.Vector2(0, 0), side):
+                self.enemy_throw(boss, p + offset)
+            boss.pattern_timer = 7.0 * faster
+        elif style == "storm":                                          # 공습 표시 3개
+            self.callout_cooldown = 0.0
+            self.shout(boss, "BRING THE THUNDER!")
+            for k in range(3):
+                spot = p + pygame.Vector2(random.uniform(0.5, 2.5) * (k > 0), 0).rotate(random.uniform(0, 360))
+                self.boss_marks.append([spot, BOSS_STRIKE[2] + k * 0.35])
+            boss.pattern_timer = 6.5 * faster
+        elif style == "sniper":                                         # 빨간 레이저 → 묵직한 한 발
+            if boss.sees:
+                self.boss_laser = [boss, BOSS_SNIPE[1]]
+                self.play_at("beep", boss.pos, 25, 0.8)
+            boss.pattern_timer = 6.0 * faster
+        elif style == "armored" and getattr(boss, "phase", 1) >= 2:     # 화나면 내 엄폐물을 부숴요
+            near = [(c, r) for r, line in enumerate(GAME_MAP) for c, ch in enumerate(line)
+                    if ch in DESTRUCTIBLE and p.distance_to(pygame.Vector2(c + 0.5, r + 0.5)) < 5]
+            for c, r in random.sample(near, min(2, len(near))):
+                self.destroy_cell(c, r)
+            if near:
+                self.popups.append(["COVER DESTROYED!", RED, 1.5])
+            boss.pattern_timer = 8.0
+        else:
+            boss.pattern_timer = 2.0
+
+    def update_boss_effects(self, dt):
+        """공습 표시가 터지고, 저격 레이저가 끝나면 쏴요"""
+        strike_r, strike_dmg, _ = BOSS_STRIKE
+        for mark in self.boss_marks:
+            mark[1] -= dt
+            if mark[1] <= 0:
+                self.explode(mark[0], strike_r, strike_dmg, owner="enemy")
+                if self.mode == "campaign" and set_of(self.round) >= 4:
+                    self.lightning = 0.25                               # 번쩍!
+        self.boss_marks = [m for m in self.boss_marks if m[1] > 0]
+        if self.boss_laser:
+            boss, left = self.boss_laser
+            self.boss_laser[1] = left - dt
+            if boss not in self.enemies:
+                self.boss_laser = None
+            elif self.boss_laser[1] <= 0:
+                self.boss_laser = None
+                self.play_at("sniper", boss.pos, 40)
+                if can_see(boss.pos, self.player.pos) and not smoke_blocks(boss.pos, self.player.pos):
+                    self.last_attacker = boss
+                    self.hurt_player(BOSS_SNIPE[0], boss.pos)
+                # 쏜 다음엔 연기 속으로 자리를 옮겨요
+                SMOKES.append([pygame.Vector2(boss.pos), 4.0])
+                spots = [pygame.Vector2(pt) for pt in self.spawn_points
+                         if 6 < pygame.Vector2(pt).distance_to(self.player.pos) < 16]
+                if spots:
+                    boss.pos.update(random.choice(spots))
+
+    def boss_armor(self, enemy, amount):
+        """앞쪽 장갑: armored/warlord 보스는 앞에서 쏘면 덜 아파요 (옆이나 뒤가 약점)"""
+        if enemy.kind != "BOSS" or getattr(enemy, "style", None) not in ("armored", "warlord"):
+            return amount
+        to_me = self.player.pos - enemy.pos
+        if to_me.length() == 0 or to_me.normalize().dot(enemy.facing) < 0.35:
+            return amount * 1.3                                         # 옆·뒤: 더 아파요
+        if not getattr(self, "armor_hint", False):
+            self.armor_hint = True
+            self.popups.append(["ARMOR! FLANK HIM", (255, 200, 60), 2.0])
+        return amount * BOSS_ARMOR
+
+    def draw_boss_telegraphs(self, screen):
+        """공습 표시(바닥의 빨간 원)와 저격 레이저(빨간 선)"""
+        strike_r, _, total = BOSS_STRIKE
+        for pos, left in self.boss_marks:
+            blink = 120 + int(135 * abs(math.sin(left * (10 if left < 0.8 else 5))))
+            # 바깥 원(터지는 범위)과 안쪽 원(줄어들수록 곧 터져요)을 바닥에 원근감 있게
+            for radius, color, width in ((strike_r, (255, 40, 40), 3),
+                                         (strike_r * max(0.05, 1 - left / total), (255, blink, 60), 2)):
+                points = []
+                for k in range(24):
+                    spot = pos + pygame.Vector2(radius, 0).rotate(k * 15)
+                    box = self.project(spot, 0.0, 0.01)
+                    if not box or box[4] < 0.3:
+                        points = []
+                        break
+                    points.append((box[0], box[2]))
+                if len(points) > 2:
+                    pygame.draw.polygon(screen, color, points, width)
+        if self.boss_laser:
+            boss, left = self.boss_laser
+            box = self.enemy_box(boss)
+            if box:
+                sx, top, bottom, w, perp = box
+                start = (sx, top + (bottom - top) * 0.3)
+                width = 1 + int(4 * (1 - left / BOSS_SNIPE[1]))
+                pygame.draw.line(screen, (255, 30, 30), start, (WIDTH / 2, HEIGHT / 2 + 30 * UI), width)
 
     def update_allies(self, dt):
         """동료: 명령에 따라 움직이고, 보이는 가장 가까운 적을 쏴요"""
@@ -5574,6 +5704,8 @@ class Game:
                 self.echoes.append([random.uniform(0.4, 1.5), "thunder", random.uniform(0.6, 1.0)])
         self.suppress = max(0.0, self.suppress - dt * 0.8)
         self.impact_sound_cd -= dt
+        if self.boss_marks or self.boss_laser:
+            self.update_boss_effects(dt)
         if self.hitstop > 0:        # 쓰러뜨린 순간: 아주 잠깐 멈춤 (묵직한 손맛)
             self.hitstop -= dt
             return
@@ -5761,6 +5893,8 @@ class Game:
             damage = enemy.update(edt, self.player)
             if enemy.kind == "BOSS":
                 self.update_boss(enemy, edt)
+                if getattr(enemy, "style", None):
+                    self.update_boss_pattern(enemy, edt)
             if enemy.alarm >= 0.99 and not getattr(enemy, "alarm_played", False):
                 enemy.alarm_played = True                      # 들켰어요! (한 번만)
                 self.play_at("beep", enemy.pos, 18, 0.7)
@@ -6135,6 +6269,7 @@ class Game:
 
     def damage_enemy(self, enemy, amount, how):
         """적에게 피해 주기. 쓰러지면 킬 로그에 남기고 상자를 떨어뜨려요."""
+        amount = self.boss_armor(enemy, amount)
         enemy.hp -= amount
         enemy.hurt_timer = 0.08
         enemy.flinch = 0.16 if how == "HEADSHOT!" else 0.12
@@ -6805,6 +6940,7 @@ class Game:
         self.draw_sky(screen)
         self.draw_world(screen)
         self.draw_sprites(screen)
+        self.draw_boss_telegraphs(screen)
         self.draw_particles(screen, casings=False)       # 튀는 피
         if self.lightning > 0:
             self.flash_overlay.set_alpha(int(190 * self.lightning / 0.3 * (0.75 + 0.25 * math.sin(self.lightning * 60))))
