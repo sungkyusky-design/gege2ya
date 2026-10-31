@@ -57,6 +57,7 @@ def look_open(game):
 def shoot(game, path):
     screen = pygame.display.get_surface()
     game.banner_timer = game.hint_timer = 0
+    game.briefing = None                      # 세트 브리핑 화면은 건너뛰어요
     if "--enemies" not in sys.argv:
         game.enemies = [e for e in game.enemies if e.pos.distance_to(game.player.pos) > 40]
     look_open(game)

@@ -13,11 +13,13 @@ MODE_KEY="${1:-Enter}"
 OUT=/tmp/strike_web
 rm -rf "$OUT" && mkdir -p "$OUT/app"
 cp browser.py build_info.py game.py main.py shooter.py "$OUT/app/"
+# 빈 포트를 골라요 (앞에서 띄운 서버가 8000번을 잡고 있으면 옛 화면을 검사하게 돼요)
+PORT=$(python -c 'import socket; s=socket.socket(); s.bind(("", 0)); print(s.getsockname()[1])')
 cd "$OUT/app"
-(timeout 300 python -m pygbag --ume_block 0 . > "$OUT/pygbag.log" 2>&1 &)
+(timeout 300 python -m pygbag --ume_block 0 --port "$PORT" . > "$OUT/pygbag.log" 2>&1 &)
 cd "$OUT"
 for i in $(seq 1 60); do
-  curl -s -o /dev/null --noproxy localhost localhost:8000/ && break
+  curl -s -o /dev/null --noproxy localhost "localhost:$PORT/" && break
   sleep 3
 done
 cat > "$OUT/smoke.js" <<EOF
@@ -28,7 +30,8 @@ const { chromium } = require('playwright');
   const p = await b.newPage({ viewport: { width: 1100, height: 720 } });
   const errs = [];
   p.on('console', m => { const t = m.text(); if (/Traceback|Error|error:/.test(t) && !/BrowserFS|MEDIA|Failed to load resource/.test(t)) errs.push(t); });
-  await p.goto('http://localhost:8000/', { waitUntil: 'load' });
+  await p.goto('http://localhost:${PORT}/', { waitUntil: 'load' });
+  if ((await p.content()).includes('Directory listing')) errs.push('GAME PAGE DID NOT LOAD (directory listing)');
   await p.waitForTimeout(25000);
   await p.keyboard.press('Enter'); await p.waitForTimeout(6000);           // pygbag 시작 화면
   await p.screenshot({ path: 'web_menu.png' });

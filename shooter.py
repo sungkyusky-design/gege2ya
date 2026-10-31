@@ -1591,6 +1591,52 @@ SET_SIZE = 20
 SETS = ["RECON", "ASSAULT", "NIGHT OPS", "STORM", "VETERAN"]
 
 
+# 캠페인 이야기: 세트마다 브리핑, 무전, 세트 마지막(20번째) 라운드의 이름 있는 보스
+# 적: 바닷가 도시들을 점령한 무장 조직 "아이언 재칼(IRON JACKALS)"
+STORY = [
+    dict(op="OPERATION FIRST LIGHT", boss="JACKAL CAPTAIN", mid="JACKAL SERGEANT",
+         ko=["아이언 재칼이 해안 도시들을 점령했다.", "정찰대가 먼저 들어간다. 놈들의 수와 무기를 확인하고 길을 열어라.",
+             "세트 마지막 라운드: 해안을 지키는 재칼 대위를 쓰러뜨려라."],
+         en=["The Iron Jackals have seized the coastal cities.", "Recon goes in first. Find out their numbers and open a path.",
+             "Final round of the set: take down the Jackal Captain holding the coast."]),
+    dict(op="OPERATION HAMMERFALL", boss="THE FOREMAN", mid="JACKAL ENFORCER",
+         ko=["해안은 되찾았다. 이제 내륙으로 밀고 들어간다.", "놈들이 중장비와 증원군을 불러들였다. 정면 돌파다.",
+             "세트 마지막 라운드: 보급 기지를 지휘하는 '포어맨'을 잡아라."],
+         en=["The coast is ours. Now we push inland.", "They brought heavy gear and reinforcements. We go straight through.",
+             "Final round of the set: capture the Foreman who runs their supply base."]),
+    dict(op="OPERATION BLACKOUT", boss="NIGHT OWL", mid="SHADOW SCOUT",
+         ko=["밤이다. 놈들의 보급선을 끊는다.", "어둠 속에서 총구 불빛이 위치를 알린다. 조용히, 빠르게.",
+             "세트 마지막 라운드: 야간 저격대장 '나이트 아울'을 찾아라."],
+         en=["Night falls. We cut their supply lines.", "Muzzle flashes give you away in the dark. Quiet and fast.",
+             "Final round of the set: hunt down the Night Owl, their night sniper chief."]),
+    dict(op="OPERATION STORMBREAK", boss="THUNDERHEAD", mid="STORM RAIDER",
+         ko=["폭풍을 틈타 놈들이 반격한다.", "비가 발소리를 덮는다. 귀보다 눈을 믿어라.",
+             "세트 마지막 라운드: 반격을 이끄는 '썬더헤드'를 막아라."],
+         en=["They counter-attack under cover of the storm.", "Rain covers footsteps. Trust your eyes over your ears.",
+             "Final round of the set: stop Thunderhead, who leads the counter-attack."]),
+    dict(op="OPERATION LAST STAND", boss="THE WARLORD", mid="WARLORD'S GUARD",
+         ko=["마지막 작전. 재칼의 우두머리 '워로드'가 숨은 곳을 찾았다.", "놈들은 가장 강한 병사들로 버틴다. 모든 기술을 쓰라.",
+             "100라운드: 워로드를 끝내고 전쟁을 끝내라."],
+         en=["The final operation. We found where the Warlord hides.", "Their best soldiers stand guard. Use everything you have.",
+             "Round 100: end the Warlord and end this war."]),
+]
+# 본부(HQ) 무전: 상황 -> (한국어 목록, 영어 목록)
+RADIO = {
+    "start": (["HQ: 구역에 들어섰다. 적 위치를 확인해라.", "HQ: 조심해, 놈들이 기다리고 있다.", "HQ: 주변을 살피고 엄폐물을 써라."],
+              ["HQ: You're in the zone. Locate the hostiles.", "HQ: Careful, they're waiting for you.",
+               "HQ: Check your corners and use cover."]),
+    "first": (["HQ: 한 명 쓰러뜨렸다. 계속 가.", "HQ: 좋은 사격이다."], ["HQ: One down. Keep moving.", "HQ: Good shot."]),
+    "low": (["HQ: 많이 다쳤다! 엄폐하고 숨을 돌려라.", "HQ: 체력이 낮다. 물러서!"],
+            ["HQ: You're hurt! Get to cover and breathe.", "HQ: Health is low. Fall back!"]),
+    "boss": (["HQ: 지휘관이 나타났다. 체력을 깎으면 화를 낼 거다.", "HQ: 큰 놈이다. 거리를 두고 싸워라."],
+             ["HQ: Their commander is here. He gets angry when hurt.", "HQ: Big one. Keep your distance."]),
+    "last": (["HQ: 하나 남았다. 끝내라.", "HQ: 마지막 한 명이다."], ["HQ: One left. Finish it.", "HQ: Last hostile."]),
+    "clear": (["HQ: 구역 확보. 잘했다.", "HQ: 깨끗하다. 다음 구역으로."], ["HQ: Area secure. Nice work.", "HQ: Clear. Move to the next zone."]),
+    "set": (["HQ: 작전 성공! 다음 작전을 준비해라.", "HQ: 훌륭하다. 놈들이 흔들리고 있다."],
+            ["HQ: Operation complete! Prepare for the next one.", "HQ: Outstanding. They're breaking."]),
+}
+
+
 def set_of(round_no):
     return min(len(SETS), (round_no - 1) // SET_SIZE + 1)
 
@@ -3517,6 +3563,9 @@ class Game:
         loadout: 고른 주무기/보조무기/퍼크 (없으면 모든 무기를 들고 시작)"""
         self.mode = mode
         self.challenge = challenge  # 도전 모드 이름 (없으면 None)
+        self.briefing = None       # 세트 브리핑 화면을 보여준 시간 (None이면 안 보여줌)
+        self.briefed = set()       # 이번에 이미 본 세트 브리핑
+        self.radio_msg = None      # 본부 무전 [글자, 지난 시간]
         self.challenge_time = 0.0
         self.challenge_done = False
         self.loadout = loadout
@@ -3991,6 +4040,46 @@ class Game:
             self.popups.append(["TRAINING COMPLETE!" if self.tutorial_step == len(steps) else "GOOD!",
                                 (80, 255, 120), 1.5])
 
+    def draw_radio(self, screen):
+        """본부 무전: 왼쪽 가운데에 'HQ' 상자와 한 글자씩 나오는 말"""
+        text, age = self.radio_msg
+        typed = text[:int(age * 45)]
+        font = self.fonts["help"]
+        label = font.render(typed, True, (200, 255, 200))
+        box = pygame.Rect(16 * UI, HEIGHT * 0.6, max(label.get_width(), font.size(text)[0]) + 70 * UI, label.get_height() + 16 * UI)
+        panel = pygame.Surface(box.size, pygame.SRCALPHA)
+        panel.fill((0, 30, 10, int(170 * min(1.0, (5.0 - age) * 2))))
+        screen.blit(panel, box)
+        pygame.draw.rect(screen, (80, 200, 120), box, 1)
+        tag = self.small_font.render("HQ", True, (80, 255, 120))
+        screen.blit(tag, tag.get_rect(midleft=(box.x + 8 * UI, box.centery)))
+        if int(age * 6) % 2 == 0 and age < 1.5:                  # 무전 신호 깜빡임
+            pygame.draw.circle(screen, (80, 255, 120), (box.x + 44 * UI, box.centery), 4 * UI)
+        screen.blit(label, label.get_rect(midleft=(box.x + 56 * UI, box.centery)))
+
+    def draw_briefing(self, screen):
+        """세트 브리핑: 작전 이름과 이야기를 한 줄씩 보여줘요"""
+        set_no = set_of(self.round)
+        story = STORY[set_no - 1]
+        ko = self.fonts["lang"] == "ko"
+        dim = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        dim.fill((5, 8, 15, 248))
+        screen.blit(dim, (0, 0))
+        self.center_text(screen, self.small_font, f"SET {set_no} / {len(SETS)}:  {SETS[set_no - 1]}", (80, 240, 255), HEIGHT * 0.22)
+        self.center_text(screen, self.big_font, story["op"], YELLOW, HEIGHT * 0.3)
+        font = self.fonts["help_big" if "help_big" in self.fonts else "help"]
+        shown = self.briefing * 40                            # 한 글자씩
+        for i, line in enumerate(story["ko" if ko else "en"]):
+            part = line[:max(0, int(shown))]
+            shown -= len(line) + 8
+            if part:
+                image = font.render(part, True, WHITE)
+                screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * (0.44 + i * 0.08))))
+        if self.briefing > 0.8 and int(self.briefing * 2) % 2 == 0:
+            hint = "스페이스 / F : 작전 시작" if ko else "SPACE / F : START"
+            image = self.fonts["help"].render(hint, True, YELLOW)
+            screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.8)))
+
     def draw_compass(self, screen):
         """위쪽 가운데 나침반: N E S W 와 15도 눈금, 목표 위치(다이아몬드)"""
         width, top = WIDTH * 0.3, HEIGHT * 0.075
@@ -4205,8 +4294,17 @@ class Game:
         self.banner = f"ROUND {self.round}" + (f" / {CAMPAIGN_ROUNDS}" if self.round <= CAMPAIGN_ROUNDS else "")
         self.sub_banners = [(f"{self.theme['op']}  -  {self.theme['name']}", WHITE),
                             (f"SET {set_no}: {SETS[set_no - 1]}   ROUND {in_set + 1} / {SET_SIZE} OF THE SET", (200, 200, 255))]
+        story = STORY[set_no - 1]
+        finale = in_set == SET_SIZE - 1
         if special == "BOSS":
-            self.sub_banners.append(("BOSS ROUND!", RED))
+            boss = self.enemies[0]
+            boss.name = story["boss"] if finale else story["mid"]
+            if finale:                                  # 세트 마지막: 더 단단한 보스 + 호위 2명
+                boss.t = dict(boss.t, hp=int(boss.t["hp"] * 1.4))
+                boss.hp = boss.t["hp"]
+                extra = [p for p in far if boss.pos.distance_to(p) > 2][:2]
+                self.enemies += [Enemy(*p, "GRUNT", self.skill) for p in extra]
+            self.sub_banners.append((f"{'SET FINALE' if finale else 'BOSS ROUND'}: {boss.name}", RED))
         elif special:
             self.sub_banners.append((f"NEW ENEMY: {special}", RED))
         if self.round > 1:
@@ -4218,9 +4316,25 @@ class Game:
             self.objective = dict(kind=kind, pos=self.far_spot(), progress=0.0, done=False,
                                   timer=BOMB_TIME, spawn=7.0, beep=0.0)
             self.sub_banners.insert(1, (f"OBJECTIVE: {OBJECTIVES[kind]['title']}", OBJECTIVES[kind]["color"]))
+        if not self.challenge:
+            if in_set == 0 and set_no not in self.briefed and self.round <= CAMPAIGN_ROUNDS:
+                self.briefing = 0.0                     # 새 세트: 작전 브리핑부터
+                self.briefed.add(set_no)
+            self.pending_radio = "boss" if special == "BOSS" else "start"
+
+    def radio(self, key, force=False):
+        """본부 무전: 화면 왼쪽에 글자 + 무전 소리 (캠페인에서만)"""
+        if self.mode != "campaign" or self.challenge:
+            return
+        if self.radio_msg and self.radio_msg[1] < 2.5 and not force:
+            return
+        lines = RADIO[key][0 if self.fonts["lang"] == "ko" else 1]
+        self.radio_msg = [random.choice(lines), 0.0]
+        self.sounds.play("radio", 0.9)
 
     def reset_round_state(self):
         """라운드(웨이브)마다 새로 시작하는 것들"""
+        self.low_warned = False        # 체력 낮음 무전을 이번 라운드에 했는지
         self.contact_timer = 0.0       # 적이 나를 보고 있었던 뒤로 지난 시간 (CONTACT! 외침용)
         self.callout_cooldown = 0.0
         self.squad_timer = 0.0
@@ -4716,6 +4830,18 @@ class Game:
     def update(self, dt, keys, mouse_dx, mouse_dy, buttons):
         if self.show_help:          # 도움말을 보는 동안은 멈춰요
             return
+        if self.briefing is not None:   # 세트 브리핑: 스페이스/사격/클릭(패드 A)으로 시작
+            self.briefing += dt
+            if self.briefing > 0.8 and (keys[pygame.K_SPACE] or keys[pygame.K_f] or buttons[0]):
+                self.briefing = None
+            return
+        if getattr(self, "pending_radio", None) and self.banner_timer < 2.5:
+            self.radio(self.pending_radio, force=True)
+            self.pending_radio = None
+        if self.radio_msg:
+            self.radio_msg[1] += dt
+            if self.radio_msg[1] > 5.0:
+                self.radio_msg = None
         waiting = []
         for item in self.echoes:    # 메아리, 탄피 소리
             item[0] -= dt
@@ -4982,6 +5108,13 @@ class Game:
             self.round_clear_timer = 4.0
             self.banner = "CAMPAIGN COMPLETE!" if self.round == CAMPAIGN_ROUNDS else "ROUND CLEAR"
             self.sub_banners = [] if self.round != CAMPAIGN_ROUNDS else [("All 100 rounds cleared - the war goes on", YELLOW)]
+            if self.round % SET_SIZE == 0 and self.round < CAMPAIGN_ROUNDS:       # 세트 끝
+                story = STORY[set_of(self.round) - 1]
+                self.banner = f"{story['op']} COMPLETE"
+                self.sub_banners = [(f"SET {set_of(self.round)}: {SETS[set_of(self.round) - 1]} CLEARED", YELLOW)]
+                self.radio("set", force=True)
+            else:
+                self.radio("clear", force=True)
             self.banner_timer = 4.0
             self.add_xp(XP["round"], f"ROUND CLEAR  +{XP['round']}")
             self.count_round()
@@ -5161,6 +5294,9 @@ class Game:
         if source is not None:
             self.last_source = pygame.Vector2(source)
         self.player.hp -= int(damage)
+        if 0 < self.player.hp < 35 and not self.low_warned:
+            self.low_warned = True
+            self.radio("low", force=True)
         self.since_hurt = 0.0
         self.damage_flash = min(1.0, 0.4 + damage / 40)
         self.shake = max(self.shake, 0.08 + damage / 200)          # 맞으면 화면이 움찔
@@ -5254,6 +5390,10 @@ class Game:
                 life[key] = life.get(key, 0) + 1
         stats = self.stats
         stats["kills"] += 1
+        if stats["kills"] == 1:
+            self.radio("first")
+        elif len(self.enemies) == 1 and not self.objective:
+            self.radio("last", force=True)
         if how == "HEADSHOT!":
             stats["heads"] += 1
         if how in ("DOWN", "HEADSHOT!"):                 # 총으로 쓰러뜨렸으면 그 총의 경험
@@ -5744,6 +5884,10 @@ class Game:
         if self.light_timer > 0:
             screen.blit(self.muzzle_light, (0, 0))       # 총구 섬광
         self.draw_hud(screen)
+        if self.radio_msg and not self.game_over:
+            self.draw_radio(screen)
+        if self.briefing is not None:
+            self.draw_briefing(screen)
         if self.mode == "training":
             self.draw_training(screen)
         if self.show_help:
@@ -6389,7 +6533,7 @@ class Game:
             for mark in (0.6, 0.3):                                     # 단계가 바뀌는 곳
                 x = bar.x + bar.w * mark
                 pygame.draw.line(screen, WHITE, (x, bar.y), (x, bar.bottom), 1)
-            label = self.small_font.render(f"BOSS  PHASE {getattr(boss, 'phase', 1)}", True, WHITE)
+            label = self.small_font.render(f"{getattr(boss, 'name', 'BOSS')}   PHASE {getattr(boss, 'phase', 1)}", True, WHITE)
             screen.blit(label, label.get_rect(midbottom=(WIDTH / 2, bar.y - 1)))
         # 위쪽 정보
         if self.mode == "mission":
