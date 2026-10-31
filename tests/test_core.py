@@ -691,6 +691,15 @@ class GameTest(unittest.TestCase):
         finally:
             shooter.menu_events = real
 
+    def test_fair_spawns_prefer_hidden_spots(self):
+        game = shooter.Game({}, 3)
+        p = game.player.pos
+        far = [pt for pt in game.spawn_points if p.distance_to(pt) > shooter.SAFE_SPAWN]
+        hidden = [pt for pt in far if not (p.distance_to(pt) < shooter.START_EXPOSE and shooter.can_see(p, pygame.Vector2(pt)))]
+        picks = game.fair_spawns(far, min(len(hidden), 4))
+        self.assertTrue(all(pt in hidden for pt in picks))
+        self.assertEqual(len(game.fair_spawns(far, len(far))), len(far))      # 모자라면 보이는 자리도 써요
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

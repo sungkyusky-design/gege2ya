@@ -2460,6 +2460,7 @@ class MaskedKeys:
         return False if key in self.hidden else bool(self.real[key])
 
 
+START_EXPOSE = 14                # 시작 자리에서 이 거리 안에 바로 보이는 곳엔 되도록 적을 안 놓아요
 ENDING_TIME = 40.0               # 엔딩 크레딧 길이(초)
 SPRINT_FOV = 0.07                # 달리면 시야가 이만큼 넓어져요 (7%)
 DIRECTOR_PEAK = 0.85       # 긴장감이 이만큼 차면 클라이맥스
@@ -4735,7 +4736,8 @@ class Game:
         far = [p for p in self.spawn_points if self.player.pos.distance_to(p) > SAFE_SPAWN]
         in_set = (self.round - 1) % SET_SIZE
         count = min(len(far), 3 + in_set // 4 + set_no - 1)
-        self.enemies = [Enemy(*p, self.pick_enemy_kind(), self.skill) for p in random.sample(far, count)]
+        self.enemies = [Enemy(*p, self.pick_enemy_kind(), self.skill) for p in self.fair_spawns(far, count)]
+        self.face_the_fight()
         # 새로운 적이 처음 나오는 라운드에는 그 적이 꼭 한 명은 있게. 5라운드마다 보스
         news = {2: "SNIPER", 3: "HEAVY", 4: "BOMBER", 6: "SHIELD", 7: "FLANKER", 8: "MEDIC", 9: "GUNNER",
                 12: "DRONE", 14: "LASER"}
@@ -5144,6 +5146,25 @@ class Game:
             hp = max(0, truck["hp"]) / CONVOY_HP
             self.center_text(screen, self.small_font, f"CONVOY  HP {hp * 100:.0f}%   ROUTE {done * 100:.0f}%",
                              RED if hp < 0.3 else (255, 160, 60), y)
+
+    def fair_spawns(self, far, count):
+        """시작하자마자 정면에서 총을 맞지 않게: 시작 자리에서 바로 보이는 가까운(14칸 안) 자리는
+        안 보이는 자리가 모자랄 때만 써요"""
+        p = self.player.pos
+        exposed = [pt for pt in far if p.distance_to(pt) < START_EXPOSE and can_see(p, pygame.Vector2(pt))]
+        hidden = [pt for pt in far if pt not in exposed]
+        picks = random.sample(hidden, min(count, len(hidden)))
+        if len(picks) < count:
+            picks += random.sample(exposed, min(count - len(picks), len(exposed)))
+        return picks
+
+    def face_the_fight(self):
+        """시작할 때 벽이 아니라 싸울 쪽(적들의 한가운데)을 보게"""
+        if not self.enemies:
+            return
+        middle = sum((e.pos for e in self.enemies), pygame.Vector2()) / len(self.enemies) - self.player.pos
+        if middle.length() > 0.5:
+            self.player.angle = math.atan2(middle.y, middle.x)
 
     def place_devices(self, set_no, boss_round):
         """전투 시작: 벽 옆 빈 칸에 드럼통 몇 개, 가끔 적들 근처에 경보기"""
