@@ -277,7 +277,7 @@ def apply_mods(spec, mods, level=1):
 ECHOES = {"NEON BEACH": (0.35, 0.12), "DOWNTOWN": (0.18, 0.35), "HARBOR": (0.22, 0.3), "DESERT TOWN": (0.25, 0.2),
           "SNOW BASE": (0.3, 0.2), "FOREST VILLAGE": (0.3, 0.22), "RAIN DISTRICT": (0.15, 0.4),
           "CARGO SHIP": (0.12, 0.3), "MOTEL": (0.2, 0.25), "SCRAPYARD": (0.2, 0.25), "BAZAAR": (0.12, 0.35),
-          "OIL RIG": (0.3, 0.2), "BLOOD MOON": (0.3, 0.3)}
+          "OIL RIG": (0.3, 0.2), "LIGHTHOUSE POINT": (0.3, 0.18), "BLOOD MOON": (0.3, 0.3)}
 PENETRATION = 0.5                 # 얇은 엄폐물(상자, 모래주머니) 너머 적을 맞히면 피해 비율
 
 
@@ -524,7 +524,7 @@ def scaled_type(kind, skill):
 #          'R' 붉은 벽돌  'N' 나이트클럽  'G' 유리 오피스 타워  'S' 마천루
 #          'W' 창고  'r' 'u' 'o' 빨강/파랑/주황 컨테이너  'Y' 두 층으로 쌓인 컨테이너
 #          'M' 흙벽돌 집  'O' 콘크리트 벙커  'U' 연료 탱크  'J' 나무집  'V' 돌담  'Z' 모래주머니
-#          'K' 나무 상자  'Q' 쓰레기통  'F' 분수/동상  (K Q F Z V 와 컨테이너는 엄폐물)
+#          'K' 나무 상자  'Q' 쓰레기통  'F' 분수/동상  (K Q F Z V 와 컨테이너는 엄폐물)  'H' 등대
 #   장식   'T' 야자수  'c' 자동차(총알을 막아요)  'v' 불탄 차(총알을 막아요)  'L' 가로등
 #          'b' 네온 광고판  'X' 크레인  'I' 침엽수
 #   상자   'a' 탄약  'h' 체력  'n' 수류탄
@@ -906,6 +906,7 @@ WALLS = {
     "J": ((125, 85, 50), 1.5, True, None),
     "V": ((120, 120, 112), 0.9, False, None),
     "Z": ((165, 145, 100), 0.7, "ribs", None),
+    "H": ((240, 238, 230), 3.2, "ribs", (255, 225, 120)),     # 등대: 높은 흰 탑, 꼭대기에 불빛
 }
 
 # 바닥 종류: 글자 -> 색
@@ -1373,7 +1374,34 @@ GENERATED_MAPS = [
          op="OPERATION LANTERN", brief="Crowded night market under neon. Stalls give cover to both sides.",
          rows=generate_map("market", 26, 18, 18)),
 ]
-MAPS[-1:-1] = GENERATED_MAPS          # 좀비 맵(마지막) 앞에 넣어요
+# 손으로 그린 맵: 노을 진 바닷가 절벽 어촌과 등대
+#   위쪽 바다와 나무 부두 -> 해변과 어시장(W) -> 나무집 골목(J) -> 언덕 위 돌담(V)과 등대(U), 소나무 숲(I)
+LIGHTHOUSE_POINT = dict(
+    name="LIGHTHOUSE POINT", sky=sky((60, 70, 140), (190, 120, 130), (250, 170, 110), (255, 205, 150)),
+    haze=(245, 190, 150), sun=-math.pi / 2, stars=False, ground=".", lit=4, fog=1.0, snow=False, camo=None,
+    op="OPERATION BEACON", brief="A fishing village on the cliffs. Take the docks, then the lighthouse.",
+    rows=[
+               "~~~~~~~~~~~~~~~~~~~~~~~~~~",
+               "~~~~pp~~~~~~~~~pp~~~~~~~~~",
+               "~~~~pE~~~~~~~~~pp~~~~~~~~~",
+               "~~..pp...~~~~..pp,,,~~~~~~",
+               "~...,,,K..E.~..,,,,K,..~~~",
+               "~..E,,,,......,,WWW,,.E.~~",
+               "~.....:::::::.,,W,W,.....~",
+               "~.JJJ.:.JJJ.:.,,,,,,.JJJE~",
+               "~.J.J.:.J.J.:....:::.J.J.~",
+               "~.J.JL:.J...:Ka..:.:.J...~",
+               "~.....:::::::::::::::::..~",
+               "~ggVVVg:.JJJJ.:.Q.:.VVVggg",
+               "gggg.Vg:.J..J.:.F.:gVgggVg",
+               "gEggIgg:.J.hJ.:...:gVgHHgg",
+               "ggIggg#:.JJ.J.:Ln.:gggHHgE",
+               "g#####P:......::::#ggVgggg",
+               "gggIggg#############gVVVgI",
+               "IgEggIggggggIggggEgggggIgg",
+    ],
+)
+MAPS[-1:-1] = [LIGHTHOUSE_POINT] + GENERATED_MAPS     # 좀비 맵(마지막) 앞에 넣어요 (등대는 13번째 맵)
 
 # 장기 미션: 아주 큰 맵(64x44칸)에서 다섯 단계 작전. 단계를 마칠 때마다 체크포인트에 저장돼요
 MISSION_STAGES = [("REACH", "INFILTRATE - REACH THE RALLY POINT"), ("HOSTAGE", "RESCUE THE DOWNED PILOT"),
@@ -1402,11 +1430,12 @@ for _m in MISSIONS:
                      brief=_m["desc"][1], rows=generate_map(_m["style"], 64, 44, _m["seed"], spawns=55, pickups=10)))
     _m["map"] = len(MAPS) - 1
 
-# 캠페인에서 라운드마다 돌아가며 나오는 맵 (좀비, 미션 맵은 빼고) - 20개
+# 캠페인에서 라운드마다 돌아가며 나오는 맵 (좀비, 미션 맵은 빼고) - 21개.
+# 세트는 20라운드씩이라 세트마다 시작 맵이 하나씩 밀려요
 CAMPAIGN_MAPS = [i for i, m in enumerate(MAPS) if not m.get("zombie") and not m.get("mission")]
 ZOMBIE_MAP = next(i for i, m in enumerate(MAPS) if m.get("zombie"))
 
-# 캠페인 100라운드 = 맵 20개 x 5세트. 세트마다 분위기가 바뀌고 적이 강해져요
+# 캠페인 100라운드 = 20라운드 x 5세트 (맵 21개가 차례로 돌아요). 세트마다 분위기가 바뀌고 적이 강해져요
 CAMPAIGN_ROUNDS = 100
 SET_SIZE = 20
 SETS = ["RECON", "ASSAULT", "NIGHT OPS", "STORM", "VETERAN"]
@@ -3462,7 +3491,7 @@ class Game:
         self.zombies_left = 0
         self.banner = f"ROUND {self.round}" + (f" / {CAMPAIGN_ROUNDS}" if self.round <= CAMPAIGN_ROUNDS else "")
         self.sub_banners = [(f"{self.theme['op']}  -  {self.theme['name']}", WHITE),
-                            (f"SET {set_no}: {SETS[set_no - 1]}   MAP {in_set + 1} / {SET_SIZE}", (200, 200, 255))]
+                            (f"SET {set_no}: {SETS[set_no - 1]}   ROUND {in_set + 1} / {SET_SIZE} OF THE SET", (200, 200, 255))]
         if special == "BOSS":
             self.sub_banners.append(("BOSS ROUND!", RED))
         elif special:
