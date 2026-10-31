@@ -139,7 +139,7 @@ GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
 # 설정 (시작 화면에서 S): 저장돼서 다음에도 그대로예요
 SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=2, v2=True, music=40,
-                hud=100, shake=1, soundviz=0, colorblind=0, squad=2)
+                hud=100, shake=1, soundviz=0, colorblind=0, squad=2, fullscreen=0)
 ASSIST_LEVELS = ["OFF", "LOW", "NORMAL", "HIGH"]
 ASSIST_PAD = [0.0, 0.6, 1.0, 1.5]          # 아깝게 빗나간 총알을 몸통에 맞혀 주는 정도
 ASSIST_STICKY = [1.0, 0.75, 0.55, 0.4]     # 조준점이 적 위에 있을 때 시점이 느려지는 정도
@@ -7259,7 +7259,8 @@ def open_window():
     flags = 0
     if not IN_BROWSER:
         # SCALED: 전체 화면에서 화면 크기에 맞춰 늘리거나 줄여줘요
-        flags = pygame.SCALED | (0 if fits_desktop(WIDTH, HEIGHT) else pygame.FULLSCREEN)
+        full = SETTINGS.get("fullscreen") or not fits_desktop(WIDTH, HEIGHT)   # 설정이 켜져 있거나 모니터보다 크면
+        flags = pygame.SCALED | (pygame.FULLSCREEN if full else 0)
     try:
         screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
     except pygame.error:
@@ -7280,6 +7281,7 @@ SETTING_ROWS = [
     ("volume", "VOLUME", "소리 크기", "Sound volume"),
     ("music", "MUSIC", "배경 음악 크기 (컴퓨터에서만, 웹은 없음)", "Background music (desktop only)"),
     ("difficulty", "DIFFICULTY", "난이도: 적 실력과 내가 받는 피해", "Enemy skill and damage taken"),
+    ("fullscreen", "FULLSCREEN", "전체 화면 (게임 중 Enter 로도)", "Fullscreen (Enter in game too)"),
     ("squad", "SQUADMATES", "같이 싸우는 AI 동료 수 0~2 (다음 판부터, K 로 명령)", "AI squadmates 0-2 (next game, K = orders)"),
     ("hud", "UI SIZE", "글자와 화면 표시 크기 (다음 판부터)", "Text and HUD size (next game)"),
     ("shake", "SCREEN SHAKE", "쏘거나 맞을 때 화면 흔들림", "Camera shake when shooting or hit"),
@@ -7305,6 +7307,9 @@ def change_setting(key, step):
         SETTINGS[key] = (SETTINGS[key] + step) % 3
     elif key in ("shake", "soundviz", "colorblind"):
         SETTINGS[key] = 1 - SETTINGS[key]
+    elif key == "fullscreen" and not IN_BROWSER:
+        SETTINGS[key] = 1 - SETTINGS[key]
+        open_window()                                   # 바로 전체 화면 / 창으로
     elif key == "difficulty":
         SETTINGS[key] = (SETTINGS[key] + step) % len(DIFFICULTIES)
     apply_settings({})
@@ -7324,6 +7329,8 @@ def setting_text(key):
         return f"{value}"
     if key in ("shake", "soundviz", "colorblind"):
         return "ON" if value else "OFF"
+    if key == "fullscreen":
+        return "BROWSER" if IN_BROWSER else ("ON" if value else "OFF")
     if key == "squad":
         return str(value)
     return f"{value}%"
@@ -7360,11 +7367,12 @@ async def settings_screen(save):
                 change_setting(SETTING_ROWS[row][0], -1)
             elif event.key in (pygame.K_RIGHT, pygame.K_d):
                 change_setting(SETTING_ROWS[row][0], 1)
+            screen = pygame.display.get_surface()       # 전체 화면을 바꾸면 새 화면
         screen.fill((14, 10, 30))
         title = fonts["big"].render("SETTINGS", True, (255, 80, 200))
         screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.08)))
         for i, (key, name, desc_ko, desc_en) in enumerate(SETTING_ROWS):
-            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.14 + i * 0.061), WIDTH * 0.88, HEIGHT * 0.056)
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.13 + i * 0.057), WIDTH * 0.88, HEIGHT * 0.052)
             selected = i == row
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
@@ -7373,7 +7381,7 @@ async def settings_screen(save):
             label = fonts["normal"].render(name, True, WHITE)
             screen.blit(label, label.get_rect(midleft=(rect.x + 14, rect.centery)))
             desc = fonts["help"].render(desc_ko if ko else desc_en, True, (200, 230, 255))
-            screen.blit(desc, desc.get_rect(midleft=(rect.x + rect.w * 0.24, rect.centery)))
+            screen.blit(desc, desc.get_rect(midleft=(rect.x + rect.w * 0.27, rect.centery)))
             value = setting_text(key)
             image = fonts["normal"].render(f"<  {value}  >" if selected else value, True, YELLOW if selected else WHITE)
             screen.blit(image, image.get_rect(midright=(rect.right - 16, rect.centery)))
@@ -8585,6 +8593,7 @@ async def run():
                 if await settings_screen(save) == "closed":
                     running, closed = False, True
                 game.sounds.refresh_background()
+                screen = pygame.display.get_surface()      # 설정에서 전체 화면을 바꿨을 수 있어요
             elif choice == "PHOTO MODE":
                 if await photo_mode(game) == "closed":
                     running, closed = False, True
@@ -8613,8 +8622,12 @@ async def run():
                   and not IN_BROWSER):
                 try:
                     pygame.display.toggle_fullscreen()
+                    SETTINGS["fullscreen"] = 1 - SETTINGS.get("fullscreen", 0)   # 설정에도 기억해요
+                    save["settings"] = dict(SETTINGS)
+                    write_save(save)
                 except pygame.error:
                     pass                       # 전체 화면을 지원하지 않는 환경
+                screen = pygame.display.get_surface()
             else:
                 game.handle_event(event)
         if not running:
