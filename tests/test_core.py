@@ -159,6 +159,25 @@ class GameTest(unittest.TestCase):
         self.assertNotIn("kills", save.get("lifetime", {}))
         self.assertEqual(game.streak, 0)
 
+    def test_enemy_walks_around_a_building_to_reach_the_player(self):
+        game = shooter.Game({}, 2, loadout=LOADOUT)
+        game.briefing = None
+        game.allies = []
+        p = game.player
+        # 나에게 곧장 걸어올 수 없는 (중간이 막힌) 먼 칸을 골라요
+        cells = [pygame.Vector2(x + 0.5, y + 0.5) for y in range(shooter.MAP_H) for x in range(shooter.MAP_W)
+                 if shooter.walkable_cell(x, y) and not shooter.is_blocked(x + 0.5, y + 0.5)]
+        start = next(c for c in cells if 8 < c.distance_to(p.pos) < 14 and not shooter.walk_clear(c, p.pos)
+                     and shooter.build_flow((int(p.pos.x), int(p.pos.y)))[int(c.y)][int(c.x)] is not None)
+        enemy = shooter.Enemy(start.x, start.y, "GRUNT")
+        enemy.t = dict(enemy.t, sight=0)
+        for _ in range(60 * 25):
+            if enemy.search is None:
+                enemy.search = pygame.Vector2(p.pos)
+            enemy.update(1 / 60, p)
+            game.navigator.clock += 1 / 60
+        self.assertLess(enemy.pos.distance_to(p.pos), 3.0)
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
