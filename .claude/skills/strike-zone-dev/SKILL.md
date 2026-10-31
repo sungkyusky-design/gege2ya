@@ -68,6 +68,11 @@ description: Develop, test and ship the Strike Zone pygame FPS (shooter.py) in t
 떠 있는 적은 타입에 `lift`, 화면 위치는 꼭 `self.enemy_box(enemy)` 로.
 부서지는 벽: `DESTRUCTIBLE`, `hit_wall`, `destroy_cell` (맵 줄은 `load_map` 에서 복사돼요).
 분대 AI: `Game.update_squad` (역할 배정, 무전), `Enemy.wander` (수색·순찰), 외침은 `Game.shout`.
+AI 디렉터: `Director` (긴장감, build/peak/relax, `assist`), `update_director`, 숨 돌리기 보급 `relax_supply`. 음악: `MUSIC_LAYERS` 4겹 + `MUSIC_MIX`, `Game.music_state`, `Sounds.mix_music`, 승리 소리 `play_sting`.
+맞은 곳 효과: `WALL_MATERIAL`, `FLOOR_MATERIAL`, `IMPACT_STYLES` (파편 + 소리), `add_impact`. 움직임 2.0: 뛰어넘기 `VAULT_WALLS`, `vault_target`, 기울이기 `,` `.` `lean_offset` (그리기는 `draw` → `draw_frame`).
+세트 마지막 보스: `BOSS_STYLES`, `update_boss_pattern`, `update_boss_effects`, `boss_armor`, `draw_boss_telegraphs`. DEEP RUN: `BOONS`, `offer_boons`/`pick_boon`, `Game.deeprun`, `save["deeprun"]`.
+계약: `CONTRACTS`, `roll_contracts`, `contract_progress`. 장치: `Device` (드럼통/경보기), `place_devices`, `shoot_device`, 가로등 `Decor.glow`. 무기 손맛: `RELOAD_STYLES`, `strafe_tilt`, `land_dip`.
+특별 장면: `SETPIECE_PLAN` (세트의 7·14번째 라운드), `start_setpiece`, `update_setpiece`, 호송 `update_convoy` + `grid_path`.
 랭킹: `RANK_MODES`, `add_ranking`, `Game.start_run` / `finish_run` (점수 `run_score` = 그 판 경험치), `ranking_screen` (L), `save["rankings"]`.
 업적: `ACHIEVEMENTS` 에 (이름, 한, 영, 검사 함수) 한 줄, 누적 기록은 `save["lifetime"]`.
 
