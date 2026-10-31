@@ -2367,6 +2367,66 @@ def big_ammo_width(game):
     return game.fonts["big"].size(text)[0]
 
 
+_icon_cache = {}
+
+
+def make_icon(kind, h, color=(235, 235, 240)):
+    """HUD 작은 그림 아이콘 (그림 파일 없이 코드로). kind: 무기 종류(RIFLES...) / GRENADE / FLASHBANG /
+    SMOKE / THROWING KNIFE / RADAR / AIRSTRIKE / SENTRY / CHOPPER. 높이 h, 무기는 너비 3h"""
+    key = (kind, int(h), color)
+    if key in _icon_cache:
+        return _icon_cache[key]
+    h = max(8, int(h))
+    wide = kind in ("RIFLES", "SMGS", "SHOTGUNS", "MARKSMAN", "LMGS", "LAUNCHERS", "PISTOLS", "OTHER")
+    img = pygame.Surface((h * 3 if wide else h, h), pygame.SRCALPHA)
+    u = h / 10                                                   # 그림 단위
+    c, dark = color, tuple(int(v * 0.55) for v in color)
+
+    def r(x, y, w, hh, col=c):
+        pygame.draw.rect(img, col, (x * u, y * u, max(1, w * u), max(1, hh * u)))
+    if kind == "PISTOLS":
+        r(9, 2, 12, 3); r(10, 5, 3, 5); r(20, 2, 2, 2, dark)
+    elif kind == "SMGS":
+        r(5, 3, 16, 3); r(21, 3, 4, 2); r(11, 6, 2, 4); r(7, 6, 2, 3, dark); r(2, 3, 3, 2)
+    elif kind == "SHOTGUNS":
+        r(1, 3, 6, 3); r(7, 3, 22, 2); r(9, 5, 14, 2, dark); r(9, 5, 2, 4)
+    elif kind == "MARKSMAN":
+        r(1, 4, 6, 3); r(7, 4, 22, 2); r(10, 1, 8, 2, dark); r(12, 6, 2, 3); r(16, 6, 2, 2)
+    elif kind == "LMGS":
+        r(1, 3, 6, 3); r(7, 3, 21, 3); r(11, 6, 6, 4, dark); r(25, 6, 1, 4); r(23, 6, 1, 4)
+    elif kind == "LAUNCHERS":
+        r(2, 3, 26, 4); r(28, 2, 2, 6, dark); r(10, 7, 2, 3); r(16, 7, 2, 2)
+    elif wide:                                                   # 돌격소총 (기본)
+        r(1, 3, 6, 3); r(7, 3, 19, 3); r(26, 4, 4, 1); r(13, 6, 3, 4, dark); r(10, 6, 2, 3)
+    elif kind == "GRENADE":
+        pygame.draw.circle(img, c, (h * 0.5, h * 0.6), h * 0.36)
+        r(4, 0, 3, 2, dark); r(6, 1, 3, 1)
+    elif kind == "FLASHBANG":
+        r(3, 2, 4, 8); r(3, 1, 4, 1, dark)
+        pygame.draw.line(img, (255, 240, 120), (h * 0.1, h * 0.3), (h * 0.25, h * 0.45), max(1, int(u)))
+    elif kind == "SMOKE":
+        r(3, 3, 4, 7); pygame.draw.circle(img, dark, (h * 0.5, h * 0.2), h * 0.18)
+    elif kind == "THROWING KNIFE":
+        pygame.draw.polygon(img, c, [(h * 0.1, h * 0.9), (h * 0.85, h * 0.15), (h * 0.95, h * 0.25), (h * 0.25, h * 0.95)])
+    elif kind == "RADAR":
+        pygame.draw.circle(img, c, (h / 2, h / 2), h * 0.45, max(1, int(u)))
+        pygame.draw.circle(img, c, (h / 2, h / 2), h * 0.2, max(1, int(u)))
+        pygame.draw.line(img, c, (h / 2, h / 2), (h * 0.85, h * 0.2), max(1, int(u)))
+    elif kind == "AIRSTRIKE":
+        pygame.draw.polygon(img, c, [(h * 0.5, 0), (h * 0.62, h * 0.4), (h, h * 0.55), (h * 0.62, h * 0.6),
+                                     (h * 0.6, h * 0.85), (h * 0.75, h), (h * 0.25, h), (h * 0.4, h * 0.85),
+                                     (h * 0.38, h * 0.6), (0, h * 0.55), (h * 0.38, h * 0.4)])
+    elif kind == "SENTRY":
+        r(4, 1, 2, 5); r(2, 2, 7, 2); pygame.draw.line(img, c, (h * 0.5, h * 0.6), (h * 0.15, h), max(1, int(u)))
+        pygame.draw.line(img, c, (h * 0.5, h * 0.6), (h * 0.85, h), max(1, int(u)))
+    elif kind == "CHOPPER":
+        r(1, 1, 8, 1); r(3, 3, 5, 4); r(8, 4, 2, 1); r(4, 2, 1, 1, dark); r(3, 8, 5, 1)
+    else:
+        pygame.draw.circle(img, c, (h / 2, h / 2), h * 0.4)
+    _icon_cache[key] = img
+    return img
+
+
 def make_bottom_shade():
     """화면 아래쪽을 살짝 어둡게 하는 그라데이션 (HUD 글자가 잘 보이게)"""
     height = int(130 * UI)
@@ -8331,6 +8391,20 @@ class Game:
         pygame.draw.line(screen, (30, 30, 30), base, base - d * 70 * UI, int(20 * UI))
         draw_glove(screen, base - d * 40 * UI, 26 * UI)
 
+    def draw_gear_line(self, screen, key, kind, count, color, bottomright):
+        """오른쪽 아래 장비 한 줄: [키] 아이콘 x개 (오른쪽 끝 맞춤). 그린 범위를 돌려줘요"""
+        font = self.small_font
+        icon = make_icon(kind, font.get_linesize() * 0.95, color)
+        count_img = font.render(count, True, color)
+        cap_w = font.size(key)[0] + 12 * UI
+        total = cap_w + 6 * UI + icon.get_width() + 4 * UI + count_img.get_width()
+        area = pygame.Rect(0, 0, total, font.get_linesize() + 4 * UI)
+        area.bottomright = bottomright
+        x = draw_keycap(screen, font, key, area.x, area.centery) + 6 * UI
+        screen.blit(icon, icon.get_rect(midleft=(x, area.centery)))
+        screen.blit(count_img, count_img.get_rect(midleft=(x + icon.get_width() + 4 * UI, area.centery)))
+        return area
+
     def hint_layout(self):
         """처음 몇 초 보이는 조작 안내: 양쪽 HUD 사이 빈 곳에 들어가게 줄을 나눠요.
         (줄들, 상자, 줄 높이) - 너무 좁으면 줄 없이"""
@@ -8390,13 +8464,16 @@ class Game:
             screen.blit(panel, rect)
             if not selected:
                 pygame.draw.rect(screen, (90, 80, 120), rect, 1)
-            level = weapon.spec.get("level", 1)
-            name = weapon.spec["name"] + (" +" if weapon.upgraded else "") + (f" L{level}" if level > 1 else "")
             key = weapon_key_label(i)
-            text = fit_text(tiny, (key + " " if key else "") + name, rect.width - 8)
-            color = BLACK if selected else ((255, 200, 60) if weapon.upgraded else WHITE)
-            label = tiny.render(text, True, color)
-            screen.blit(label, label.get_rect(center=rect.center))
+            color = (20, 16, 10) if selected else ((255, 200, 60) if weapon.upgraded else (225, 225, 235))
+            icon = make_icon(weapon_class(weapon.spec["name"]), rect.h * 0.62, color)     # 무기 모양 그림
+            screen.blit(icon, icon.get_rect(center=(rect.centerx + 6 * UI, rect.centery)))
+            if key:
+                label = tiny.render(key, True, color)
+                screen.blit(label, label.get_rect(midleft=(rect.x + 5 * UI, rect.centery)))
+            if weapon.upgraded:
+                plus = tiny.render("+", True, color)
+                screen.blit(plus, plus.get_rect(midright=(rect.right - 4 * UI, rect.centery)))
         mid = top + 14 * UI
         if start > 0:
             label = tiny.render(f"< {start}", True, (200, 200, 220))
@@ -8550,7 +8627,9 @@ class Game:
         y = HEIGHT - 104 * UI
         if self.streaks_ready:
             for name in reversed(self.streaks_ready):
-                draw_key_text(screen, self.small_font, [(kl(pygame.K_x), name)], (24, y), "topleft", (80, 240, 255))
+                area = draw_key_text(screen, self.small_font, [(kl(pygame.K_x), name)], (24, y), "topleft", (80, 240, 255))
+                icon = make_icon(name, area.h * 0.8, (80, 240, 255))
+                screen.blit(icon, icon.get_rect(midleft=(area.right + 6 * UI, area.centery)))
                 y -= 26 * UI
         upcoming = [(need, name) for need, name in STREAKS if need > self.streak]
         streak_text = f"STREAK {self.streak}"
@@ -8578,11 +8657,11 @@ class Game:
         name = w.spec["name"] + (" +" if w.upgraded else "")
         image = self.small_font.render(name, True, (200, 200, 220))
         rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 26, rect.top + 2)))
-        rect = draw_key_text(screen, self.small_font, [(kl(pygame.K_g), f"GRENADE x{self.arsenal.grenades}")],
-                             (WIDTH - 26, rect.top - 2), "bottomright", YELLOW)
+        rect = self.draw_gear_line(screen, kl(pygame.K_g), "GRENADE", f"x{self.arsenal.grenades}", YELLOW,
+                                   (WIDTH - 26, rect.top - 2))
         if self.mode != "training":                       # 전술 장비는 그 위 줄에
-            rect = draw_key_text(screen, self.small_font, [(kl(pygame.K_n), f"{self.tactical} x{self.tactical_left}")],
-                                 (WIDTH - 26, rect.top), "bottomright", (150, 220, 255))
+            rect = self.draw_gear_line(screen, kl(pygame.K_n), self.tactical, f"x{self.tactical_left}",
+                                       (150, 220, 255), (WIDTH - 26, rect.top))
         if self.cooking is not None:                     # 쿠킹: 남은 시간 막대
             left = max(0.0, GRENADE_FUSE - self.cooking)
             bar = pygame.Rect(WIDTH / 2 - 60 * UI, HEIGHT * 0.62, 120 * UI, 8 * UI)
