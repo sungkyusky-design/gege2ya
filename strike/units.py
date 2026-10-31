@@ -240,3 +240,35 @@ GUN_LOOKS = {
     "MACHINE PISTOL": dict(body=(40, 40, 44), accent=(72, 72, 78), length=0.6, thick=0.9, mag="straight", optic="iron"),
     "LAUNCHER": dict(body=(72, 82, 56), accent=(50, 56, 40), length=0.8, thick=1.6, mag=None, optic="iron", tube=True),
 }
+
+
+# 총기 개조: 칸마다 고를 수 있는 부착물 (이름, 필요한 무기 레벨, 바뀌는 성능)
+#   ads_spread: 정조준 때 퍼짐 (작을수록 정확, 기본 0.45)   ads: 정조준 확대 배율에 곱하기
+#   hip: 그냥 쏠 때 퍼짐에 곱하기   kick: 위로 튀는 반동에 곱하기   recoil: 옆 반동에 곱하기
+#   mag / reserve / reload / move: 탄창, 여분 탄, 재장전 시간, 움직이는 속도에 곱하기
+ATTACHMENTS = {
+    "OPTIC": [("IRON SIGHTS", 1, {}), ("RED DOT", 1, {"ads_spread": 0.40}),
+              ("HOLO", 3, {"ads_spread": 0.36, "ads": 1.1}),
+              ("4X SCOPE", 6, {"ads_spread": 0.30, "ads": 1.8, "move": 0.92})],
+    "MUZZLE": [("NONE", 1, {}), ("COMPENSATOR", 3, {"kick": 0.8, "recoil": 0.7}),
+               ("SUPPRESSOR", 8, {"suppressed": True})],
+    "MAGAZINE": [("STANDARD", 1, {}), ("EXT MAG", 2, {"mag": 1.5, "reserve": 1.25, "reload": 1.1}),
+                 ("FAST MAG", 4, {"reload": 0.75})],
+    "GRIP": [("NONE", 1, {}), ("ANGLED GRIP", 3, {"hip": 0.8, "move": 1.04}),
+             ("VERTICAL GRIP", 5, {"kick": 0.7, "recoil": 0.7})],
+}
+ATTACHMENT_INFO = {
+    "IRON SIGHTS": ("기본 가늠쇠", "Basic sights"), "RED DOT": ("정조준이 조금 더 정확해요", "Slightly tighter aim"),
+    "HOLO": ("정조준이 더 정확하고 살짝 확대", "Tighter aim, a bit more zoom"),
+    "4X SCOPE": ("멀리 크게 보이고 아주 정확, 조금 느려져요", "Long zoom, very accurate, slower"),
+    "NONE": ("없음", "None"), "COMPENSATOR": ("반동이 줄어요", "Less recoil"),
+    "SUPPRESSOR": ("소음기: 적이 잘 못 들어요", "Quiet shots"), "STANDARD": ("기본 탄창", "Standard magazine"),
+    "EXT MAG": ("탄창 1.5배, 재장전 조금 느림", "1.5x magazine, slower reload"),
+    "FAST MAG": ("재장전이 25% 빨라요", "25% faster reload"),
+    "ANGLED GRIP": ("그냥 쏠 때 덜 퍼지고 조금 빨라요", "Better hip fire, a bit faster"),
+    "VERTICAL GRIP": ("반동이 크게 줄어요", "Much less recoil"),
+}
+# 전술 장비 (로드아웃에서 하나 골라요, N 으로 던져요)
+TACTICALS = [("FLASHBANG", "섬광탄: 근처 적이 3초 동안 아무것도 못 해요", "Flashbang: stuns nearby enemies"),
+             ("SMOKE", "연막탄: 10초 동안 연기가 적의 시야를 가려요", "Smoke: blocks enemy vision for 10s"),
+             ("THROWING KNIFE", "투척 칼: 조용히 날아가 꽂혀요 (빗나가면 돌아와요)", "Throwing knife: silent, returns if it misses")]

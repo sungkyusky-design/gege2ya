@@ -87,7 +87,8 @@ import pygame
 
 # 데이터 표는 strike/ 폴더에 나눠 두었어요 (맵, 무기·적, 소리, 이야기)
 from strike.maps import MAPS, WALLS, FLOORS, OFFICE_BLOCK
-from strike.units import HORIZONTAL_KICK, START_WEAPONS, UNLOCKS, PERKS, WEAPON_INFO, WEAPONS, ENEMY_TYPES, ARMORED, ENEMY_MAGS, COVER_USERS, GUN_LOOKS
+from strike.units import (HORIZONTAL_KICK, START_WEAPONS, UNLOCKS, PERKS, WEAPON_INFO, WEAPONS, ENEMY_TYPES, ARMORED, ENEMY_MAGS, COVER_USERS, GUN_LOOKS,
+                          ATTACHMENTS, ATTACHMENT_INFO, TACTICALS)
 from strike.sounds import SOUND_RECIPES, SOUND_MARK_KINDS, MUFFLED_SOUNDS, STEP_SOUNDS, ENEMY_STEPS, GUN_SOUNDS
 from strike.story import CHALLENGES, STORY, RADIO, HELP_TEXT
 
@@ -154,7 +155,7 @@ KEY_ACTIONS = [
     ("STREAK", pygame.K_x, "킬스트릭"), ("NEXT WEAPON", pygame.K_q, "무기 바꾸기"), ("SCOPE ZOOM", pygame.K_z, "조준경 배율"),
     ("FOCUS", pygame.K_t, "스킬: 집중"), ("MEDKIT", pygame.K_y, "스킬: 구급상자"), ("SCAN", pygame.K_j, "스킬: 탐지"),
     ("INSPECT", pygame.K_i, "무기 살펴보기"), ("SQUAD ORDER", pygame.K_k, "동료 명령: 따라와/대기/공격"),
-    ("FLASHLIGHT", pygame.K_l, "손전등 켜기/끄기"), ("SHOP AMMO", pygame.K_b, "좀비 상점: 탄약"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
+    ("FLASHLIGHT", pygame.K_l, "손전등 켜기/끄기"), ("TACTICAL", pygame.K_n, "전술 장비 던지기"), ("SHOP AMMO", pygame.K_b, "좀비 상점: 탄약"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
 ]
 # 바꿀 수 없는 키: 메뉴/시점/전체 화면
 KEY_FIXED = (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_UP, pygame.K_DOWN,
@@ -446,7 +447,61 @@ HEALTH_PACK = 35
 # 로드아웃: 시작하기 전에 주무기 / 보조무기 / 퍼크(특수 능력)를 골라요
 PRIMARIES = ["RIFLE", "HEAVY AR", "BURST", "SMG", "SHOTGUN", "AUTO SHOTGUN", "LMG", "DMR", "SNIPER"]
 SECONDARIES = ["PISTOL", "REVOLVER", "MACHINE PISTOL", "ROCKET", "LAUNCHER"]
-DEFAULT_LOADOUT = dict(primary="RIFLE", secondary="PISTOL", perk="HEAVY ROUNDS")
+DEFAULT_LOADOUT = dict(primary="RIFLE", secondary="PISTOL", perk="HEAVY ROUNDS", tactical="FLASHBANG")
+TACTICAL_COUNT = 2                # 라운드마다 전술 장비 개수
+FLASH_RANGE = 7.0                 # 섬광탄이 닿는 거리
+SMOKE_TIME, SMOKE_RADIUS = 10.0, 1.7
+SMOKES = []                       # 지금 피어 있는 연막: [위치, 남은 시간] (적의 시야 검사에서 써요)
+
+
+def smoke_blocks(a, b):
+    """a와 b 사이에 연막이 있으면 True (선분과 원이 닿는지)"""
+    for center, life in SMOKES:
+        radius = SMOKE_RADIUS * min(1.0, life / 1.5, (SMOKE_TIME - life + 0.3) / 1.0)
+        ab = b - a
+        t = 0.0 if ab.length_squared() == 0 else max(0.0, min(1.0, (center - a).dot(ab) / ab.length_squared()))
+        if (a + ab * t).distance_to(center) < radius:
+            return True
+    return False
+
+
+def gunsmith_default(save, name):
+    """총기 개조를 아직 안 했을 때의 부착물 (예전처럼 처치 수로 풀린 것을 자동으로)"""
+    mods = weapon_mods(save.get("wkills", {}).get(name, 0))
+    return {"OPTIC": "IRON SIGHTS", "MUZZLE": "SUPPRESSOR" if "SUPPRESSOR" in mods else "NONE",
+            "MAGAZINE": "EXT MAG" if "EXT MAG" in mods else "STANDARD",
+            "GRIP": "VERTICAL GRIP" if "GRIP" in mods else "NONE"}
+
+
+def attachment_unlocked(save, name, slot, choice):
+    kills = save.get("wkills", {}).get(name, 0)
+    need = next(level for option, level, _ in ATTACHMENTS[slot] if option == choice)
+    legacy = {"EXT MAG": "EXT MAG", "VERTICAL GRIP": "GRIP", "SUPPRESSOR": "SUPPRESSOR"}.get(choice)
+    return weapon_level(kills) >= need or (legacy is not None and legacy in weapon_mods(kills))
+
+
+def apply_gunsmith(spec, choices):
+    """고른 부착물의 성능을 무기에 적용 (새 dict)"""
+    spec = dict(spec)
+    for slot, choice in choices.items():
+        if slot == "OPTIC" and (spec["scope"] or spec["projectile"]):
+            continue                                   # 저격총/발사기는 조준경을 안 바꿔요
+        effect = next((e for option, _, e in ATTACHMENTS[slot] if option == choice), {})
+        for key, value in effect.items():
+            if key == "suppressed":
+                if not spec["projectile"]:
+                    spec["suppressed"] = True
+            elif key == "ads_spread":
+                spec["ads_spread"] = value
+            elif key in ("mag", "reserve"):
+                if not spec["projectile"]:
+                    spec[key] = max(1, int(spec[key] * value))
+            elif key in ("hip", "recoil", "move"):
+                spec[key] = spec.get(key, 1.0) * value
+            else:                                      # ads, kick, reload
+                spec[key] = spec[key] * value
+    spec["attachments"] = choices
+    return spec
 
 
 WEAPON_BY_NAME = {spec["name"]: spec for spec in WEAPONS}
@@ -2194,6 +2249,7 @@ class Enemy:
         self.in_view = False
         self.combat_timer = 0.0   # 싸우는 중 (이때는 뒤도 봐요)
         self.alarm = 0.0          # 방금 알아챘을 때 머리 위 ! 표시 시간
+        self.stun = 0.0           # 섬광탄에 멍해진 남은 시간 (아무것도 못 해요)
         self.role = None          # 분대 역할: "suppress" 제압 사격 / "flank" 옆으로 돌아가기
         self.role_timer = 0.0
         self.flank_spot = None
@@ -2237,6 +2293,10 @@ class Enemy:
         self.flinch -= dt
         self.suppressed -= dt
         dist = self.pos.distance_to(player.pos)
+        if self.stun > 0:                         # 섬광탄: 눈이 부셔서 아무것도 못 해요
+            self.stun -= dt
+            self.sees = False
+            return 0
         if t.get("melee"):
             return self.update_zombie(dt, player, dist)
         self.los_timer -= dt
@@ -2246,7 +2306,8 @@ class Enemy:
             front = True
             if dist > 2.0 and self.combat_timer <= 0 and dist > 0:
                 front = (player.pos - self.pos).normalize().dot(self.facing) > VIEW_COS
-            self.in_view = dist < t["sight"] and front and can_see(self.pos, player.pos)
+            self.in_view = (dist < t["sight"] and front and can_see(self.pos, player.pos)
+                            and not (SMOKES and smoke_blocks(self.pos, player.pos)))
         self.combat_timer -= dt
         self.alarm -= dt
         if self.in_view:
@@ -2780,6 +2841,12 @@ class Projectile:
         self.bounced = False                  # 유탄: 어디든 닿았는지
         if kind == "rocket":
             self.timer = 4.0
+        elif kind == "flash":
+            self.timer = 1.4
+        elif kind == "smoke":
+            self.timer = 1.0
+        elif kind == "tknife":
+            self.timer = 2.0
         elif kind == "shell":
             self.timer = 3.0
         else:
@@ -2792,8 +2859,11 @@ class Projectile:
         steps = max(1, int(speed * dt / 0.1) + 1)     # 빠르면 잘게 나눠서 벽을 뚫지 않게
         sdt = dt / steps
         for _ in range(steps):
-            if self.kind == "grenade":
+            if self.kind in ("grenade", "flash", "smoke"):
                 self.bounce_step(sdt)
+            elif self.kind == "tknife":
+                if self.knife_step(sdt, enemies):
+                    return True
             elif self.kind == "shell":
                 self.bounce_step(sdt)
                 if self.bounced or any(e.pos.distance_to(self.pos) < 0.4 and self.z <= e.t["height"]
@@ -2824,6 +2894,21 @@ class Projectile:
             self.bounced = True
             self.vz = -self.vz * 0.35 if abs(self.vz) > 1 else 0.0
             self.vel *= 0.6
+
+    def knife_step(self, sdt, enemies):
+        """투척 칼: 살짝 떨어지며 날아가요. 적이나 벽에 닿으면 True"""
+        self.vz -= GRAVITY * 0.25 * sdt
+        self.pos += self.vel * sdt
+        self.z += self.vz * sdt
+        if self.z <= 0 or obstacle_height(self.pos.x, self.pos.y) > self.z:
+            self.pos -= self.vel.normalize() * 0.2
+            self.vel = pygame.Vector2()
+            return True
+        for e in enemies:
+            if e.pos.distance_to(self.pos) < 0.35 and self.z <= e.t["height"] + e.t.get("lift", 0):
+                self.hit = e
+                return True
+        return False
 
     def rocket_step(self, sdt, enemies):
         """로켓: 똑바로 날아가다 무언가에 닿으면 터져요. 터져야 하면 True"""
@@ -2925,6 +3010,10 @@ class Game:
         self.allies = []           # AI 동료 (설정 SQUADMATES)
         self.squad_order = 0       # SQUAD_ORDERS 중 몇 번째
         self.flashlight = False    # 손전등 (L)
+        self.tactical = (loadout or {}).get("tactical", "FLASHBANG")
+        self.tactical_left = 0
+        self.cooking = None        # 수류탄을 쥐고 있는 시간 (G 를 꾹 누르면 쿠킹, 떼면 던져요)
+        self.flashed = 0.0         # 내가 섬광탄에 눈부신 남은 시간
         self.body_timer = 0.0      # 시체 발견 검사 간격
         self.hold_pos = None
         self.world_tracers = []    # 동료와 적이 서로 쏜 총알 궤적: [시작 위치, 끝 위치, 남은 시간]
@@ -2951,6 +3040,15 @@ class Game:
             "I": make_pine_image(), "v": make_burnt_car_image(),
         }
         self.snowy_pine = make_pine_image(snowy=True)
+        self.knife_image = pygame.Surface((30, 8), pygame.SRCALPHA)        # 투척 칼
+        pygame.draw.polygon(self.knife_image, (210, 215, 225), [(8, 1), (30, 4), (8, 7)])
+        pygame.draw.rect(self.knife_image, (40, 40, 40), (0, 2, 9, 4))
+        self.smoke_images = []                                              # 연기 (진하기 4단계)
+        for alpha in (60, 110, 160, 205):
+            puff = pygame.Surface((64, 64), pygame.SRCALPHA)
+            for r, a in ((31, alpha // 2), (24, alpha * 3 // 4), (16, alpha)):
+                pygame.draw.circle(puff, (190, 192, 195, a), (32, 32), r)
+            self.smoke_images.append(puff)
         rng = random.Random(3)            # 눈송이: (x, y, 떨어지는 속도)
         self.snowflakes = [(rng.random(), rng.random(), rng.uniform(0.08, 0.2)) for _ in range(160)]
         self.car_images = [make_car_image(color) for color in CAR_COLORS]
@@ -3172,7 +3270,12 @@ class Game:
     def weapon_spec(self, name):
         """그 무기의 지금 성능 (처치 수에 따른 레벨과 부착물 적용)"""
         kills = self.save.get("wkills", {}).get(name, 0)
-        spec = apply_mods(WEAPON_BY_NAME[name], weapon_mods(kills), weapon_level(kills))
+        chosen = self.save.get("gunsmith", {}).get(name)
+        if chosen:                                    # 총기 개조 화면에서 고른 부착물
+            gold = [m for m in weapon_mods(kills) if m == "GOLD CAMO"]
+            spec = apply_gunsmith(apply_mods(WEAPON_BY_NAME[name], gold, weapon_level(kills)), chosen)
+        else:
+            spec = apply_mods(WEAPON_BY_NAME[name], weapon_mods(kills), weapon_level(kills))
         camo = self.save.get("camo", "NONE")
         if camo != "NONE" and camo in earned_camos(self.save):
             spec["camo"] = camo                         # 업적 화면에서 고른 위장 무늬
@@ -3755,6 +3858,9 @@ class Game:
     def reset_round_state(self):
         """라운드(웨이브)마다 새로 시작하는 것들"""
         self.low_warned = False        # 체력 낮음 무전을 이번 라운드에 했는지
+        self.tactical_left = TACTICAL_COUNT + (1 if self.perk == "SCAVENGER" else 0)
+        self.cooking = None
+        SMOKES.clear()
         self.spawn_allies()
         self.world_tracers = []
         self.contact_timer = 0.0       # 적이 나를 보고 있었던 뒤로 지난 시간 (CONTACT! 외침용)
@@ -4353,7 +4459,11 @@ class Game:
             elif event.key == pygame.K_z:      # 배율 바꾸기 3 -> 6 -> 12 -> 3
                 a.zoom_index = (a.zoom_index + 1) % len(SCOPE_ZOOMS)
             elif event.key == pygame.K_g:
-                self.throw_grenade()
+                if self.arsenal.grenades > 0 and self.knife_timer == 0 and self.cooking is None:
+                    self.cooking = 0.0                   # 핀 뽑기: 떼면 던져요 (오래 쥐면 짧게 터져요)
+                    self.sounds.play("mech", 0.8)
+            elif event.key == pygame.K_n:
+                self.throw_tactical()
             elif event.key == pygame.K_v:
                 self.knife_attack()
             elif event.key == pygame.K_c:
@@ -4392,6 +4502,11 @@ class Game:
         self.screen_blood = [[x, y, r, t - dt] for x, y, r, t in self.screen_blood if t - dt > 0]
         self.lightning = max(0.0, self.lightning - dt)
         self.navigator.clock += dt
+        self.flashed = max(0.0, self.flashed - dt)
+        if SMOKES:
+            for cloud in SMOKES:
+                cloud[1] -= dt
+            SMOKES[:] = [c for c in SMOKES if c[1] > 0]
         if self.doors:
             self.update_doors(dt)
         if self.allies and not self.game_over and self.round_clear_timer <= 0:
@@ -4485,6 +4600,7 @@ class Game:
         turn = self.player.angle - angle_before
         self.sway = max(-50 * UI, min(50 * UI, self.sway * 0.85 - turn * 900 * UI))
         arsenal.update(dt)
+        self.update_cooking(dt, keys)
         if arsenal.reload_left > 0 and not self.was_reloading:
             self.sounds.play("reload")
         self.was_reloading = arsenal.reload_left > 0
@@ -4889,7 +5005,9 @@ class Game:
         else:
             spread = spec["spread"] + (self.arsenal.recoil * 0.1 if spec["auto"] else 0)
             if self.aiming:
-                spread *= 0.45                     # 정조준하면 덜 퍼져요
+                spread *= spec.get("ads_spread", 0.45)   # 정조준하면 덜 퍼져요 (조준경이 좋을수록 더)
+            else:
+                spread *= spec.get("hip", 1.0)
         if self.player.moving:
             spread += 40 if spec["scope"] else (8 if self.aiming else 16)
         if self.player.z > 0:
@@ -5274,7 +5392,71 @@ class Game:
             name += "_m"            # 벽 너머: 먹먹한 소리
         self.sounds.play(name, volume * loud, pan)
 
-    def throw_grenade(self):
+    def update_cooking(self, dt, keys):
+        """수류탄 쿠킹: G 를 쥐고 있는 동안 시간이 가요. 떼면 던지고, 너무 오래 쥐면 손에서 터져요"""
+        if self.cooking is None:
+            return
+        self.cooking += dt
+        if self.cooking >= GRENADE_FUSE:
+            self.cooking = None
+            self.arsenal.grenades -= 1
+            self.popups.append(["COOKED TOO LONG!", RED, 1.5])
+            self.explode(pygame.Vector2(self.player.pos), *GRENADE_BLAST, owner="player")
+        elif not keys[pygame.K_g]:
+            cook, self.cooking = self.cooking, None
+            self.throw_grenade(cook)
+
+    def throw_tactical(self):
+        """전술 장비 던지기 (N): 섬광탄 / 연막탄 / 투척 칼"""
+        if self.tactical_left <= 0 or self.knife_timer > 0 or self.game_over:
+            return
+        self.tactical_left -= 1
+        self.sounds.play("throw")
+        p = self.player
+        forward = pygame.Vector2(math.cos(p.angle), math.sin(p.angle))
+        slope = self.aim_slope()
+        if self.tactical == "THROWING KNIFE":
+            vel = forward * 16
+            proj = Projectile("tknife", p.pos + forward * 0.3, self.eye - 0.1, vel, slope * 16 + 0.5)
+        else:
+            kind = "flash" if self.tactical == "FLASHBANG" else "smoke"
+            vel = forward * GRENADE_THROW * (1 - min(0.5, abs(slope) * 0.5))
+            proj = Projectile(kind, p.pos + forward * 0.3, self.eye - 0.1, vel, 3.0 + slope * GRENADE_THROW)
+        self.projectiles.append(proj)
+
+    def tactical_hit(self, proj):
+        """전술 장비가 터지거나 꽂혔어요"""
+        if proj.kind == "flash":
+            self.play_at("flash", proj.pos, 26, 1.0)
+            self.effects.append(Effect(proj.pos, self.explosion_frames, 0.15, 0.8))
+            stunned = 0
+            for enemy in self.enemies:
+                d = enemy.pos.distance_to(proj.pos)
+                if d < FLASH_RANGE and can_see(proj.pos, enemy.pos) and "melee" not in enemy.t:
+                    enemy.stun = 1.0 + 2.5 * (1 - d / FLASH_RANGE)
+                    enemy.aware, enemy.combat_timer = 1.0, 6.0
+                    stunned += 1
+            if stunned:
+                self.popups.append([f"FLASHED x{stunned}", WHITE, 1.2])
+            d = self.player.pos.distance_to(proj.pos)
+            off = proj.pos - self.player.pos
+            facing = d < 0.5 or abs(angle_diff(math.atan2(off.y, off.x), self.player.angle)) < math.pi / 2
+            if d < FLASH_RANGE and facing and can_see(proj.pos, self.player.pos):
+                self.flashed = max(self.flashed, 2.5 * (1 - d / FLASH_RANGE) + 0.3)   # 나도 눈부셔요
+        elif proj.kind == "smoke":
+            self.play_at("throw", proj.pos, 16, 0.6)
+            SMOKES.append([pygame.Vector2(proj.pos), SMOKE_TIME])
+        else:                                            # 투척 칼
+            target = getattr(proj, "hit", None)
+            if target in self.enemies:
+                unaware = not target.sees and target.aware < 1.0
+                self.damage_enemy(target, 9999 if unaware and target.kind != "BOSS" else 110,
+                                  "TAKEDOWN!" if unaware and target.kind != "BOSS" else "KNIFE!")
+            else:
+                self.play_at("casing", proj.pos, 10, 1.0)
+                self.tactical_left += 1                  # 빗나간 칼은 주워 와요
+
+    def throw_grenade(self, cook=0.0):
         if self.arsenal.grenades <= 0 or self.knife_timer > 0:
             return
         self.arsenal.grenades -= 1
@@ -5285,7 +5467,9 @@ class Game:
         # 바라보는 방향으로 던져요. 위를 볼수록 높이 날아가요
         vel = forward * GRENADE_THROW * (1 - min(0.5, abs(slope) * 0.5))
         vz = 3.0 + slope * GRENADE_THROW
-        self.projectiles.append(Projectile("grenade", p.pos + forward * 0.3, self.eye - 0.1, vel, vz))
+        grenade = Projectile("grenade", p.pos + forward * 0.3, self.eye - 0.1, vel, vz)
+        grenade.timer = max(0.15, GRENADE_FUSE - cook)       # 쿠킹한 만큼 빨리 터져요
+        self.projectiles.append(grenade)
 
     def enemy_throw(self, enemy, target):
         """적이 target 위치에 떨어지도록 수류탄을 던져요 (포물선 계산)"""
@@ -5318,6 +5502,9 @@ class Game:
         alive = []
         for proj in self.projectiles:
             if proj.update(dt, self.enemies):
+                if proj.kind in ("flash", "smoke", "tknife"):
+                    self.tactical_hit(proj)
+                    continue
                 if proj.kind == "rocket":
                     radius, damage = ROCKET_BLAST
                 elif proj.kind == "shell":
@@ -5473,6 +5660,9 @@ class Game:
         self.draw_tracers(screen)
         if self.light_timer > 0:
             screen.blit(self.muzzle_light, (0, 0))       # 총구 섬광
+        if self.flashed > 0:                              # 섬광탄에 눈부심: 하얀 화면
+            self.flash_overlay.set_alpha(int(255 * min(1.0, self.flashed / 1.2)))
+            screen.blit(self.flash_overlay, (0, 0))
         self.draw_hud(screen)
         if self.radio_msg and not self.game_over:
             self.draw_radio(screen)
@@ -5740,13 +5930,23 @@ class Game:
             if box:
                 items.append((box, self.pickup_images[item.kind], None))
         for proj in self.projectiles:
-            if proj.kind in ("grenade", "shell"):
+            if proj.kind in ("grenade", "shell", "flash", "smoke"):
                 img, h, w = self.grenade_image, 0.18, 0.15
+            elif proj.kind == "tknife":
+                img, h, w = self.knife_image, 0.08, 0.3
             else:
                 img, h, w = self.rocket_image, 0.2, 0.35
             box = self.project(proj.pos, h, w, lift=proj.z)
             if box:
                 items.append((box, img, None))
+        for center, life in SMOKES:                       # 연막: 회색 연기 덩어리 여러 개
+            fade = min(1.0, life / 1.5, (SMOKE_TIME - life + 0.3) / 1.0)
+            img = self.smoke_images[max(0, min(3, int(fade * 4) - 1))]
+            for k in range(6):
+                spot = center + pygame.Vector2(0.9 if k else 0, 0).rotate(k * 60 + 15)
+                box = self.project(spot, 1.7 * fade + 0.2, 1.9 * fade + 0.2)
+                if box:
+                    items.append((box, img, None))
         for pos, size in self.splats:
             box = self.project(pos, 0.08, size)
             if box:
@@ -5825,10 +6025,12 @@ class Game:
                                                         (box[0], bubble.bottom + 6 * UI)])
                     screen.blit(label, label.get_rect(center=bubble.center))
             if isinstance(enemy, Enemy) and box[4] < 25 and "melee" not in enemy.t and enemy.kind != "TARGET" and (
-                    (not enemy.sees and enemy.aware > 0.05) or enemy.alarm > 0):
+                    (not enemy.sees and enemy.aware > 0.05) or enemy.alarm > 0 or enemy.stun > 0):
                 col = int(box[0] // self.col_w)
                 if 0 <= col < self.num_rays and box[4] < self.zbuffer[col] + 0.3:
-                    if enemy.alarm > 0:                      # 들켰어요
+                    if enemy.stun > 0:                       # 섬광탄에 멍함
+                        mark, color = "*", WHITE
+                    elif enemy.alarm > 0:                    # 들켰어요
                         mark, color = "!", RED
                     else:                                     # 알아채는 중: 노란 ? 가 점점 진해져요
                         k = enemy.aware
@@ -6148,6 +6350,15 @@ class Game:
         rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, HEIGHT - 20 * UI)))
         image = font.render(f"GRENADE x{self.arsenal.grenades}", True, YELLOW)
         rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 4)))
+        if self.mode != "training":
+            image = font.render(f"{self.tactical} x{self.tactical_left} (N)", True, (150, 220, 255))
+            rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 2)))
+        if self.cooking is not None:                     # 쿠킹: 남은 시간 막대
+            left = max(0.0, GRENADE_FUSE - self.cooking)
+            bar = pygame.Rect(WIDTH / 2 - 60 * UI, HEIGHT * 0.62, 120 * UI, 8 * UI)
+            pygame.draw.rect(screen, (60, 30, 30), bar)
+            pygame.draw.rect(screen, RED if left < 0.6 else YELLOW, (bar.x, bar.y, bar.w * left / GRENADE_FUSE, bar.h))
+            self.center_text(screen, self.small_font, f"COOKING  {left:.1f}s", WHITE, bar.y - 10 * UI)
         if self.mode == "zombies":
             image = font.render(f"POINTS {self.points}", True, (255, 200, 60))
             rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 4)))
@@ -7109,6 +7320,104 @@ async def skills_screen(save):
         await asyncio.sleep(0)
 
 
+def current_weapon_spec(save, name, choices=None):
+    """저장 정보 기준으로 그 무기의 지금 성능 (choices 를 주면 그 부착물로)"""
+    kills = save.get("wkills", {}).get(name, 0)
+    chosen = choices or save.get("gunsmith", {}).get(name)
+    if chosen:
+        gold = [m for m in weapon_mods(kills) if m == "GOLD CAMO"]
+        return apply_gunsmith(apply_mods(WEAPON_BY_NAME[name], gold, weapon_level(kills)), chosen)
+    return apply_mods(WEAPON_BY_NAME[name], weapon_mods(kills), weapon_level(kills))
+
+
+async def gunsmith_screen(save, name):
+    """총기 개조: 칸(조준경·총구·탄창·손잡이)마다 부착물을 골라요. ↑↓ 칸, ←→ 부착물, Enter/ESC 저장하고 돌아가기"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    slots = list(ATTACHMENTS)
+    choices = dict(save.get("gunsmith", {}).get(name) or gunsmith_default(save, name))
+    base = current_weapon_spec(save, name)
+    row = 0
+    preview = make_viewmodel(name, False)[0]
+    scale = min(WIDTH * 0.36 / preview.get_width(), HEIGHT * 0.3 / preview.get_height())
+    preview = pygame.transform.smoothscale(preview, (int(preview.get_width() * scale), int(preview.get_height() * scale)))
+    level = weapon_level(save.get("wkills", {}).get(name, 0))
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_g):
+                save.setdefault("gunsmith", {})[name] = choices
+                write_save(save)
+                return None
+            if event.key in (pygame.K_UP, pygame.K_w):
+                row = (row - 1) % len(slots)
+            elif event.key in (pygame.K_DOWN, pygame.K_s):
+                row = (row + 1) % len(slots)
+            elif event.key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_a, pygame.K_d):
+                slot = slots[row]
+                names = [option for option, _, _ in ATTACHMENTS[slot]]
+                step = 1 if event.key in (pygame.K_RIGHT, pygame.K_d) else -1
+                k = names.index(choices[slot])
+                for _ in range(len(names)):                    # 잠긴 것은 건너뛰어요
+                    k = (k + step) % len(names)
+                    if attachment_unlocked(save, name, slot, names[k]):
+                        choices[slot] = names[k]
+                        break
+        spec = current_weapon_spec(save, name, choices)
+        screen.fill((14, 10, 30))
+        title = fonts["big"].render(f"GUNSMITH  -  {name}", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.05, HEIGHT * 0.08)))
+        screen.blit(fonts["small"].render(f"WEAPON LEVEL {level}  (level up by getting kills with this weapon)", True,
+                                          (255, 200, 60)), (WIDTH * 0.05, HEIGHT * 0.14))
+        for i, slot in enumerate(slots):
+            rect = pygame.Rect(WIDTH * 0.05, HEIGHT * (0.2 + i * 0.13), WIDTH * 0.5, HEIGHT * 0.115)
+            selected = i == row
+            pygame.draw.rect(screen, (60, 40, 90) if selected else (24, 18, 44), rect, border_radius=8)
+            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1,
+                             border_radius=8)
+            screen.blit(fonts["small"].render(slot, True, (200, 200, 220)), (rect.x + 12, rect.y + 6))
+            choice = choices[slot]
+            text = f"<  {choice}  >" if selected else choice
+            screen.blit(fonts["normal"].render(text, True, YELLOW if selected else WHITE), (rect.x + 12, rect.y + rect.h * 0.3))
+            info = ATTACHMENT_INFO[choice][0 if ko else 1]
+            if slot == "OPTIC" and (spec["scope"] or spec["projectile"]):
+                info = "이 무기는 조준경을 바꿀 수 없어요" if ko else "This weapon keeps its own sight"
+            screen.blit(fonts["help"].render(info, True, (200, 230, 255)), (rect.x + 12, rect.y + rect.h * 0.68))
+            # 오른쪽 끝: 이 칸의 부착물들 (잠긴 것은 필요한 레벨)
+            parts = []
+            for option, need, _ in ATTACHMENTS[slot]:
+                parts.append(option if attachment_unlocked(save, name, slot, option) else f"LV{need}")
+            label = fonts["tiny"].render("  ".join(parts), True, (150, 150, 175))
+            screen.blit(label, label.get_rect(topright=(rect.right - 10, rect.y + 8)))
+        box = pygame.Rect(WIDTH * 0.58, HEIGHT * 0.2, WIDTH * 0.37, HEIGHT * 0.32)
+        pygame.draw.rect(screen, (0, 0, 0), box)
+        screen.blit(preview, preview.get_rect(center=box.center))
+        stats = weapon_stats(spec) + [("ADS AIM", max(0.05, 1 - spec["spread"] * spec.get("ads_spread", 0.45) / 22))]
+        before = weapon_stats(base) + [("ADS AIM", max(0.05, 1 - base["spread"] * base.get("ads_spread", 0.45) / 22))]
+        for k, ((stat, value), (_, old)) in enumerate(zip(stats, before)):
+            y = HEIGHT * (0.56 + k * 0.055)
+            screen.blit(fonts["small"].render(stat, True, (200, 200, 220)), (box.x, y))
+            bar = pygame.Rect(box.x + WIDTH * 0.12, y + 4 * UI, WIDTH * 0.25, 10 * UI)
+            pygame.draw.rect(screen, (45, 40, 70), bar)
+            pygame.draw.rect(screen, (80, 240, 255), (bar.x, bar.y, bar.w * min(1.0, value), bar.h))
+            if abs(value - old) > 0.005:                     # 바뀐 만큼 초록(좋아짐) / 빨강(나빠짐)
+                color = (80, 255, 120) if value > old else (255, 90, 90)
+                x0, x1 = sorted((bar.w * min(1.0, old), bar.w * min(1.0, value)))
+                pygame.draw.rect(screen, color, (bar.x + x0, bar.y, max(2, x1 - x0), bar.h))
+        hint = ("↑↓ 칸 고르기   ←→ 부착물 바꾸기   Enter / ESC 저장하고 돌아가기" if ko
+                else "UP/DOWN slot   LEFT/RIGHT attachment   ENTER / ESC save and back")
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
 async def loadout_screen(save, choice):
     """로드아웃: 주무기 / 보조무기 / 퍼크를 골라요. ↑↓ 줄 고르기, ←→ 바꾸기, Enter 시작, ESC 뒤로.
     고른 로드아웃(dict)을 돌려줘요. ESC면 None, 창 닫기면 "closed"."""
@@ -7117,13 +7426,15 @@ async def loadout_screen(save, choice):
     ko = fonts["lang"] == "ko"
     clock = pygame.time.Clock()
     perk_names = [name for name, _, _ in PERKS]
+    tactical_names = [name for name, _, _ in TACTICALS]
     owned = unlocked_weapons(save)
-    options = [owned, owned, perk_names]
-    labels = ["START WEAPON", "SECOND WEAPON (Q)", "PERK"]
+    options = [owned, owned, perk_names, tactical_names]
+    labels = ["START WEAPON", "SECOND WEAPON (Q)", "PERK", "TACTICAL (N)"]
     saved = dict(DEFAULT_LOADOUT, **save.get("loadout", {}))
     picks = [options[0].index(saved["primary"]) if saved["primary"] in options[0] else 0,
              options[1].index(saved["secondary"]) if saved["secondary"] in options[1] else 0,
-             options[2].index(saved["perk"]) if saved["perk"] in options[2] else 0]
+             options[2].index(saved["perk"]) if saved["perk"] in options[2] else 0,
+             options[3].index(saved["tactical"]) if saved["tactical"] in options[3] else 0]
     row = 0
     previews = {}
     while True:
@@ -7136,9 +7447,9 @@ async def loadout_screen(save, choice):
             if event.key == pygame.K_ESCAPE:
                 return None
             if event.key in (pygame.K_UP, pygame.K_w):
-                row = (row - 1) % 3
+                row = (row - 1) % 4
             elif event.key in (pygame.K_DOWN, pygame.K_s):
-                row = (row + 1) % 3
+                row = (row + 1) % 4
             elif event.key in (pygame.K_LEFT, pygame.K_a):
                 picks[row] = (picks[row] - 1) % len(options[row])
             elif event.key in (pygame.K_RIGHT, pygame.K_d):
@@ -7146,9 +7457,13 @@ async def loadout_screen(save, choice):
             elif event.key == pygame.K_k:
                 if await skills_screen(save) == "closed":
                     return "closed"
+            elif event.key == pygame.K_g:                     # 총기 개조 (지금 고른 무기)
+                weapon = options[1][picks[1]] if row == 1 else options[0][picks[0]]
+                if await gunsmith_screen(save, weapon) == "closed":
+                    return "closed"
             elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
                 loadout = dict(primary=options[0][picks[0]], secondary=options[1][picks[1]],
-                               perk=options[2][picks[2]])
+                               perk=options[2][picks[2]], tactical=options[3][picks[3]])
                 save["loadout"] = loadout
                 write_save(save)
                 return loadout
@@ -7171,25 +7486,27 @@ async def loadout_screen(save, choice):
         screen.blit(label, label.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.16)))
 
         # 왼쪽: 세 줄 (시작 무기 / 두 번째 무기 / 퍼크)
-        card_w, card_h = WIDTH * 0.44, HEIGHT * 0.14
-        for i in range(3):
-            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.21 + i * 0.155), card_w, card_h)
+        card_w, card_h = WIDTH * 0.44, HEIGHT * 0.105
+        for i in range(4):
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.2 + i * 0.118), card_w, card_h)
             selected = i == row
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
             screen.blit(panel, rect)
             pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1)
-            screen.blit(fonts["small"].render(labels[i], True, (200, 200, 220)), (rect.x + 14, rect.y + 10))
+            screen.blit(fonts["small"].render(labels[i], True, (200, 200, 220)), (rect.x + 14, rect.y + 6))
             name = options[i][picks[i]]
             arrows = f"<  {name}  >" if selected else name
-            image = fonts["big"].render(arrows, True, YELLOW if selected else WHITE)
-            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.28))
+            image = fonts["normal"].render(arrows, True, YELLOW if selected else WHITE)
+            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.3))
             if i < 2:
                 desc = WEAPON_INFO[name][0 if ko else 1]
-            else:
+            elif i == 2:
                 desc = PERKS[picks[2]][1 if ko else 2]
+            else:
+                desc = TACTICALS[picks[3]][1 if ko else 2]
             image = fonts["help"].render(desc, True, (200, 230, 255))
-            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.7))
+            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.68))
         # 왼쪽 아래: 무기 인벤토리 (가진 무기는 레벨, 없는 무기는 얻는 조건)
         title = fonts["small"].render(f"INVENTORY  {len(owned)} / {len(WEAPONS)}   (in game: 1-9, 0, TAB)", True, WHITE)
         screen.blit(title, (WIDTH * 0.06, HEIGHT * 0.685))
@@ -7230,8 +7547,11 @@ async def loadout_screen(save, choice):
         if mods:
             screen.blit(fonts["tiny"].render(" + ".join(mods), True, (80, 240, 255)),
                         (box.x + 12, box.y + 10 + 50 * UI))
-        kills = save.get("wkills", {}).get(weapon, 0)
-        leveled = apply_mods(WEAPON_BY_NAME[weapon], weapon_mods(kills), weapon_level(kills))
+        leveled = current_weapon_spec(save, weapon)
+        if save.get("gunsmith", {}).get(weapon):
+            parts = [v for v in save["gunsmith"][weapon].values() if v not in ("NONE", "STANDARD", "IRON SIGHTS")]
+            screen.blit(fonts["tiny"].render("GUNSMITH: " + (" + ".join(parts) or "-"), True, (150, 220, 255)),
+                        (box.x + 12, box.y + 10 + 70 * UI))
         for k, (stat, value) in enumerate(weapon_stats(leveled)):
             y = HEIGHT * (0.69 + k * 0.045)
             screen.blit(fonts["small"].render(stat, True, (200, 200, 220)), (box.x, y))
@@ -7240,8 +7560,8 @@ async def loadout_screen(save, choice):
             bar.width = int(bar.width * value)
             pygame.draw.rect(screen, (80, 240, 255), bar)
 
-        hint = ("↑↓ 고르기     ←→ 바꾸기     Enter 시작     K 스킬     ESC 뒤로" if ko
-                else "UP/DOWN choose     LEFT/RIGHT change     ENTER start     K skills     ESC back")
+        hint = ("↑↓ 고르기     ←→ 바꾸기     Enter 시작     G 총기 개조     K 스킬     ESC 뒤로" if ko
+                else "UP/DOWN choose     LEFT/RIGHT change     ENTER start     G gunsmith     K skills     ESC back")
         image = fonts["help"].render(hint, True, YELLOW)
         screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
         pygame.display.flip()
