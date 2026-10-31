@@ -7887,6 +7887,12 @@ class Game:
         px, py, angle = p.pos.x, p.pos.y, p.angle
         textured = col_w <= MAX_TEXTURE_COL
         light = self.light_timer > 0
+        if getattr(self, "bar_key", None) != (col_w, HEIGHT):      # 그림자/불빛 막대 (크기가 바뀌면 다시)
+            self.bar_key = (col_w, HEIGHT)
+            self.shadow_bar = pygame.Surface((col_w, HEIGHT))
+            self.shadow_bar.fill((150, 150, 155))
+            self.light_bars = {}
+        shadow_bar, light_bars = self.shadow_bar, self.light_bars
         depth_floor = SETTINGS.get("gfx", 1) >= 1 and FLOOR_DEPTH
         for i, (offset, fix) in enumerate(self.ray_table):
             # i번째 세로 줄이 바라보는 방향. 화면에 평평하게 펼쳐지도록 tan으로 계산해요
@@ -7974,14 +7980,19 @@ class Game:
                     draw_rect(screen, fog(base, perp, fog_dist), (x, top, col_w, vis_b - top + 1))
                 if perp < 14:
                     # 벽 아래쪽 그림자 (땅과 닿는 곳이 어두워서 건물이 땅에 붙어 보여요)
+                    # (색을 칠한 세로 막대 그림을 잘라 붙여요: 특수 효과 fill 보다 blit 이 훨씬 빨라요)
                     shadow_top = max(top, bottom - 0.12 * size)
                     if shadow_top < min(HEIGHT, vis_b):
-                        fill((150, 150, 155), (x, shadow_top, col_w, min(HEIGHT, vis_b) - shadow_top + 1),
-                                    special_flags=pygame.BLEND_MULT)
+                        blit(shadow_bar, (x, shadow_top), (0, 0, col_w, min(HEIGHT, vis_b) - shadow_top + 1),
+                             special_flags=pygame.BLEND_MULT)
                     if light and perp < 5:      # 총구 불빛이 가까운 벽을 비춰요
-                        k = int(self.muzzle_glow * (1 - perp / 5))
-                        fill((k, int(k * 0.8), int(k * 0.5)), (x, max(0, top), col_w, min(HEIGHT, vis_b) - max(0, top)),
-                                    special_flags=pygame.BLEND_ADD)
+                        k = int(self.muzzle_glow * (1 - perp / 5)) // 16 * 16
+                        bar = light_bars.get(k)
+                        if bar is None:
+                            bar = light_bars[k] = pygame.Surface((col_w, HEIGHT))
+                            bar.fill((k, int(k * 0.8), int(k * 0.5)))
+                        blit(bar, (x, max(0, top)), (0, 0, col_w, min(HEIGHT, vis_b) - max(0, top)),
+                             special_flags=pygame.BLEND_ADD)
                 # 창문: 층마다 두 칸씩. 몇몇 창문은 불이 켜져 있어요
                 if pattern is True and (0.18 < wall_x < 0.42 or 0.58 < wall_x < 0.82):
                     dark_glass = fog((60, 80, 120) if vertical else (90, 110, 150), perp, fog_dist)
