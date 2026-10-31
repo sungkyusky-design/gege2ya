@@ -240,6 +240,21 @@ class GameTest(unittest.TestCase):
         self.assertIsNone(shooter.import_code(broken))
         self.assertIsNone(shooter.import_code("nothing here"))
 
+    def test_zombie_buyables(self):
+        game = shooter.Game({}, 1, mode="zombies", loadout=LOADOUT)
+        game.allies = []
+        game.points = 5000
+        barricade = next(b for b in game.buyables if b["kind"] == "barricade")
+        cx, cy = barricade["cell"]
+        self.assertTrue(shooter.is_blocked(cx + 0.5, cy + 0.5))
+        game.buy_item(barricade)
+        self.assertFalse(shooter.is_blocked(cx + 0.5, cy + 0.5))
+        self.assertEqual(game.points, 5000 - shooter.BARRICADE_COST)
+        wall = next(b for b in game.buyables if b["kind"] == "weapon")
+        game.buy_item(wall)
+        self.assertEqual(game.arsenal.current.spec["name"], wall["weapon"])
+        self.assertEqual(game.price_of(wall), wall["cost"] // 2)           # 다시 사면 탄약만 반값
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

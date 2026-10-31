@@ -311,7 +311,7 @@ SLIDE_SPEED = 2.3                 # 슬라이딩 처음 속도 (점점 느려져
 
 # 킬스트릭: 죽지 않고 연속으로 쓰러뜨린 수 -> 받는 보상 (X 키로 사용)
 STREAKS = [(3, "RADAR"), (5, "AIRSTRIKE"), (7, "SENTRY")]
-STREAK_KILLS = ("AIRSTRIKE!", "SENTRY", "ALLY")   # 킬스트릭으로 쓰러뜨린 건 연속 처치 수에 안 세요
+STREAK_KILLS = ("AIRSTRIKE!", "SENTRY", "ALLY", "TRAP")   # 킬스트릭으로 쓰러뜨린 건 연속 처치 수에 안 세요
 RADAR_TIME = 20                   # 레이더: 미니맵에 적이 다 보이는 시간(초)
 AIRSTRIKE_BLAST = (2.6, 220)
 SENTRY_TIME = 30                  # 자동 포탑이 버티는 시간(초)
@@ -474,6 +474,12 @@ PRIMARIES = ["RIFLE", "HEAVY AR", "BURST", "SMG", "SHOTGUN", "AUTO SHOTGUN", "LM
 SECONDARIES = ["PISTOL", "REVOLVER", "MACHINE PISTOL", "ROCKET", "LAUNCHER"]
 DEFAULT_LOADOUT = dict(primary="RIFLE", secondary="PISTOL", perk="HEAVY ROUNDS", tactical="FLASHBANG")
 TACTICAL_COUNT = 2                # 라운드마다 전술 장비 개수
+# 좀비 모드 2탄: B 로 사는 것들 (가까이 가면 화면 아래에 이름과 가격)
+BARRICADE_COST = 750
+WALL_WEAPONS = [("SMG", 1000), ("SHOTGUN", 1250), ("AUTO SHOTGUN", 1750)]   # 맵의 'y' 를 읽는 순서대로
+BOX_COST = 950
+TRAP_COST, TRAP_TIME, TRAP_DPS = 1000, 15.0, 400
+TITAN_POINTS = 1000
 FLASH_RANGE = 7.0                 # 섬광탄이 닿는 거리
 SMOKE_TIME, SMOKE_RADIUS = 10.0, 1.7
 SMOKES = []                       # 지금 피어 있는 연막: [위치, 남은 시간] (적의 시야 검사에서 써요)
@@ -1207,7 +1213,7 @@ load_map(0)       # 처음엔 첫 번째 맵
 TEXTURE_KINDS = {"R": "brick", "M": "stucco", "A": "stucco", "B": "stucco", "C": "stucco", "D": "stucco",
                  "N": "panel", "G": "panel", "S": "panel", "W": "metal", "r": "metal", "u": "metal", "o": "metal",
                  "Y": "metal", "U": "metal", "H": "metal", "K": "planks", "J": "planks", "Q": "metal",
-                 "F": "stone", "O": "concrete", "V": "stone", "Z": "sandbag", "i": "stucco", "d": "planks"}
+                 "F": "stone", "O": "concrete", "V": "stone", "Z": "sandbag", "i": "stucco", "d": "planks", "q": "planks", "y": "planks"}
 TEX = 32                          # 질감 한 장의 크기 (px)
 FOG_LEVELS = 8                    # 안개 단계 (멀수록 안개 색에 가까운 그림을 미리 만들어 둬요)
 
@@ -3166,6 +3172,8 @@ class Game:
         self.decal_count = 0
         self.broken_windows = set()
         self.cover_hp = {}         # 부서지는 엄폐물 남은 체력
+        self.buyables = self.find_buyables()
+        self.trap_timer = 0.0
         self.doors = {cell: 0.0 for cell in ((x, y) for y, row in enumerate(GAME_MAP) for x, ch in enumerate(row)
                                               if ch in DOORS)}   # 문 칸 -> 닫히기까지 남은 시간 (0이면 닫힘)
         self.map_index = index
@@ -3796,11 +3804,14 @@ class Game:
         self.spawn_timer = 2.5
         self.flow_timer = 0.0
         self.brute_due = self.round % 5 == 0       # 5웨이브마다 거대 좀비
+        self.titan_due = self.round % 10 == 0      # 10웨이브마다 보스 좀비 타이탄
         self.pickups = [Pickup(x, y, kind) for letter, kind in PICKUP_TILES.items()
                         for x, y in find_cells(letter)]
         self.banner = f"WAVE {self.round}"
         self.sub_banners = [(f"{self.zombies_left} ZOMBIES", RED)]
-        if self.brute_due:
+        if self.titan_due:
+            self.sub_banners.append(("BOSS WAVE: TITAN!", RED))
+        elif self.brute_due:
             self.sub_banners.append(("BRUTE INCOMING!", (255, 120, 40)))
 
     def start_battle(self):
@@ -4176,6 +4187,108 @@ class Game:
             self.popups.append([f"{ally.name} IS DOWN!", (90, 170, 255), 2.0])
             self.sounds.play("radio")
 
+    def find_buyables(self):
+        """좀비 맵에서 B 로 살 수 있는 것: 바리케이드(q), 벽 무기(y), 미스터리 상자(m), 전기 함정(z)"""
+        items = []
+        walls = 0
+        for row, line in enumerate(GAME_MAP):
+            for col, ch in enumerate(line):
+                spot = pygame.Vector2(col + 0.5, row + 0.5)
+                if ch == "q":
+                    items.append(dict(kind="barricade", cell=(col, row), pos=spot, cost=BARRICADE_COST,
+                                      name="OPEN BARRICADE"))
+                elif ch == "y":
+                    name, cost = WALL_WEAPONS[walls % len(WALL_WEAPONS)]
+                    walls += 1
+                    items.append(dict(kind="weapon", cell=(col, row), pos=spot, cost=cost, weapon=name,
+                                      name=f"BUY {name}"))
+                elif ch == "m":
+                    items.append(dict(kind="box", cell=(col, row), pos=spot, cost=BOX_COST, name="MYSTERY BOX"))
+        traps = [pygame.Vector2(c + 0.5, r + 0.5) for r, line in enumerate(GAME_MAP) for c, ch in enumerate(line) if ch == "z"]
+        if traps:
+            center = sum(traps, pygame.Vector2()) / len(traps)
+            items.append(dict(kind="trap", pos=center, cells=traps, cost=TRAP_COST, name="ELECTRIC TRAP"))
+        return items
+
+    def nearby_buyable(self):
+        """B 로 살 수 있는 가장 가까운 것 (1.4칸 안, 함정은 칸 어디든 가까우면)"""
+        if self.mode != "zombies":
+            return None
+        p = self.player.pos
+        best, best_d = None, 1.4
+        for item in self.buyables:
+            spots = item.get("cells", [item["pos"]])
+            d = min(p.distance_to(q) for q in spots)
+            if d < best_d:
+                best, best_d = item, d
+        return best
+
+    def price_of(self, item):
+        if item["kind"] == "weapon" and any(w.spec["name"] == item["weapon"] for w in self.arsenal.weapons):
+            return item["cost"] // 2                         # 이미 있으면 탄약만 (반값)
+        return item["cost"]
+
+    def buy_item(self, item):
+        cost = self.price_of(item)
+        if item["kind"] == "trap" and self.trap_timer > 0:
+            return
+        if self.points < cost:
+            self.popups.append([f"NEED {cost} POINTS", RED, 1.2])
+            return
+        self.points -= cost
+        self.sounds.play("cash")
+        if item["kind"] == "barricade":
+            col, row = item["cell"]
+            line = GAME_MAP[row]
+            GAME_MAP[row] = line[:col] + FLOOR_GRID[row][col] + line[col + 1:]
+            WALL_GRID[row][col] = None
+            self.navigator.clear()
+            self.buyables.remove(item)
+            self.minimap = self.make_minimap()
+            self.play_at("smash", item["pos"], 16)
+            self.popups.append(["BARRICADE OPENED", (255, 200, 60), 1.5])
+        elif item["kind"] == "weapon":
+            self.give_weapon(item["weapon"])
+        elif item["kind"] == "box":
+            owned = [w.spec["name"] for w in self.arsenal.weapons]
+            pool = [w["name"] for w in WEAPONS if w["name"] != self.arsenal.current.spec["name"]]
+            name = random.choice([n for n in pool if n not in owned] or pool)
+            self.give_weapon(name)
+            self.sounds.play("streak")
+            self.popups.append([f"MYSTERY BOX: {name}!", (200, 120, 255), 2.0])
+        else:
+            self.trap_timer = TRAP_TIME
+            self.popups.append(["ELECTRIC TRAP ON!", (120, 200, 255), 1.5])
+
+    def give_weapon(self, name):
+        """무기를 받아요: 있으면 탄약을 가득, 없으면 새로 들고 바로 꺼내요"""
+        a = self.arsenal
+        for k, w in enumerate(a.weapons):
+            if w.spec["name"] == name:
+                w.mag = w.spec["mag"]
+                w.reserve = int(w.spec["reserve"] * 2 * a.ammo_mult)
+                a.switch(k)
+                self.popups.append([f"{name} AMMO FULL", (80, 240, 255), 1.5])
+                return
+        a.weapons.append(Weapon(self.weapon_spec(name), a.ammo_mult))
+        a.switch(len(a.weapons) - 1)
+        self.popups.append([f"GOT {name}!", (255, 200, 60), 1.5])
+
+    def update_trap(self, dt):
+        """켜진 전기 함정 위의 좀비는 큰 피해 (불꽃이 튀어요)"""
+        self.trap_timer -= dt
+        trap = next((b for b in self.buyables if b["kind"] == "trap"), None)
+        if not trap:
+            return
+        for enemy in list(self.enemies):
+            if any(enemy.pos.distance_to(c) < 0.6 for c in trap["cells"]):
+                self.damage_enemy(enemy, TRAP_DPS * dt, "TRAP")
+        if random.random() < 0.5:                            # 지직: 함정 위 불꽃
+            box = self.project(random.choice(trap["cells"]), 0.1, 0.3)
+            if box:
+                self.particles.append([box[0], box[2], random.uniform(-80, 80) * UI, random.uniform(-160, -60) * UI,
+                                       0.2, max(2.0, 3 * UI), (150, 210, 255), False])
+
     def update_doors(self, dt):
         """문: 나나 적이 가까이 오면 열리고, 4초 동안 아무도 없으면 닫혀요 (그 칸에 아무도 없을 때만)"""
         people = [self.player.pos] + [e.pos for e in self.enemies] + [a.pos for a in self.allies if not a.down]
@@ -4281,12 +4394,18 @@ class Game:
     def spawn_zombie(self):
         """내가 안 보는 먼 곳에서 좀비가 나와요"""
         p = self.player.pos
+        flow = Enemy.flow
         spots = [pt for pt in self.spawn_points
-                 if p.distance_to(pt) > 6 and not can_see(p, pygame.Vector2(pt))]
+                 if p.distance_to(pt) > 6 and not can_see(p, pygame.Vector2(pt))
+                 and (flow is None or flow[int(pt[1])][int(pt[0])] is not None)]     # 바리케이드 안쪽은 빼요
         if not spots:
             spots = sorted(self.spawn_points, key=lambda pt: -p.distance_to(pt))[:3]
         x, y = random.choice(spots)
-        if self.brute_due:
+        if getattr(self, "titan_due", False):
+            kind, self.titan_due = "TITAN", False
+            self.popups.append(["TITAN HAS ARRIVED!", RED, 2.5])
+            self.sounds.play("streak")
+        elif self.brute_due:
             kind, self.brute_due = "BRUTE", False
         elif self.round >= 6 and random.random() < 0.05:
             kind = "BRUTE"
@@ -4512,7 +4631,11 @@ class Game:
             elif event.key == pygame.K_x:
                 self.use_streak()
             elif event.key == pygame.K_b and self.mode == "zombies":
-                self.buy("ammo")
+                item = self.nearby_buyable()
+                if item:
+                    self.buy_item(item)
+                else:
+                    self.buy("ammo")
             elif event.key == pygame.K_u and self.mode == "zombies":
                 self.buy("upgrade")
 
@@ -4550,6 +4673,8 @@ class Game:
             SMOKES[:] = [c for c in SMOKES if c[1] > 0]
         if self.doors:
             self.update_doors(dt)
+        if self.mode == "zombies" and self.trap_timer > 0:
+            self.update_trap(dt)
         if self.allies and not self.game_over and self.round_clear_timer <= 0:
             self.update_allies(dt)
         if self.theme.get("rain"):                 # 폭풍우: 가끔 번개가 번쩍, 조금 뒤 천둥
@@ -5080,7 +5205,8 @@ class Game:
         enemy.shoot_timer = max(enemy.shoot_timer, 0.2)
         away = enemy.pos - self.player.pos
         away = away.normalize() if away.length() > 0 else pygame.Vector2(1, 0)
-        move_with_collision(enemy.pos, away * min(0.35, 0.05 + amount / 500))   # 셀수록 크게 밀려요
+        if how != "TRAP":
+            move_with_collision(enemy.pos, away * min(0.35, 0.05 + amount / 500))   # 셀수록 크게 밀려요
         self.hitmarker = 0.18
         self.hitmarker_kill = enemy.hp <= 0
         self.hit_head = how == "HEADSHOT!"
@@ -5155,7 +5281,7 @@ class Game:
                     self.refresh_weapon(name)
         if self.mode == "zombies":
             key = {"HEADSHOT!": "headshot", "KNIFE!": "knife"}.get(how, "kill")
-            self.points += ZOMBIE_POINTS[key]
+            self.points += ZOMBIE_POINTS[key] + (TITAN_POINTS if enemy.kind == "TITAN" else 0)
         self.check_unlocks()
         xp = XP["kill"]
         if how == "HEADSHOT!":
@@ -5830,6 +5956,9 @@ class Game:
                     # 바닥은 벽보다 안개를 약하게 (바다가 회색으로 안 보이게)
                     color = fog(FLOOR_COLORS[kind], (min(d1, fog_dist) + d0) * 0.3, fog_dist)
                     draw_rect(screen, color, (x, y_far, col_w, min(HEIGHT, y_near) - y_far + 1))
+                if kind == "z" and self.trap_timer > 0 and y_near > y_far:      # 켜진 전기 함정: 파랗게 번쩍
+                    glow = 140 + int(100 * abs(math.sin(self.time * 25)))
+                    draw_rect(screen, (60, glow // 2, glow), (x, y_far, col_w, min(HEIGHT, y_near) - y_far + 1))
                 if kind in INDOOR_FLOORS and d1 != math.inf:
                     # 천장: 바닥을 위아래로 뒤집은 모양 (실내 바닥 위에만)
                     c_near = 0.0 if d0 < 0.05 else horizon + (eye - CEILING) * proj / (d0 * fix)
@@ -5872,7 +6001,7 @@ class Game:
                 if top > HEIGHT or vis_b < 0:
                     continue
                 textures = None
-                if textured and perp < TEXTURE_DISTANCE:     # 먼 벽은 안개에 묻혀서 단색으로
+                if textured and perp < TEXTURE_DISTANCE and pattern != "box":     # 먼 벽은 안개에 묻혀서 단색으로
                     textures = wall_textures.get(game_map[cy][cx])
                 if textures:
                     # 질감: 그림에서 세로 한 줄을 잘라 화면 높이만큼 늘려 붙여요 (보이는 부분만)
@@ -5890,6 +6019,8 @@ class Game:
                     base = shade(color, 0.82 if vertical else 1.0)
                     if wall_x < 0.03 or wall_x > 0.97:      # 건물 모서리 선
                         base = shade(base, 0.6)
+                    elif pattern == "box" and (wall_x < 0.08 or wall_x > 0.92 or 0.45 < wall_x < 0.55):
+                        base = (230, 190, 70)                               # 미스터리 상자: 금색 테두리
                     elif pattern == "door" and 0.08 < wall_x < 0.14:      # 문 손잡이 쪽 어두운 줄
                         base = shade(base, 0.7)
                     elif pattern == "ribs" and (wall_x * 6) % 1 < 0.2:   # 컨테이너/창고의 세로 골
@@ -5919,6 +6050,11 @@ class Game:
                                 continue
                             lit = (cx * 7 + cy * 13 + k * 5 + half * 3 + vertical) % LIT == 0
                             draw_rect(screen, lit_glass if lit else dark_glass, (x, y0, col_w, y1 - y0))
+                if pattern == "weapon" and 0.2 < wall_x < 0.8:          # 벽 무기: 분필로 그린 총 모양
+                    y0 = bottom - (0.78 if wall_x < 0.35 else 0.85) * size
+                    y1 = bottom - 0.68 * size
+                    if y1 < vis_b:
+                        draw_rect(screen, fog((235, 225, 190), perp, fog_dist), (x, y0, col_w, max(1.0, y1 - y0)))
                 # 총알 자국과 폭발 그을음
                 marks = decals.get((cx, cy, vertical)) if decals else None
                 if marks:
@@ -6402,6 +6538,15 @@ class Game:
             pygame.draw.rect(screen, (60, 30, 30), bar)
             pygame.draw.rect(screen, RED if left < 0.6 else YELLOW, (bar.x, bar.y, bar.w * left / GRENADE_FUSE, bar.h))
             self.center_text(screen, self.small_font, f"COOKING  {left:.1f}s", WHITE, bar.y - 10 * UI)
+        item = self.nearby_buyable()
+        if item and not self.game_over:
+            text = f"B: {item['name']}  ({self.price_of(item)} POINTS)"
+            if item["kind"] == "weapon" and self.price_of(item) < item["cost"]:
+                text = f"B: {item['weapon']} AMMO  ({self.price_of(item)} POINTS)"
+            if item["kind"] == "trap" and self.trap_timer > 0:
+                text = f"TRAP ACTIVE  {self.trap_timer:.0f}s"
+            color = (255, 220, 90) if self.points >= self.price_of(item) else (200, 120, 120)
+            self.center_text(screen, font, text, color, HEIGHT * 0.66)
         if self.mode == "zombies":
             image = font.render(f"POINTS {self.points}", True, (255, 200, 60))
             rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 4)))
