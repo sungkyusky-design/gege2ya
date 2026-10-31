@@ -247,6 +247,7 @@ ACHIEVEMENTS = [
     ("DEADEYE", "헤드샷 300번", "300 headshots", lambda s, l: l.get("heads", 0) >= 300),
     ("CLOSE QUARTERS", "칼로 10명 처치", "10 knife kills", lambda s, l: l.get("knife", 0) >= 10),
     ("DEMOLITION", "폭발로 25명 처치", "25 explosive kills", lambda s, l: l.get("explosive", 0) >= 25),
+    ("CONTRACTOR", "라운드 계약 10개 완료", "Complete 10 round contracts", lambda s, l: l.get("contracts", 0) >= 10),
     ("ON FIRE", "한 판에서 연속 10명 처치", "10 kill streak", lambda s, l: l.get("streak", 0) >= 10),
     ("VETERAN", "라운드/웨이브 50번 깨기", "Clear 50 rounds or waves", lambda s, l: l.get("rounds", 0) >= 50),
     ("SET ONE", "캠페인 21라운드 도착", "Reach campaign round 21", lambda s, l: s.get("best", 0) >= 21),
@@ -2340,7 +2341,7 @@ DIRECTOR_MAX_ASSIST = 0.25
 WHEEL_KEYS = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_1, pygame.K_2, pygame.K_3,
               pygame.K_4, pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_8, pygame.K_9, pygame.K_0)
 # 이 말로 시작하는 알림은 왼쪽 카드로 (나머지는 조준점 아래 짧은 글자)
-TOAST_WORDS = ("NEW ", "RANK UP", "CHECKPOINT", "ACHIEVEMENT", "GOT ", "MYSTERY BOX", "TRAINING COMPLETE",
+TOAST_WORDS = ("NEW ", "CONTRACT", "SECOND WIND", "SUPPLY", "RANK UP", "CHECKPOINT", "ACHIEVEMENT", "GOT ", "MYSTERY BOX", "TRAINING COMPLETE",
                "BOSS", "TITAN", "BARRICADE", "ELECTRIC TRAP", "MAX AMMO", "CHOPPER", "RADAR", "AIRSTRIKE", "SENTRY",
                "SOUND ", "FLASHLIGHT", "MOUNTED", "DISMOUNTED")
 STRIP_SLOTS = 5            # 아래 무기 칸에 한 번에 보여줄 무기 수
@@ -3269,6 +3270,21 @@ BOSS_STYLES = {1: ("barrage", "WEAK POINT: HEAD  -  DODGE THE GRENADE FANS"),
 BOSS_ARMOR = 0.35                 # 앞에서 쏘면 받는 피해 비율 (armored)
 BOSS_SNIPE = (32, 1.3)            # 저격 보스: (피해, 레이저 조준 시간)
 BOSS_STRIKE = (2.2, 40, 2.0)      # 공습 표시: (반경, 피해, 터지기까지 초)
+
+
+# ----- 라운드 미니 계약 -----
+# 라운드마다 선택 목표 2개. 깨면 보너스 경험치 (+ 누적 기록, 10개면 업적 CONTRACTOR)
+CONTRACTS = {  # 키: (이름, 한국어, 영어, 목표 수, 좀비 모드에서도?)
+    "clean": ("CLEAN SWEEP", "한 번도 안 맞고 클리어", "Clear without taking damage", 1, False),
+    "blade": ("BLADE WORK", "칼로 2명", "2 knife kills", 2, True),
+    "heads": ("HEADHUNTER", "헤드샷으로 4명", "4 headshot kills", 4, True),
+    "boom": ("DEMOLITION", "폭발로 2명", "2 explosive kills", 2, True),
+    "close": ("CLOSE QUARTERS", "4m 안에서 3명", "3 kills within 4m", 3, True),
+    "long": ("LONG SHOT", "20m 넘게 떨어진 적 1명", "1 kill from 20m+", 1, False),
+    "fast": ("BLITZ", "60초 안에 클리어", "Clear within 60s", 1, False),
+    "ghost": ("GHOST", "몰래 처치 2명", "2 takedowns", 2, False),
+}
+CONTRACT_XP = 300
 
 
 # ----- DEEP RUN (로그라이트) -----
@@ -4611,6 +4627,8 @@ class Game:
 
     def reset_round_state(self):
         """라운드(웨이브)마다 새로 시작하는 것들"""
+        self.contracts = self.roll_contracts()
+        self.round_time = 0.0
         self.boss_marks, self.boss_laser, self.armor_hint = [], None, False
         self.director.new_round()
         self.low_warned = False        # 체력 낮음 무전을 이번 라운드에 했는지
@@ -5252,6 +5270,61 @@ class Game:
             return "alert"
         return "calm"
 
+    def roll_contracts(self):
+        """이번 라운드 계약 2개 (캠페인·DEEP RUN·좀비, 도전/연습/미션은 없음)"""
+        if self.mode not in ("campaign", "zombies") or self.challenge or self.practice:
+            return []
+        keys = [k for k, c in CONTRACTS.items() if self.mode != "zombies" or c[4]]
+        return [dict(key=k, count=0, done=False, failed=False) for k in random.sample(keys, 2)]
+
+    def contract_progress(self, key, amount=1):
+        for c in getattr(self, "contracts", []):
+            if c["key"] == key and not c["done"] and not c["failed"]:
+                c["count"] += amount
+                if c["count"] >= CONTRACTS[key][3]:
+                    self.complete_contract(c)
+
+    def complete_contract(self, c):
+        c["done"] = True
+        name = CONTRACTS[c["key"]][0]
+        self.add_xp(CONTRACT_XP)
+        self.popups.append([f"CONTRACT COMPLETE: {name}  +{CONTRACT_XP}", (255, 200, 60), 2.5])
+        self.sounds.play("cash", 0.7)
+        if not self.practice:
+            life = self.save.setdefault("lifetime", {})
+            life["contracts"] = life.get("contracts", 0) + 1
+
+    def contracts_on_clear(self):
+        """라운드를 깨는 순간 판정하는 계약 (안 맞기, 빨리 깨기)"""
+        for c in getattr(self, "contracts", []):
+            if c["done"] or c["failed"]:
+                continue
+            if c["key"] == "clean" or (c["key"] == "fast" and self.round_time <= 60):
+                self.complete_contract(c)
+            elif c["key"] in ("clean", "fast"):
+                c["failed"] = True
+
+    def draw_contracts(self, screen):
+        """왼쪽: 이번 라운드 계약 (진행 / 완료 초록 / 실패 빨강)"""
+        if not getattr(self, "contracts", None):
+            return
+        tiny = self.fonts["tiny"]
+        y = HEIGHT * 0.58
+        screen.blit(tiny.render("CONTRACTS", True, UI_DIM), (16, y))
+        for c in self.contracts:
+            y += tiny.get_linesize() + 2 * UI
+            name, _, en, goal, _ = CONTRACTS[c["key"]]
+            if c["done"]:
+                text, color = f"[OK] {name}", GREEN
+            elif c["failed"]:
+                text, color = f"[X] {name}", RED
+            else:
+                state = f"{c['count']}/{goal}" if goal > 1 else ""
+                if c["key"] == "fast":
+                    state = f"{max(0, 60 - int(self.round_time))}s"
+                text, color = f"{name}  {state}  - {en}", WHITE
+            screen.blit(tiny.render(fit_text(tiny, text, WIDTH * 0.3), True, color), (16, y))
+
     def offer_boons(self):
         """DEEP RUN: 강화 3개를 보여줘요 (SECOND WIND 는 하나만)"""
         pool = [b[0] for b in unlocked_boons(self.save) if not (b[0] == "wind" and self.boons.get("wind"))]
@@ -5844,6 +5917,8 @@ class Game:
                 self.echoes.append([random.uniform(0.4, 1.5), "thunder", random.uniform(0.6, 1.0)])
         self.suppress = max(0.0, self.suppress - dt * 0.8)
         self.impact_sound_cd -= dt
+        if self.round_clear_timer <= 0:
+            self.round_time = getattr(self, "round_time", 0.0) + dt
         blasts, self.boon_blasts = self.boon_blasts, []
         for pos, radius, damage in blasts:
             self.explode(pos, radius, damage)
@@ -6394,6 +6469,10 @@ class Game:
         if source is not None:
             self.last_source = pygame.Vector2(source)
         self.director.on_damage(damage)
+        if damage > 0:
+            for c in getattr(self, "contracts", []):
+                if c["key"] == "clean" and not c["done"]:
+                    c["failed"] = True
         self.player.hp -= int(damage)
         if 0 < self.player.hp < 35 and not self.low_warned:
             self.low_warned = True
@@ -6488,6 +6567,20 @@ class Game:
 
     def on_kill(self, enemy, how):
         """처치 보상: 경험치, 연속 처치 메달, 킬스트릭"""
+        if getattr(self, "contracts", None):
+            dist = enemy.pos.distance_to(self.player.pos)
+            if how in ("KNIFE!", "TAKEDOWN!"):
+                self.contract_progress("blade")
+            if how == "TAKEDOWN!":
+                self.contract_progress("ghost")
+            if how == "HEADSHOT!":
+                self.contract_progress("heads")
+            if how == "BOOM!":
+                self.contract_progress("boom")
+            if dist < 4:
+                self.contract_progress("close")
+            if dist >= 20 and how not in STREAK_KILLS:
+                self.contract_progress("long")
         if self.boons:
             self.boon_on_kill(enemy, how)
         self.director.on_kill(enemy.pos.distance_to(self.player.pos))
@@ -6618,6 +6711,7 @@ class Game:
     def count_round(self):
         """라운드/웨이브/미션 단계를 깰 때마다 누적 기록"""
         self.director.on_clear()
+        self.contracts_on_clear()
         self.sounds.play_sting()
         life = self.save.setdefault("lifetime", {})
         life["rounds"] = life.get("rounds", 0) + 1
@@ -8095,6 +8189,7 @@ class Game:
                 draw_key_text(screen, self.fonts["tiny"], parts, (WIDTH / 2, box.y + 5 * UI + (i + 0.5) * line_h),
                               alpha=int(255 * fade))
         self.draw_objective(screen)
+        self.draw_contracts(screen)
         if self.round_clear_timer > 0 and not self.game_over:
             self.draw_summary(screen, HEIGHT * 0.5)
         if self.banner_timer > 0:
@@ -9204,7 +9299,8 @@ async def achievements_screen(save):
         half = (len(ACHIEVEMENTS) + 1) // 2
         for i, (name, desc_ko, desc_en, test) in enumerate(ACHIEVEMENTS):
             col, line = divmod(i, half)
-            rect = pygame.Rect(WIDTH * (0.04 + col * 0.47), HEIGHT * (0.15 + line * 0.069), WIDTH * 0.45, HEIGHT * 0.062)
+            step = min(0.069, 0.55 / half)                     # 업적이 늘어도 아래 기록 줄 위까지
+            rect = pygame.Rect(WIDTH * (0.04 + col * 0.47), HEIGHT * (0.15 + line * step), WIDTH * 0.45, HEIGHT * step * 0.9)
             got = name in done
             pygame.draw.rect(screen, (50, 44, 20) if got else (24, 18, 44), rect, border_radius=6)
             pygame.draw.rect(screen, (255, 215, 80) if got else (70, 60, 100), rect, 2 if got else 1, border_radius=6)

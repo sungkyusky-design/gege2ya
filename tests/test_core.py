@@ -530,6 +530,24 @@ class GameTest(unittest.TestCase):
         self.assertTrue(len(shooter.unlocked_boons({})) < len(shooter.BOONS))
         self.assertEqual(len(shooter.unlocked_boons({"deeprun": {"total": 999}})), len(shooter.BOONS))
 
+    def test_round_contracts(self):
+        save = {}
+        game = shooter.Game(save, 3)
+        self.assertEqual(len(game.contracts), 2)
+        game.contracts = [dict(key="heads", count=0, done=False, failed=False),
+                          dict(key="clean", count=0, done=False, failed=False)]
+        xp = game.xp
+        enemy = game.enemies[0]
+        for _ in range(4):
+            game.contract_progress("heads")
+        self.assertTrue(game.contracts[0]["done"])
+        self.assertGreaterEqual(game.xp, xp + shooter.CONTRACT_XP)
+        game.hurt_player(5)
+        self.assertTrue(game.contracts[1]["failed"])                    # 맞았으니 실패
+        self.assertEqual(save["lifetime"]["contracts"], 1)
+        self.assertEqual(shooter.Game({}, 1, mode="training").contracts, [])
+        del enemy
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

@@ -60,10 +60,12 @@ def problems_in(texts, size):
     # 그림자 2px 와 글자 안쪽 여백은 빼고 봐요
     boxes = [r.inflate(-4, -6) for r in texts if r.w > 6 and r.h > 6]
     for i, a in enumerate(boxes):
+        if a.w < a.h * 1.2:
+            continue                             # 한 글자짜리 (적 머리 위 '?' '!' 같은 3D 세상 표시)는 빼요
         if not screen_rect.contains(texts[i].inflate(-4, -4)):
             found.append(f"clipped at {tuple(texts[i])}")
         for b in boxes[i + 1:]:
-            if a == b:
+            if a == b or b.w < b.h * 1.2:
                 continue                         # 같은 자리에 다시 그린 것 (덧그리기)
             cut = a.clip(b)
             if cut.w * cut.h > 0.2 * min(a.w * a.h, b.w * b.h):
