@@ -183,15 +183,77 @@ WEAPON_LEVELS = [(10, "EXT MAG"), (25, "GRIP"), (45, "SUPPRESSOR"), (70, "GOLD C
 PLAYER_LOOK = dict(uniform=(60, 90, 140), vest=(40, 60, 100), pants=(40, 45, 60), head="helmet", gun=30)
 
 
+# ----- RPG: 무기 해금, 무기 레벨, 스킬 -----
+START_WEAPONS = ["RIFLE", "PISTOL"]
+# 무기를 얻는 조건: ("level", 계급) / ("score", 한 라운드 점수) / ("heads", 한 라운드 헤드샷 수)
+UNLOCKS = {
+    "SMG": ("level", 2), "SHOTGUN": ("level", 3), "BURST": ("score", 1000), "MACHINE PISTOL": ("level", 4),
+    "SNIPER": ("level", 5), "DMR": ("heads", 5), "HEAVY AR": ("level", 6), "REVOLVER": ("score", 1500),
+    "AUTO SHOTGUN": ("level", 8), "LMG": ("level", 10), "LAUNCHER": ("score", 2500), "ROCKET": ("level", 12),
+}
+WEAPON_MAX_LEVEL = 10
+KILLS_PER_WEAPON_LEVEL = 6
+# 스킬: (이름, 최대 단계, 한국어 설명, 영어 설명, 쓰는 키(액티브 스킬))
+SKILLS = [
+    ("VITALITY", 3, "최대 체력 +15", "Max health +15", None),
+    ("MARKSMAN", 3, "헤드샷 피해 +15%", "Headshot damage +15%", None),
+    ("RELOAD MASTER", 3, "재장전 10% 빠르게", "Reload 10% faster", None),
+    ("RUNNER", 3, "이동 6% 빠르게", "Move 6% faster", None),
+    ("REGEN", 3, "체력이 0.7초 일찍, 30% 더 빨리 차요", "Health regen starts sooner, 30% faster", None),
+    ("DEMOLITION", 3, "수류탄 +1, 폭발 피해 +20%", "+1 grenade, explosions +20%", None),
+    ("AMMO PACK", 3, "탄약 +25%", "Ammo +25%", None),
+    ("FOCUS", 1, "T: 5초 동안 적이 느려져요 (다시 쓰기 45초)", "T: enemies slow down for 5s (45s cooldown)", "T"),
+    ("MEDKIT", 1, "Y: 체력 60 회복 (다시 쓰기 35초)", "Y: heal 60 (35s cooldown)", "Y"),
+    ("SCAN", 1, "J: 8초 동안 벽 너머 모든 적 표시 (다시 쓰기 30초)", "J: reveal all enemies for 8s (30s cooldown)", "J"),
+]
+ACTIVE_SKILLS = {"FOCUS": (5.0, 45.0), "MEDKIT": (0.0, 35.0), "SCAN": (8.0, 30.0)}   # (지속 시간, 다시 쓰기)
+
+
+def player_level(save):
+    return 1 + save.get("xp", 0) // XP_PER_RANK
+
+
+def skill_points(save):
+    """쓸 수 있는 스킬 포인트: 계급이 오를 때마다 1점"""
+    return player_level(save) - 1 - sum(save.get("skills", {}).values())
+
+
+def unlocked_weapons(save):
+    """가진 무기 목록 (계급 조건은 여기서 바로 풀려요)"""
+    have = set(START_WEAPONS) | set(save.get("unlocked", []))
+    have |= {name for name, (kind, need) in UNLOCKS.items() if kind == "level" and player_level(save) >= need}
+    return [spec["name"] for spec in WEAPONS if spec["name"] in have]
+
+
+def unlock_text(name, ko):
+    kind, need = UNLOCKS[name]
+    if kind == "level":
+        return f"계급 {need}" if ko else f"rank {need}"
+    if kind == "score":
+        return f"한 판 {need}점" if ko else f"{need} pts/round"
+    return f"한 판 헤드샷 {need}" if ko else f"{need} heads/round"
+
+
+def weapon_level(kills):
+    return min(WEAPON_MAX_LEVEL, 1 + kills // KILLS_PER_WEAPON_LEVEL)
+
+
 def weapon_mods(kills):
     """쓰러뜨린 수로 풀린 부착물 목록"""
     return [mod for need, mod in WEAPON_LEVELS if kills >= need]
 
 
-def apply_mods(spec, mods):
-    """부착물을 단 무기 설정을 새로 만들어요
-    EXT MAG 탄창 1.5배 / GRIP 반동 30% 줄임 / SUPPRESSOR 소음기(적이 잘 못 들어요) / GOLD CAMO 금색 총"""
+def apply_mods(spec, mods, level=1):
+    """부착물과 무기 레벨을 적용한 무기 설정을 새로 만들어요
+    EXT MAG 탄창 1.5배 / GRIP 반동 30% 줄임 / SUPPRESSOR 소음기(적이 잘 못 들어요) / GOLD CAMO 금색 총
+    레벨마다 피해 +5%, 재장전 -3%, 반동 -3%"""
     spec = dict(spec)
+    up = level - 1
+    spec["level"] = level
+    spec["body"] = spec["body"] * (1 + 0.05 * up)
+    spec["head"] = spec["head"] * (1 + 0.05 * up)
+    spec["reload"] = spec["reload"] * (1 - 0.03 * up)
+    spec["kick"] = spec["kick"] * (1 - 0.03 * up)
     if "EXT MAG" in mods and not spec["projectile"]:
         spec["mag"] = int(spec["mag"] * 1.5)
         spec["reserve"] = int(spec["reserve"] * 1.25)
@@ -1909,7 +1971,7 @@ HELP_TEXT = {
         keys=[("W A S D", "이동"), ("Shift", "달리기 (W와 함께)"), ("C", "앉기 / 달리다가: 슬라이딩"),
               ("← → ↑ ↓", "시점 (마우스도 돼요)"), ("스페이스바", "점프"),
               ("F,  왼쪽 클릭", "사격 (꾹 누르면 연사)"), ("E,  오른쪽 클릭", "정조준 / 저격총 조준경"), ("Z", "조준경 배율 3·6·12배"),
-              ("G", "수류탄"), ("V", "칼"), ("X", "킬스트릭 쓰기"), ("1, 2,  Q", "주무기 / 보조무기 바꾸기"),
+              ("G", "수류탄"), ("V", "칼"), ("X", "킬스트릭 쓰기"), ("1~9, 0, Tab, Q", "무기 바꾸기 (가진 무기 전부)"), ("T,  Y,  J", "스킬: 집중 / 구급상자 / 탐지"),
               ("R,  B,  U", "재장전,  좀비 상점 (탄약 / 강화)"), ("H,  M", "도움말 (일시정지),  소리 끄기"), ("P,  Enter", "FPS 표시,  전체 화면"),
               ("ESC", "메뉴로")],
         tips=["적을 모두 쓰러뜨리면 다음 라운드! 라운드마다 맵이 바뀌어요.",
@@ -1927,7 +1989,7 @@ HELP_TEXT = {
         keys=[("W A S D", "move"), ("SHIFT", "sprint (with W)"), ("C", "crouch / slide while sprinting"),
               ("ARROWS", "look (or mouse)"), ("SPACE", "jump"),
               ("F, LEFT CLICK", "fire (hold for auto)"), ("E, RIGHT CLICK", "aim / sniper scope"), ("Z", "scope zoom 3/6/12x"),
-              ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1, 2, Q", "primary / secondary"),
+              ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1-9, 0, TAB, Q", "switch weapon (whole inventory)"), ("T, Y, J", "skills: focus / medkit / scan"),
               ("R, B, U", "reload, zombie shop"), ("H, M", "help (pause), mute"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "menu")],
         tips=["Kill every enemy to clear the round. The map changes each round.",
               "Killstreaks without dying: 3 radar, 5 airstrike, 7 sentry turret (X).",
@@ -2910,7 +2972,11 @@ class Game:
         self.mode = mode
         self.loadout = loadout
         self.perk = loadout["perk"] if loadout else None
-        self.max_hp = 130 if self.perk == "IRON SKIN" else 100
+        ranks = save.get("skills", {})
+        self.max_hp = (130 if self.perk == "IRON SKIN" else 100) + 15 * ranks.get("VITALITY", 0)
+        self.cooldowns = {}        # 액티브 스킬 다시 쓰기까지 남은 시간
+        self.focus = 0.0           # FOCUS: 적이 느려지는 남은 시간
+        self.scan = 0.0            # SCAN: 적이 다 보이는 남은 시간
         self.pickup_images = {kind: make_pickup_image(kind) for kind in DROP_WEIGHTS}
         self.decor_images = {
             "T": make_palm_image(), "L": make_lamp_image(),
@@ -3074,18 +3140,80 @@ class Game:
         self.reset_streak()
         self.start_round()
 
+    def rank_of(self, skill):
+        """스킬 단계 (안 배웠으면 0)"""
+        return self.save.get("skills", {}).get(skill, 0)
+
+    def weapon_spec(self, name):
+        """그 무기의 지금 성능 (처치 수에 따른 레벨과 부착물 적용)"""
+        kills = self.save.get("wkills", {}).get(name, 0)
+        return apply_mods(WEAPON_BY_NAME[name], weapon_mods(kills), weapon_level(kills))
+
     def make_arsenal(self):
-        """로드아웃대로 무기를 챙겨요. 퍼크도 적용해요."""
-        specs = None
+        """가진 무기를 모두 챙겨요 (인벤토리). 로드아웃의 시작 무기를 들고, 퍼크와 스킬도 적용해요."""
+        specs, start, second = None, 0, 1
         if self.loadout:
-            kills = self.save.get("wkills", {})
-            specs = [apply_mods(WEAPON_BY_NAME[name], weapon_mods(kills.get(name, 0)))
-                     for name in (self.loadout["primary"], self.loadout["secondary"])]
-        arsenal = Arsenal(specs, reload_mult=0.6 if self.perk == "QUICK HANDS" else 1.0,
-                          ammo_mult=1.5 if self.perk == "SCAVENGER" else 1.0)
+            names = unlocked_weapons(self.save)
+            specs = [self.weapon_spec(name) for name in names]
+            start = names.index(self.loadout["primary"]) if self.loadout["primary"] in names else 0
+            second = names.index(self.loadout["secondary"]) if self.loadout["secondary"] in names else 1 % len(names)
+        reload_mult = (0.6 if self.perk == "QUICK HANDS" else 1.0) * (1 - 0.1 * self.rank_of("RELOAD MASTER"))
+        ammo_mult = (1.5 if self.perk == "SCAVENGER" else 1.0) * (1 + 0.25 * self.rank_of("AMMO PACK"))
+        arsenal = Arsenal(specs, reload_mult=reload_mult, ammo_mult=ammo_mult)
+        arsenal.index, arsenal.last_index = start, second
         if self.perk == "SCAVENGER":
             arsenal.grenades += 2
+        arsenal.grenades += self.rank_of("DEMOLITION")
         return arsenal
+
+    def check_unlocks(self):
+        """조건을 채운 무기를 얻어요. 얻는 순간 바로 들고 쓸 수 있어요."""
+        if not self.loadout:
+            return
+        earned = self.save.setdefault("unlocked", [])
+        for name, (kind, need) in UNLOCKS.items():
+            if name in earned or kind == "level":
+                continue
+            if (kind == "score" and self.stats["score"] >= need) or (kind == "heads" and self.stats["heads"] >= need):
+                earned.append(name)
+                write_save(self.save)
+        for name in unlocked_weapons(self.save):      # 계급 조건 무기도 여기서 손에 들어와요
+            self.add_to_inventory(name)
+
+    def add_to_inventory(self, name):
+        if any(w.spec["name"] == name for w in self.arsenal.weapons):
+            return
+        self.arsenal.weapons.append(Weapon(self.weapon_spec(name), self.arsenal.ammo_mult))
+        slot = len(self.arsenal.weapons)
+        key = str(slot) if slot <= 9 else ("0" if slot == 10 else "TAB")
+        self.popups.append([f"NEW WEAPON: {name}!  press {key}", (255, 200, 60), 3.5])
+        self.sounds.play("streak")
+
+    def refresh_weapon(self, name):
+        """무기 레벨이 오르거나 부착물이 풀리면 들고 있는 그 무기에 바로 적용해요"""
+        for w in self.arsenal.weapons:
+            if w.spec["name"] == name and not w.upgraded:
+                w.spec = self.weapon_spec(name)
+                w.mag = min(w.mag, w.spec["mag"])
+
+    def use_skill(self, name):
+        """액티브 스킬 (T 집중 / Y 구급상자 / J 탐지)"""
+        if not self.rank_of(name) or self.game_over:
+            return
+        if self.cooldowns.get(name, 0) > 0:
+            self.popups.append([f"{name} READY IN {self.cooldowns[name]:.0f}s", WHITE, 1.0])
+            return
+        duration, cooldown = ACTIVE_SKILLS[name]
+        self.cooldowns[name] = cooldown
+        if name == "FOCUS":
+            self.focus = duration
+        elif name == "MEDKIT":
+            self.player.hp = min(self.max_hp, self.player.hp + 60)
+        elif name == "SCAN":
+            self.scan = duration
+            self.radar_timer = max(self.radar_timer, duration)
+        self.popups.append([name + "!", (80, 240, 255), 1.2])
+        self.sounds.play("heal" if name == "MEDKIT" else "streak")
 
     @property
     def skill(self):
@@ -3191,7 +3319,7 @@ class Game:
         self.effects = []
         self.tracers = []          # 내 총알 궤적: [x0, y0, x1, y1, 남은 시간]
         self.camp_pos = pygame.Vector2(self.player.pos)   # 한자리에 오래 있으면 적이 수류탄을 던져요
-        self.stats = dict(shots=0, hits=0, heads=0, kills=0, best=0, weapons={})   # 라운드 결과 화면용
+        self.stats = dict(shots=0, hits=0, heads=0, kills=0, best=0, weapons={}, score=0)   # 라운드 결과 화면용
         self.camp_timer = 0.0
         self.camp_nade = 5.0
         self.enemy_tracers = []    # 적 총알 궤적: [적, 남은 시간, 끝점 흔들림]
@@ -3437,10 +3565,12 @@ class Game:
         before = self.rank
         self.xp += amount
         self.save["xp"] = self.xp
+        self.stats["score"] = self.stats.get("score", 0) + amount
         if text:
             self.popups.append([text, color, 1.4])
         if self.rank > before:
-            self.popups.append([f"RANK UP!  RANK {self.rank}", (255, 80, 200), 2.5])
+            self.popups.append([f"RANK UP!  RANK {self.rank}  (+1 SKILL POINT)", (255, 80, 200), 2.5])
+            self.check_unlocks()
 
     def record_progress(self, next_round):
         """저장: 다음에 이어할 라운드와 최고 기록"""
@@ -3519,6 +3649,16 @@ class Game:
                 self.popups.append(["SOUND OFF" if self.sounds.muted else "SOUND ON", WHITE, 1.0])
             elif pygame.K_1 <= event.key <= pygame.K_9 and event.key - pygame.K_1 < len(a.weapons):
                 a.switch(event.key - pygame.K_1)
+            elif event.key == pygame.K_0 and len(a.weapons) >= 10:
+                a.switch(9)
+            elif event.key == pygame.K_TAB:          # 다음 무기
+                a.switch(a.index + 1)
+            elif event.key == pygame.K_t:
+                self.use_skill("FOCUS")
+            elif event.key == pygame.K_y:
+                self.use_skill("MEDKIT")
+            elif event.key == pygame.K_j:
+                self.use_skill("SCAN")
             elif event.key == pygame.K_q:
                 a.switch(a.last_index)
             elif event.key == pygame.K_r:
@@ -3604,6 +3744,7 @@ class Game:
         speed = (AIM_MOVE if self.aiming else 1.0) * spec.get("move", 1.0)
         if self.perk == "LIGHTFOOT":
             speed *= 1.12
+        speed *= 1 + 0.06 * self.rank_of("RUNNER")
         # 조준점이 적 위에 있으면 시점이 살짝 느리게 돌아요 (키보드로도 적을 놓치지 않게)
         self.on_target = self.enemy_at(WIDTH / 2, HEIGHT / 2) is not None
         sticky = ASSIST_STICKY[SETTINGS["assist"]] if self.on_target and not self.scoped else 1.0
@@ -3659,6 +3800,12 @@ class Game:
                 self.burst_left -= 1
                 self.burst_timer = spec["burst_delay"]
 
+        # 액티브 스킬 시간
+        for name in list(self.cooldowns):
+            self.cooldowns[name] = max(0.0, self.cooldowns[name] - dt)
+        self.focus = max(0.0, self.focus - dt)
+        self.scan = max(0.0, self.scan - dt)
+        edt = dt * (0.35 if self.focus > 0 else 1.0)   # FOCUS 중엔 적과 총알이 느려져요
         # 내 소리가 들리는 거리: 걸으면 4.5칸, 달리면 9칸, 앉으면 안 들려요. 총을 쏘면 16칸
         p = self.player
         step_noise = 0.0
@@ -3667,13 +3814,13 @@ class Game:
         self.gun_noise = max(0.0, self.gun_noise - dt)
         p.noise = max(step_noise, self.gun_noise_radius if self.gun_noise > 0 else 0.0)
         if self.mode == "zombies":
-            self.update_zombies(dt)
+            self.update_zombies(edt)
         else:
             self.punish_camping(dt)
 
         for enemy in self.enemies:
             before = pygame.Vector2(enemy.pos)
-            damage = enemy.update(dt, self.player)
+            damage = enemy.update(edt, self.player)
             # 걷는 적의 군화 소리: 멀수록 작게, 소리 나는 방향(왼쪽/오른쪽)에서 들려요
             if enemy.pos != before and enemy.pos.distance_to(p.pos) < 13:
                 enemy.step_timer -= dt * enemy.t["speed"] / 1.4
@@ -3722,7 +3869,7 @@ class Game:
             if not self.pending_blasts:
                 break
             self.explode(self.pending_blasts.pop(0), *EXPLODER_SHOT_BLAST)
-        self.update_projectiles(dt)
+        self.update_projectiles(edt)
         self.update_streaks(dt)
         self.update_effects(dt)
         self.collect_pickups()
@@ -3949,13 +4096,22 @@ class Game:
             if self.loadout:
                 kills = self.save.setdefault("wkills", {})
                 kills[name] = kills.get(name, 0) + 1
+                changed = False
                 for need, mod in WEAPON_LEVELS:
                     if kills[name] == need:
                         self.popups.append([f"{name}: {mod} UNLOCKED!", (255, 200, 60), 3.0])
                         self.sounds.play("streak")
+                        changed = True
+                level = weapon_level(kills[name])
+                if level > weapon_level(kills[name] - 1):
+                    self.popups.append([f"{name} LEVEL {level}  (DAMAGE +{5 * (level - 1)}%)", (255, 200, 60), 2.5])
+                    changed = True
+                if changed:
+                    self.refresh_weapon(name)
         if self.mode == "zombies":
             key = {"HEADSHOT!": "headshot", "KNIFE!": "knife"}.get(how, "kill")
             self.points += ZOMBIE_POINTS[key]
+        self.check_unlocks()
         xp = XP["kill"]
         if how == "HEADSHOT!":
             xp += XP["headshot"]
@@ -4038,8 +4194,9 @@ class Game:
         self.was_airborne = p.z > 0
         self.since_hurt += dt
         self.light_timer = max(0.0, self.light_timer - dt)
-        if self.since_hurt > REGEN_DELAY and 0 < p.hp < self.max_hp:
-            p.hp = min(self.max_hp, p.hp + REGEN_RATE * dt)
+        regen = self.rank_of("REGEN")
+        if self.since_hurt > REGEN_DELAY - 0.7 * regen and 0 < p.hp < self.max_hp:
+            p.hp = min(self.max_hp, p.hp + REGEN_RATE * (1 + 0.3 * regen) * dt)
         if 0 < p.hp < 30:                       # 체력이 낮으면 심장 소리
             self.heart_timer -= dt
             if self.heart_timer <= 0:
@@ -4126,7 +4283,7 @@ class Game:
             if not target:
                 self.add_impact(ax, ay)           # 벽이나 바닥에 맞으면 먼지와 불똥
             if target:
-                amount = spec["head"] if head else spec["body"]
+                amount = spec["head"] * (1 + 0.15 * self.rank_of("MARKSMAN")) if head else spec["body"]
                 if self.perk == "HEAVY ROUNDS":
                     amount *= 1.25
                 if found[5]:                      # 관통: 피해가 줄어요
@@ -4262,7 +4419,8 @@ class Game:
             for enemy in list(self.enemies):
                 d = enemy.pos.distance_to(pos)
                 if d < radius and can_see(pos, enemy.pos):
-                    self.damage_enemy(enemy, damage * power(d), how)
+                    boost = 1 + 0.2 * self.rank_of("DEMOLITION") if owner == "player" else 1.0
+                    self.damage_enemy(enemy, damage * power(d) * boost, how)
                     self.add_splat(enemy.pos, 0.7)
         d = self.player.pos.distance_to(pos)
         if owner != "streak" and d < radius and can_see(pos, self.player.pos):
@@ -4739,6 +4897,30 @@ class Game:
         if danger and pygame.time.get_ticks() // 150 % 2 == 0:
             self.center_text(screen, big_font, "GRENADE!", RED, HEIGHT * 0.38)
 
+        # FOCUS: 화면이 푸르스름해져요 / SCAN: 벽 너머 적 위치 표시
+        if self.focus > 0:
+            tint = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            tint.fill((60, 120, 255, 45))
+            screen.blit(tint, (0, 0))
+        if self.scan > 0:
+            for enemy in self.enemies:
+                box = self.project(enemy.pos, enemy.t["height"], enemy.t["width"])
+                if box:
+                    sx, top = box[0], box[1]
+                    size = 7 * UI
+                    pygame.draw.polygon(screen, RED, [(sx, top - 2 * size), (sx + size, top - size),
+                                                      (sx, top), (sx - size, top - size)], 2)
+        # 액티브 스킬 (오른쪽 가운데)
+        y_skill = HEIGHT * 0.45
+        for name, (duration, cooldown) in ACTIVE_SKILLS.items():
+            if not self.rank_of(name):
+                continue
+            key = next(k for n, _, _, _, k in SKILLS if n == name)
+            left = self.cooldowns.get(name, 0)
+            text = f"[{key}] {name}" + (f"  {left:.0f}s" if left > 0 else "  READY")
+            image = self.fonts["tiny"].render(text, True, (120, 120, 130) if left > 0 else (80, 240, 255))
+            screen.blit(image, image.get_rect(topright=(WIDTH - 16, y_skill)))
+            y_skill += 20 * UI
         # 왼쪽 아래: 킬스트릭 (받은 것 / 다음 것까지)
         y = HEIGHT - 100 * UI
         if self.streaks_ready:
@@ -4785,7 +4967,8 @@ class Game:
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 220, 90, 200) if selected else (0, 0, 0, 120))
             screen.blit(panel, rect)
-            name = weapon.spec["name"] + (" +" if weapon.upgraded else "")
+            level = weapon.spec.get("level", 1)
+            name = weapon.spec["name"] + (" +" if weapon.upgraded else "") + (f" L{level}" if level > 1 else "")
             color = BLACK if selected else ((255, 200, 60) if weapon.upgraded else WHITE)
             label = self.fonts["tiny"].render(f"{i + 1} {name}", True, color)
             screen.blit(label, label.get_rect(center=rect.center))
@@ -4940,13 +5123,13 @@ class Game:
 # 게임패드 (Xbox / PlayStation 컨트롤러를 블루투스로 연결하면 돼요)
 # ---------------------------------------------------------------
 # 버튼 -> 키보드 키 (게임 중). A 점프와 왼쪽 스틱 이동, 트리거는 따로 처리해요
-PAD_GAME_KEYS = {"b": pygame.K_c, "x": pygame.K_r, "y": pygame.K_q, "rb": pygame.K_g, "lb": pygame.K_v,
+PAD_GAME_KEYS = {"b": pygame.K_c, "x": pygame.K_r, "y": pygame.K_TAB, "rb": pygame.K_g, "lb": pygame.K_j,
                  "r3": pygame.K_v, "up": pygame.K_x, "down": pygame.K_b, "left": pygame.K_u, "start": pygame.K_h,
-                 "back": pygame.K_m}
+                 "right": pygame.K_t, "back": pygame.K_y}
 # 메뉴 화면에서: A 확인, B 뒤로, 십자키 이동, X 좀비 모드, Y 이어하기, 시작 버튼 설정
 PAD_MENU_KEYS = {"a": pygame.K_RETURN, "b": pygame.K_ESCAPE, "up": pygame.K_UP, "down": pygame.K_DOWN,
                  "left": pygame.K_LEFT, "right": pygame.K_RIGHT, "x": pygame.K_z, "y": pygame.K_c,
-                 "start": pygame.K_s}
+                 "start": pygame.K_s, "back": pygame.K_k, "lb": pygame.K_o}
 PAD_LOOK_YAW = 3.2                # 오른쪽 스틱 끝까지 밀었을 때 1초에 도는 각도(라디안)
 PAD_LOOK_PITCH = 520              # 1초에 위아래로 움직이는 px (화면 크기 비율을 곱해요)
 
@@ -5254,6 +5437,10 @@ async def intro_screen(save):
                     return "closed"
                 fonts = make_fonts()
                 continue
+            if event.key == pygame.K_k:
+                if await skills_screen(save) == "closed":
+                    return "closed"
+                continue
             if event.key == pygame.K_t and len(options) > 1:
                 res_index = (res_index + 1) % len(options)
                 save["res"] = res_index
@@ -5278,6 +5465,7 @@ async def intro_screen(save):
             w, h = options[res_index]
             note = "" if fits_desktop(w, h) else (" 전체 화면" if ko else " fullscreen")
             parts.append(f"T 해상도 {w}x{h}{note}" if ko else f"T resolution {w}x{h}{note}")
+        parts.append("K 스킬" if ko else "K skills")
         parts.append("S 설정" if ko else "S settings")
         parts.append("ESC 메뉴" if ko else "ESC menu")
         screen.fill((15, 10, 35))
@@ -5312,6 +5500,64 @@ def weapon_stats(spec):
             ("MOBILITY", spec.get("move", 1.0) * (0.85 if spec["scope"] else 1.0))]
 
 
+async def skills_screen(save):
+    """스킬 트리: 계급이 오를 때마다 받는 포인트로 스킬을 배워요. ↑↓ 고르기, → 배우기, ← 되돌리기, ESC 돌아가기"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    row = 0
+    ranks = save.setdefault("skills", {})
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            name, top = SKILLS[row][0], SKILLS[row][1]
+            if event.key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_k):
+                write_save(save)
+                return None
+            if event.key in (pygame.K_UP, pygame.K_w):
+                row = (row - 1) % len(SKILLS)
+            elif event.key in (pygame.K_DOWN, pygame.K_s):
+                row = (row + 1) % len(SKILLS)
+            elif event.key in (pygame.K_RIGHT, pygame.K_d) and skill_points(save) > 0 and ranks.get(name, 0) < top:
+                ranks[name] = ranks.get(name, 0) + 1
+            elif event.key in (pygame.K_LEFT, pygame.K_a) and ranks.get(name, 0) > 0:
+                ranks[name] -= 1                           # 언제든 되돌려서 다시 고를 수 있어요
+        screen.fill((14, 10, 30))
+        title = fonts["big"].render("SKILLS", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.08)))
+        level = player_level(save)
+        into = save.get("xp", 0) % XP_PER_RANK
+        info = f"RANK {level}   XP {into} / {XP_PER_RANK}   SKILL POINTS {skill_points(save)}"
+        screen.blit(fonts["normal"].render(info, True, (80, 240, 255)), (WIDTH * 0.06, HEIGHT * 0.14))
+        for i, (name, top, desc_ko, desc_en, key) in enumerate(SKILLS):
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.2 + i * 0.071), WIDTH * 0.88, HEIGHT * 0.062)
+            selected = i == row
+            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+            panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
+            screen.blit(panel, rect)
+            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 2 if selected else 1)
+            kind = "ACTIVE" if key else "PASSIVE"
+            screen.blit(fonts["small"].render(f"{name}  ({kind})", True, YELLOW if key else WHITE),
+                        (rect.x + 12, rect.y + rect.h * 0.12))
+            screen.blit(fonts["help"].render(desc_ko if ko else desc_en, True, (200, 230, 255)),
+                        (rect.x + rect.w * 0.33, rect.y + rect.h * 0.18))
+            have = ranks.get(name, 0)
+            for k in range(top):                           # 배운 단계는 채운 칸
+                box = pygame.Rect(rect.right - (top - k) * 26 * UI - 10, rect.centery - 8 * UI, 20 * UI, 16 * UI)
+                pygame.draw.rect(screen, (255, 200, 60) if k < have else (60, 55, 80), box)
+        hint = ("↑↓ 고르기     → 배우기     ← 되돌리기     ESC 돌아가기   (계급이 오를 때마다 포인트 1)" if ko
+                else "UP/DOWN choose     RIGHT learn     LEFT undo     ESC back   (1 point per rank)")
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
 async def loadout_screen(save, choice):
     """로드아웃: 주무기 / 보조무기 / 퍼크를 골라요. ↑↓ 줄 고르기, ←→ 바꾸기, Enter 시작, ESC 뒤로.
     고른 로드아웃(dict)을 돌려줘요. ESC면 None, 창 닫기면 "closed"."""
@@ -5320,8 +5566,9 @@ async def loadout_screen(save, choice):
     ko = fonts["lang"] == "ko"
     clock = pygame.time.Clock()
     perk_names = [name for name, _, _ in PERKS]
-    options = [PRIMARIES, SECONDARIES, perk_names]
-    labels = ["PRIMARY", "SECONDARY", "PERK"]
+    owned = unlocked_weapons(save)
+    options = [owned, owned, perk_names]
+    labels = ["START WEAPON", "SECOND WEAPON (Q)", "PERK"]
     saved = dict(DEFAULT_LOADOUT, **save.get("loadout", {}))
     picks = [options[0].index(saved["primary"]) if saved["primary"] in options[0] else 0,
              options[1].index(saved["secondary"]) if saved["secondary"] in options[1] else 0,
@@ -5345,6 +5592,9 @@ async def loadout_screen(save, choice):
                 picks[row] = (picks[row] - 1) % len(options[row])
             elif event.key in (pygame.K_RIGHT, pygame.K_d):
                 picks[row] = (picks[row] + 1) % len(options[row])
+            elif event.key == pygame.K_k:
+                if await skills_screen(save) == "closed":
+                    return "closed"
             elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
                 loadout = dict(primary=options[0][picks[0]], secondary=options[1][picks[1]],
                                perk=options[2][picks[2]])
@@ -5361,15 +5611,18 @@ async def loadout_screen(save, choice):
         screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
         if choice["mode"] == "zombies":
             mode_text = "ZOMBIES  -  BLOOD MOON"
+        elif choice["mode"] == "mission":
+            mode_text = f"MISSION  -  {MISSIONS[choice['mission']]['name']}"
         else:
             mode_text = f"CAMPAIGN  -  ROUND {choice['round']}"
+        mode_text += f"     RANK {player_level(save)}   SKILL POINTS {skill_points(save)}"
         label = fonts["normal"].render(mode_text, True, (80, 240, 255))
         screen.blit(label, label.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.16)))
 
-        # 왼쪽: 세 줄 (주무기 / 보조무기 / 퍼크)
-        card_w, card_h = WIDTH * 0.44, HEIGHT * 0.19
+        # 왼쪽: 세 줄 (시작 무기 / 두 번째 무기 / 퍼크)
+        card_w, card_h = WIDTH * 0.44, HEIGHT * 0.14
         for i in range(3):
-            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.23 + i * 0.22), card_w, card_h)
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.21 + i * 0.155), card_w, card_h)
             selected = i == row
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
@@ -5385,7 +5638,23 @@ async def loadout_screen(save, choice):
             else:
                 desc = PERKS[picks[2]][1 if ko else 2]
             image = fonts["help"].render(desc, True, (200, 230, 255))
-            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.72))
+            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.7))
+        # 왼쪽 아래: 무기 인벤토리 (가진 무기는 레벨, 없는 무기는 얻는 조건)
+        title = fonts["small"].render(f"INVENTORY  {len(owned)} / {len(WEAPONS)}   (in game: 1-9, 0, TAB)", True, WHITE)
+        screen.blit(title, (WIDTH * 0.06, HEIGHT * 0.685))
+        kills_all = save.get("wkills", {})
+        for k, spec in enumerate(WEAPONS):
+            name = spec["name"]
+            x = WIDTH * (0.06 + (k % 2) * 0.235)
+            y = HEIGHT * (0.72 + (k // 2) * 0.031)
+            if name in owned:
+                text = f"{name}  LV {weapon_level(kills_all.get(name, 0))}"
+                color = (255, 200, 60) if name in (options[0][picks[0]], options[1][picks[1]]) else WHITE
+            else:
+                text = f"[LOCKED] {name}: {unlock_text(name, ko)}"
+                color = (120, 120, 135)
+            font = fonts["help"] if ko else fonts["tiny"]
+            screen.blit(font.render(text, True, color), (x, y))
 
         # 오른쪽: 고른 무기 모습과 성능 막대
         weapon = options[1][picks[1]] if row == 1 else options[0][picks[0]]
@@ -5394,7 +5663,7 @@ async def loadout_screen(save, choice):
             scale = min(WIDTH * 0.4 / image.get_width(), HEIGHT * 0.4 / image.get_height())
             previews[weapon] = pygame.transform.smoothscale(
                 image, (int(image.get_width() * scale), int(image.get_height() * scale)))
-        box = pygame.Rect(WIDTH * 0.54, HEIGHT * 0.23, WIDTH * 0.40, HEIGHT * 0.41)
+        box = pygame.Rect(WIDTH * 0.54, HEIGHT * 0.21, WIDTH * 0.40, HEIGHT * 0.41)
         pygame.draw.rect(screen, (0, 0, 0), box)
         pygame.draw.rect(screen, (70, 60, 100), box, 1)
         preview = previews[weapon]
@@ -5403,14 +5672,16 @@ async def loadout_screen(save, choice):
         kills = save.get("wkills", {}).get(weapon, 0)
         mods = weapon_mods(kills)
         upcoming = [(need, mod) for need, mod in WEAPON_LEVELS if kills < need]
-        level = f"LV {len(mods) + 1}   {kills} kills"
+        level = f"LV {weapon_level(kills)} / {WEAPON_MAX_LEVEL}  (DMG +{5 * (weapon_level(kills) - 1)}%)   {kills} kills"
         if upcoming:
             level += f"   next: {upcoming[0][1]} at {upcoming[0][0]}"
         screen.blit(fonts["tiny"].render(level, True, (255, 200, 60)), (box.x + 12, box.y + 10 + 30 * UI))
         if mods:
             screen.blit(fonts["tiny"].render(" + ".join(mods), True, (80, 240, 255)),
                         (box.x + 12, box.y + 10 + 50 * UI))
-        for k, (stat, value) in enumerate(weapon_stats(WEAPON_BY_NAME[weapon])):
+        kills = save.get("wkills", {}).get(weapon, 0)
+        leveled = apply_mods(WEAPON_BY_NAME[weapon], weapon_mods(kills), weapon_level(kills))
+        for k, (stat, value) in enumerate(weapon_stats(leveled)):
             y = HEIGHT * (0.69 + k * 0.045)
             screen.blit(fonts["small"].render(stat, True, (200, 200, 220)), (box.x, y))
             bar = pygame.Rect(box.x + WIDTH * 0.12, y + 4 * UI, WIDTH * 0.28, 10 * UI)
@@ -5418,8 +5689,8 @@ async def loadout_screen(save, choice):
             bar.width = int(bar.width * value)
             pygame.draw.rect(screen, (80, 240, 255), bar)
 
-        hint = ("↑↓ 고르기     ←→ 바꾸기     Enter 시작     ESC 뒤로" if ko
-                else "UP/DOWN choose     LEFT/RIGHT change     ENTER start     ESC back")
+        hint = ("↑↓ 고르기     ←→ 바꾸기     Enter 시작     K 스킬     ESC 뒤로" if ko
+                else "UP/DOWN choose     LEFT/RIGHT change     ENTER start     K skills     ESC back")
         image = fonts["help"].render(hint, True, YELLOW)
         screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
         pygame.display.flip()
