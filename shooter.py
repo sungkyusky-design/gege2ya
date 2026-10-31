@@ -2212,12 +2212,14 @@ def draw_help(screen, fonts, footer):
 
     line_h = small.get_linesize() * 1.15
     top = HEIGHT * 0.32
-    left = WIDTH * 0.12
+    left = WIDTH * 0.08
+    tip_left = WIDTH * 0.52
+    key_w = max(small.size(key)[0] for key, _ in text["keys"]) + 18 * UI
     for i, (key, desc) in enumerate(text["keys"]):
         y = top + i * line_h
         screen.blit(small.render(key, True, YELLOW), (left, y))
-        screen.blit(small.render(desc, True, WHITE), (left + WIDTH * 0.13, y))
-    tip_left = WIDTH * 0.52
+        desc = fit_text(small, desc, tip_left - left - key_w - 16 * UI)
+        screen.blit(small.render(desc, True, WHITE), (left + key_w, y))
     y = top
     for tip in text["tips"]:
         for j, line in enumerate(wrap_text(small, tip, WIDTH * 0.42)):
@@ -8288,8 +8290,48 @@ async def achievements_screen(save):
         await asyncio.sleep(0)
 
 
+# 시작 화면 메뉴: (키, 키 글자, 이름, 한글 설명, 영어 설명, 칸(0 = 왼쪽 PLAY, 1 = 오른쪽 PROFILE))
+INTRO_ITEMS = [
+    (pygame.K_RETURN, "Enter", "CAMPAIGN", "100라운드 전쟁. ←→ 로 시작할 세트를 골라요", "100 rounds of war. LEFT/RIGHT picks the start set", 0),
+    (pygame.K_c, "C", "CONTINUE", "저장된 라운드부터 이어해요", "Pick up from your saved round", 0),
+    (pygame.K_z, "Z", "ZOMBIES", "웨이브를 버티며 점수를 모아요", "Survive the waves, earn points", 0),
+    (pygame.K_o, "O", "MISSIONS", "큰 맵에서 5단계 작전", "Five-stage operations on huge maps", 0),
+    (pygame.K_x, "X", "CHALLENGES", "오늘의 도전, 헤드샷만, 권총만...", "Daily, headshots only, pistol only...", 0),
+    (pygame.K_r, "R", "TRAINING", "사격장에서 연습 (기록 안 바뀜)", "Practice range (no progress)", 0),
+    (pygame.K_e, "E", "MY MAPS", "맵을 직접 그리고 플레이해요", "Draw your own maps and play them", 0),
+    (pygame.K_l, "L", "LEADERBOARD", "모드별 점수 TOP 10", "Top 10 scores per mode", 1),
+    (pygame.K_v, "V", "STATS", "누적 기록, 최근 판, 저장 옮기기", "Lifetime stats, recent games, save code", 1),
+    (pygame.K_a, "A", "ACHIEVEMENTS", "업적과 위장 무늬", "Achievements and camo", 1),
+    (pygame.K_k, "K", "SKILLS", "계급 포인트로 스킬 배우기", "Spend rank points on skills", 1),
+    (pygame.K_s, "S", "SETTINGS", "화면, 소리, 조작, 키 바꾸기", "Display, sound, controls, keys", 1),
+    (pygame.K_d, "D", "DIFFICULTY", "←→ 로 적의 강함을 바꿔요", "LEFT/RIGHT changes enemy strength", 1),
+    (pygame.K_t, "T", "RESOLUTION", "←→ 로 화면 크기를 바꿔요", "LEFT/RIGHT changes the window size", 1),
+    (pygame.K_h, "H", "HOW TO PLAY", "조작법과 팁", "Controls and tips", 1),
+]
+
+
+async def help_screen(fonts):
+    """조작법 화면: 아무 키나 누르면 돌아가요"""
+    screen = pygame.display.get_surface()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type == pygame.KEYDOWN:
+                return None
+        draw_backdrop(screen)
+        draw_help(screen, fonts, "")
+        draw_hint_bar(screen, fonts, "Enter / ESC 돌아가기 (아무 키)" if ko else "ANY KEY back")
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
 async def intro_screen(save):
-    """시작 화면: 조작법을 보여주고 캠페인 / 좀비 모드 / 이어하기 / 해상도를 골라요.
+    """시작 화면: 왼쪽 PLAY(게임 모드), 오른쪽 PROFILE(기록·설정) 메뉴.
+    ↑↓ 고르기, ←→ 값 바꾸기(세트·난이도·해상도) 또는 옆 칸으로, Enter 실행. 칸마다 단축키도 그대로.
     고른 것을 dict(mode=..., round=...)로 돌려줘요. ESC면 None, 창 닫기면 "closed"."""
     options = available_resolutions()
     res_index = min(save.get("res", 0), len(options) - 1)
@@ -8301,116 +8343,183 @@ async def intro_screen(save):
     reached = max(save.get("best", 1), continue_round)
     set_starts = [1 + k * SET_SIZE for k in range(len(SETS)) if 1 + k * SET_SIZE <= reached]
     start_pick = 0
+    sel = 0
+    cursor = None                    # 고른 칸 빛이 부드럽게 따라가는 위치
+    t = 0.0
+
+    def change_res(step):
+        nonlocal res_index, screen, fonts, cursor
+        res_index = (res_index + step) % len(options)
+        save["res"] = res_index
+        write_save(save)
+        set_resolution(*options[res_index])
+        screen = open_window()
+        fonts = make_fonts()
+        cursor = None
+
     while True:
-        clock.tick(30)
+        t += clock.tick(30) / 1000
+        items = [it for it in INTRO_ITEMS
+                 if not (it[0] == pygame.K_c and continue_round <= 1) and not (it[0] == pygame.K_t and len(options) < 2)]
+        sel = min(sel, len(items) - 1)
         for event in menu_events():
             if event.type == pygame.QUIT:
                 return "closed"
             if event.type != pygame.KEYDOWN:
                 continue
-            if event.key == pygame.K_ESCAPE:
+            key = event.key
+            if key == pygame.K_ESCAPE:
                 return None
-            if event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+            if key in (pygame.K_UP, pygame.K_DOWN):
+                sel = (sel + (1 if key == pygame.K_DOWN else -1)) % len(items)
+                continue
+            if key in (pygame.K_LEFT, pygame.K_RIGHT):
+                step = 1 if key == pygame.K_RIGHT else -1
+                item = items[sel]
+                if item[0] == pygame.K_RETURN and len(set_starts) > 1:
+                    start_pick = (start_pick + step) % len(set_starts)
+                elif item[0] == pygame.K_d:
+                    SETTINGS["difficulty"] = (SETTINGS["difficulty"] + step) % len(DIFFICULTIES)
+                    save["settings"] = dict(SETTINGS)
+                    write_save(save)
+                elif item[0] == pygame.K_t:
+                    change_res(step)
+                else:                                  # 옆 칸의 같은 줄로
+                    col = item[5]
+                    mine = [i for i, it in enumerate(items) if it[5] == col]
+                    other = [i for i, it in enumerate(items) if it[5] != col]
+                    sel = other[min(mine.index(sel), len(other) - 1)]
+                continue
+            if key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                key = items[sel][0]                    # 고른 칸 실행
+            else:                                      # 단축키를 누르면 그 칸으로 커서도 옮겨요
+                sel = next((i for i, it in enumerate(items) if it[0] == key), sel)
+            if key == pygame.K_RETURN:
                 return dict(mode="campaign", round=set_starts[start_pick])
-            if event.key in (pygame.K_LEFT, pygame.K_RIGHT) and len(set_starts) > 1:
-                start_pick = (start_pick + (1 if event.key == pygame.K_RIGHT else -1)) % len(set_starts)
-            if event.key == pygame.K_d:
+            if key == pygame.K_d:
                 SETTINGS["difficulty"] = (SETTINGS["difficulty"] + 1) % len(DIFFICULTIES)
                 save["settings"] = dict(SETTINGS)
                 write_save(save)
-            if event.key == pygame.K_z:
+            if key == pygame.K_z:
                 return dict(mode="zombies", round=1)
-            if event.key == pygame.K_r:
+            if key == pygame.K_r:
                 return dict(mode="training", round=1)
-            if event.key == pygame.K_v:
+            if key == pygame.K_h:
+                if await help_screen(fonts) == "closed":
+                    return "closed"
+                continue
+            if key == pygame.K_v:
                 if await stats_screen(save) == "closed":
                     return "closed"
                 continue
-            if event.key == pygame.K_l:
+            if key == pygame.K_l:
                 if await ranking_screen(save) == "closed":
                     return "closed"
                 continue
-            if event.key == pygame.K_e:
+            if key == pygame.K_e:
                 picked = await map_slots_screen(save)
                 if picked == "closed" or picked:
                     return picked
                 continue
-            if event.key == pygame.K_x:
+            if key == pygame.K_x:
                 picked = await challenge_screen(save)
                 if picked == "closed" or picked:
                     return picked
                 continue
-            if event.key == pygame.K_a:
+            if key == pygame.K_a:
                 if await achievements_screen(save) == "closed":
                     return "closed"
                 continue
-            if event.key == pygame.K_o:
+            if key == pygame.K_o:
                 picked = await mission_screen(save)
                 if picked == "closed" or picked:
                     return picked
                 continue
-            if event.key == pygame.K_c and continue_round > 1:
+            if key == pygame.K_c and continue_round > 1:
                 return dict(mode="campaign", round=continue_round)
-            if event.key == pygame.K_s:
+            if key == pygame.K_s:
                 if await settings_screen(save) == "closed":
                     return "closed"
+                screen = pygame.display.get_surface()
                 fonts = make_fonts()
+                cursor = None
                 continue
-            if event.key == pygame.K_k:
+            if key == pygame.K_k:
                 if await skills_screen(save) == "closed":
                     return "closed"
                 continue
-            if event.key == pygame.K_t and len(options) > 1:
-                res_index = (res_index + 1) % len(options)
-                save["res"] = res_index
-                write_save(save)
-                set_resolution(*options[res_index])
-                screen = open_window()
-                fonts = make_fonts()
+            if key == pygame.K_t and len(options) > 1:
+                change_res(1)
 
         ko = fonts["lang"] == "ko"
-        first = set_starts[start_pick]
-        if ko:
-            parts = [f"Enter 캠페인 (라운드 {first})", "Z 좀비 모드"]
-        else:
-            parts = [f"ENTER campaign (round {first})", "Z zombies"]
-        if len(set_starts) > 1:
-            parts.append("←→ 시작 세트" if ko else "LEFT/RIGHT start set")
-        diff = DIFFICULTIES[SETTINGS["difficulty"]][0]
-        parts.append(f"D 난이도 {diff}" if ko else f"D difficulty {diff}")
-        if continue_round > 1:
-            parts.append(f"C 이어하기 (라운드 {continue_round})" if ko else f"C continue (round {continue_round})")
-        if len(options) > 1:
-            w, h = options[res_index]
-            note = "" if fits_desktop(w, h) else (" 전체 화면" if ko else " fullscreen")
-            parts.append(f"T 해상도 {w}x{h}{note}" if ko else f"T resolution {w}x{h}{note}")
-        parts.append("O 미션" if ko else "O missions")
-        parts.append("R 사격장" if ko else "R training range")
-        parts.append("X 도전" if ko else "X challenges")
-        parts.append("V 기록/저장 옮기기" if ko else "V stats / save code")
-        parts.append("L 랭킹" if ko else "L leaderboard")
-        parts.append("E 맵 만들기" if ko else "E map editor")
-        parts.append("A 업적" if ko else "A achievements")
-        parts.append("K 스킬" if ko else "K skills")
-        parts.append("S 설정" if ko else "S settings")
-        parts.append("ESC 메뉴" if ko else "ESC menu")
-        screen.fill((15, 10, 35))
-        draw_help(screen, fonts, "     ".join(parts))
-        # 조작법 판 위에 제목과 네온 줄무늬
-        for i in range(6):
-            y = HEIGHT * (0.15 + i * 0.012)
-            pygame.draw.line(screen, (255, 80, 200) if i % 2 else (80, 240, 255), (0, y), (WIDTH, y), 2)
-        title = fonts["title"].render("STRIKE ZONE", True, (255, 80, 200))
+        draw_backdrop(screen)
+        # 제목과 네온 줄무늬 (천천히 빛나요)
+        glow = 0.5 + 0.5 * math.sin(t * 2)
+        for i in range(5):
+            y = HEIGHT * (0.165 + i * 0.01)
+            color = UI_ACCENT if i % 2 else UI_CYAN
+            line = pygame.Surface((WIDTH, 2), pygame.SRCALPHA)
+            line.fill((*color, int(110 + 120 * (glow if i % 2 else 1 - glow))))
+            screen.blit(line, (0, y))
+        title = fonts["title"].render("STRIKE ZONE", True, UI_ACCENT)
         screen.blit(title, title.get_rect(center=(WIDTH / 2, HEIGHT * 0.09)))
-        best, zbest = save.get("best", 0), save.get("zbest", 0)
-        records = []
-        if best:
-            records.append(f"캠페인 최고 라운드 {best}" if ko else f"Campaign best: round {best}")
-        if zbest:
-            records.append(f"좀비 최고 웨이브 {zbest}" if ko else f"Zombies best: wave {zbest}")
-        if records:
-            label = fonts["help"].render("     ".join(records), True, WHITE)
-            screen.blit(label, label.get_rect(center=(WIDTH / 2, HEIGHT * 0.88)))
+        # 두 칸 메뉴
+        col_x = [WIDTH * 0.08, WIDTH * 0.53]
+        col_w, row_h, gap = WIDTH * 0.39, HEIGHT * 0.058, HEIGHT * 0.067
+        heads = ["PLAY", "PROFILE"]
+        rects = []
+        rows = [0, 0]
+        for col in (0, 1):
+            screen.blit(fonts["small"].render(heads[col], True, UI_CYAN), (col_x[col], HEIGHT * 0.215))
+        for item in items:
+            col = item[5]
+            rects.append(pygame.Rect(col_x[col], HEIGHT * 0.25 + rows[col] * gap, col_w, row_h))
+            rows[col] += 1
+        target = pygame.Vector2(rects[sel].topleft)
+        cursor = target if cursor is None else cursor.lerp(target, 0.35)
+        for i, (item, rect) in enumerate(zip(items, rects)):
+            draw_panel(screen, rect, False)
+        moving = pygame.Rect(cursor.x, cursor.y, col_w, row_h)        # 움직이는 선택 칸
+        draw_panel(screen, moving, True)
+        diff = DIFFICULTIES[SETTINGS["difficulty"]][0]
+        for i, (item, rect) in enumerate(zip(items, rects)):
+            key, cap, name, _, _, _ = item
+            selected = i == sel
+            label = fonts["normal"].render(name, True, YELLOW if selected else WHITE)
+            screen.blit(label, label.get_rect(midleft=(rect.x + 14 * UI, rect.centery)))
+            value = ""
+            if key == pygame.K_RETURN:
+                value = f"ROUND {set_starts[start_pick]}" + ("  < >" if len(set_starts) > 1 and selected else "")
+            elif key == pygame.K_c:
+                value = f"ROUND {continue_round}"
+            elif key == pygame.K_d:
+                value = diff + ("  < >" if selected else "")
+            elif key == pygame.K_t:
+                w, h = options[res_index]
+                value = f"{w}x{h}" + ("" if fits_desktop(w, h) else " FULL") + ("  < >" if selected else "")
+            right = rect.right - 10 * UI
+            cap_w = fonts["tiny"].size(cap)[0] + 12 * UI
+            draw_keycap(screen, fonts["tiny"], cap, right - cap_w, rect.centery)
+            if value:
+                room = right - cap_w - 12 * UI - (label.get_rect(midleft=(rect.x + 14 * UI, 0)).right + 10 * UI)
+                font = fonts["small"] if fonts["small"].size(value)[0] <= room else fonts["tiny"]
+                image = font.render(fit_text(font, value, room), True, UI_CYAN)
+                screen.blit(image, image.get_rect(midright=(right - cap_w - 12 * UI, rect.centery)))
+        # 고른 칸 설명과 기록
+        item = items[sel]
+        desc = fonts["help"].render(item[3] if ko else item[4], True, (200, 230, 255))
+        bottom = HEIGHT * 0.25 + max(rows) * gap
+        screen.blit(desc, desc.get_rect(center=(WIDTH / 2, bottom + 6 * UI)))
+        records = [f"RANK {player_level(save)}"]
+        if save.get("best"):
+            records.append(f"CAMPAIGN BEST ROUND {save['best']}")
+        if save.get("zbest"):
+            records.append(f"ZOMBIES BEST WAVE {save['zbest']}")
+        image = fonts["small"].render("     ".join(records), True, UI_DIM)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, bottom + 32 * UI)))
+        hint = ("↑↓ 고르기   ←→ 값 바꾸기 / 옆 칸   Enter 실행   ESC 뒤로   - 칸 오른쪽 글자는 바로 가는 키" if ko else
+                "UP/DOWN choose   LEFT/RIGHT change / other column   ENTER select   ESC back   - letters are shortcuts")
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
