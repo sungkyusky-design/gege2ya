@@ -116,7 +116,8 @@ JUMP_SPEED = 4.2                  # 점프 힘
 GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
 # 설정 (시작 화면에서 S): 저장돼서 다음에도 그대로예요
-SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=2, v2=True, music=40)
+SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=2, v2=True, music=40,
+                hud=100, shake=1, soundviz=0, colorblind=0)
 ASSIST_LEVELS = ["OFF", "LOW", "NORMAL", "HIGH"]
 ASSIST_PAD = [0.0, 0.6, 1.0, 1.5]          # 아깝게 빗나간 총알을 몸통에 맞혀 주는 정도
 ASSIST_STICKY = [1.0, 0.75, 0.55, 0.4]     # 조준점이 적 위에 있을 때 시점이 느려지는 정도
@@ -225,9 +226,12 @@ def earned_camos(save):
 
 def apply_settings(settings):
     """저장된 설정을 게임에 적용해요"""
-    global NORMAL_FOV
+    global NORMAL_FOV, UI, RED, GREEN
     SETTINGS.update(settings)
     NORMAL_FOV = math.radians(SETTINGS["fov"])
+    UI = HEIGHT / 600 * SETTINGS.get("hud", 100) / 100
+    # 색약 모드: 빨강/초록 대신 주황/파랑 (조준선, 체력, 적 표시)
+    RED, GREEN = ((255, 130, 20), (70, 160, 255)) if SETTINGS.get("colorblind") else ((230, 50, 50), (90, 220, 120))
 
 
 # 고를 수 있는 해상도. 화면보다 큰 해상도는 전체 화면으로 열어요
@@ -238,7 +242,7 @@ def set_resolution(width, height):
     """해상도를 바꿔요. 화면 크기에 따라 정해지는 값들도 같이 다시 계산해요."""
     global WIDTH, HEIGHT, UI, LOOK_SPEED, MAX_PITCH
     WIDTH, HEIGHT = width, height
-    UI = HEIGHT / 600
+    UI = HEIGHT / 600 * SETTINGS.get("hud", 100) / 100     # 설정의 UI SIZE 로 글자·표시 크기 조절
     LOOK_SPEED = 420 * UI
     MAX_PITCH = 260 * UI
 
@@ -1335,9 +1339,14 @@ def can_see(a, b):
     """a에서 b까지 건물에 가리지 않고 직선으로 보이면 True"""
     dist = a.distance_to(b)
     steps = int(dist / 0.1) + 1
-    for i in range(1, steps):
-        p = a.lerp(b, i / steps)
-        if is_opaque(p.x, p.y):
+    x, y = a.x, a.y
+    sx, sy = (b.x - x) / steps, (b.y - y) / steps
+    grid, width, height = WALL_GRID, MAP_W, MAP_H
+    for _ in range(1, steps):                    # 0.1칸씩 가며 건물에 막히는지 봐요
+        x += sx
+        y += sy
+        col, row = int(x), int(y)
+        if 0 <= col < width and 0 <= row < height and grid[row][col] is not None:
             return False
     return True
 
@@ -1377,7 +1386,8 @@ def cast_ray(px, py, angle):
 
     floors, walls = [], []
     seg_start = 0.0
-    cur_floor = FLOOR_GRID[map_y][map_x]
+    floor_grid, wall_grid, width, height, max_depth, max_wall = FLOOR_GRID, WALL_GRID, MAP_W, MAP_H, MAX_DEPTH, MAX_WALL
+    cur_floor = floor_grid[map_y][map_x]
     tallest = 0.0
     while True:
         # 가까운 격자선을 하나 넘어가기
@@ -1392,12 +1402,12 @@ def cast_ray(px, py, angle):
             map_y += step_y
             vertical = False
 
-        if dist > MAX_DEPTH or not in_map(map_x, map_y):
+        if dist > max_depth or not (0 <= map_x < width and 0 <= map_y < height):
             if not walls:                      # 건물이 없으면 바닥이 지평선까지 이어져요
                 floors.append((seg_start, math.inf, cur_floor))
             break
 
-        spec = WALL_GRID[map_y][map_x]
+        spec = wall_grid[map_y][map_x]
         if spec:
             if not walls:
                 floors.append((seg_start, dist, cur_floor))
@@ -1405,10 +1415,10 @@ def cast_ray(px, py, angle):
                 hit = py + dy * dist if vertical else px + dx * dist
                 walls.append((dist, vertical, hit - math.floor(hit), spec, map_x, map_y))
                 tallest = spec[1]
-                if tallest >= MAX_WALL:
+                if tallest >= max_wall:
                     break
         elif not walls:
-            f = FLOOR_GRID[map_y][map_x]
+            f = floor_grid[map_y][map_x]
             if f != cur_floor:
                 floors.append((seg_start, dist, cur_floor))
                 seg_start, cur_floor = dist, f
@@ -2185,6 +2195,9 @@ SOUND_RECIPES = {
     "punch":     (0.16, 26, 0.0, 0.0, 52, 1.0, 0, 0, 0.55),
 }
 # 벽 너머에서 나는 소리는 먹먹하게 (높은 소리를 깎은 "_m" 소리를 따로 만들어요)
+# 화면에 방향을 표시할 소리 (설정 SOUND MARKS)
+SOUND_MARK_KINDS = {"enemy": "shot", "spit": "shot", "explosion": "shot", "boot_hard": "step", "boot_soft": "step",
+                    "boot_snow": "step", "boot_wood": "step", "zstep": "step", "groan": "step"}
 MUFFLED_SOUNDS = ("enemy", "spit", "explosion", "boot_hard", "boot_soft", "boot_snow", "boot_wood", "zstep", "groan")
 # 바닥 -> 발소리 (없는 바닥은 step_hard)
 STEP_SOUNDS = {".": "step_soft", ";": "step_soft", "g": "step_soft", "#": "step_soft",
@@ -3853,6 +3866,36 @@ class Game:
             self.popups.append(["TRAINING COMPLETE!" if self.tutorial_step == len(steps) else "GOOD!",
                                 (80, 255, 120), 1.5])
 
+    def draw_compass(self, screen):
+        """위쪽 가운데 나침반: N E S W 와 15도 눈금, 목표 위치(다이아몬드)"""
+        width, top = WIDTH * 0.3, HEIGHT * 0.075
+        left = WIDTH / 2 - width / 2
+        span = math.radians(110)                     # 나침반에 보이는 범위
+        panel = pygame.Surface((int(width), int(22 * UI)), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 90))
+        screen.blit(panel, (left, top))
+        heading = self.player.angle + math.pi / 2     # 맵 위쪽이 북쪽(N)
+        names = {0: "N", 90: "E", 180: "S", 270: "W"}
+        for deg in range(0, 360, 15):
+            rel = angle_diff(math.radians(deg), heading)
+            if abs(rel) > span / 2:
+                continue
+            x = WIDTH / 2 + rel / span * width
+            if deg in names:
+                label = self.small_font.render(names[deg], True, YELLOW if deg == 0 else WHITE)
+                screen.blit(label, label.get_rect(center=(x, top + 11 * UI)))
+            else:
+                pygame.draw.line(screen, (200, 200, 210), (x, top + 6 * UI), (x, top + 16 * UI), 1)
+        pygame.draw.line(screen, YELLOW, (WIDTH / 2, top - 2), (WIDTH / 2, top + 4 * UI), 2)
+        if self.objective and not self.objective.get("done"):
+            offset = self.objective["pos"] - self.player.pos
+            rel = angle_diff(math.atan2(offset.y, offset.x), self.player.angle)
+            x = WIDTH / 2 + max(-0.5, min(0.5, rel / span)) * width
+            y = top + 11 * UI
+            size = 6 * UI
+            color = OBJECTIVES[self.objective["kind"]]["color"] if self.objective.get("kind") in OBJECTIVES else YELLOW
+            pygame.draw.polygon(screen, color, [(x, y - size), (x + size, y), (x, y + size), (x - size, y)])
+
     def draw_training(self, screen):
         """사격장 안내판과 사격 기록"""
         ko = self.fonts["lang"] == "ko"
@@ -3864,7 +3907,7 @@ class Game:
             text = "연습 끝! 마음껏 쏴 보세요. ESC → QUIT TO MENU" if ko else "Done! Shoot freely. ESC -> QUIT TO MENU"
             head = ""
         label = self.fonts["help_big" if "help_big" in self.fonts else "help"].render(head + text, True, YELLOW)
-        rect = label.get_rect(midtop=(WIDTH / 2, HEIGHT * 0.12)).inflate(24 * UI, 12 * UI)
+        rect = label.get_rect(midtop=(WIDTH / 2, HEIGHT * 0.13)).inflate(24 * UI, 12 * UI)
         panel = pygame.Surface(rect.size, pygame.SRCALPHA)
         panel.fill((0, 0, 0, 160))
         screen.blit(panel, rect)
@@ -4080,6 +4123,7 @@ class Game:
         self.seen_index = self.arsenal.index
         self.popups = []           # 점수/메달 글자: [글자, 색, 남은 시간]
         self.damage_dirs = []      # 맞은 방향 표시: [방향(각도), 남은 시간]
+        self.sound_marks = []      # 소리 표시 (설정 SOUND MARKS): [방향, "step"/"shot", 남은 시간]
         self.radar_timer = 0.0
         self.airstrikes = []       # 떨어질 폭탄: [위치, 남은 시간]
         self.sentries = []
@@ -4534,10 +4578,11 @@ class Game:
         self.hitmarker = max(0.0, self.hitmarker - dt)
         self.shake = max(0.0, self.shake - dt)
         # 폭발 흔들림: 이번 장면에서 화면이 위아래로 움직일 양
-        self.shake_offset = random.uniform(-1, 1) * self.shake * 30 * UI
+        self.shake_offset = random.uniform(-1, 1) * self.shake * 30 * UI * SETTINGS.get("shake", 1)
         self.feed = [[text, t - dt] for text, t in self.feed if t - dt > 0]
         self.popups = [[text, color, t - dt] for text, color, t in self.popups if t - dt > 0]
         self.damage_dirs = [[a, t - dt] for a, t in self.damage_dirs if t - dt > 0]
+        self.sound_marks = [[a, k, t - dt] for a, k, t in self.sound_marks if t - dt > 0]
         self.tracers = [tr[:4] + [tr[4] - dt] for tr in self.tracers if tr[4] - dt > 0]
         self.enemy_tracers = [[e, t - dt, off] for e, t, off in self.enemy_tracers if t - dt > 0]
         self.time += dt
@@ -5221,6 +5266,10 @@ class Game:
 
     def play_at(self, name, pos, reach, loud=1.0):
         volume, pan = self.spatial(pos, reach)
+        if SETTINGS.get("soundviz") and volume > 0.05 and name in SOUND_MARK_KINDS and len(self.sound_marks) < 12:
+            offset = pos - self.player.pos
+            if offset.length() > 0.5:
+                self.sound_marks.append([math.atan2(offset.y, offset.x), SOUND_MARK_KINDS[name], 0.9])
         if volume > 0.02 and name in MUFFLED_SOUNDS and not can_see(self.player.pos, pos):
             name += "_m"            # 벽 너머: 먹먹한 소리
         self.sounds.play(name, volume * loud, pan)
@@ -5479,11 +5528,24 @@ class Game:
     def draw_world(self, screen):
         p = self.player
         horizon, proj, eye, fog_dist, col_w = self.horizon, self.proj, self.eye, self.fog_dist, self.col_w
-        for i in range(self.num_rays):
+        key = (self.num_rays, col_w, proj)
+        if getattr(self, "ray_table_key", None) != key:
+            # 세로 줄마다 바라보는 방향(가운데에서 벌어진 각도)과 물고기 눈 보정 값은 시야가 같으면 늘 같아요: 한 번만 계산
+            self.ray_table_key = key
+            self.ray_table = []
+            for i in range(self.num_rays):
+                offset = math.atan(((i + 0.5) * col_w - WIDTH / 2) / proj)
+                self.ray_table.append((offset, math.cos(offset)))
+        # 반복문 안에서 자주 쓰는 것들을 지역 이름으로 (파이썬은 지역 이름이 더 빨라요)
+        draw_rect, blit, fill, scale = pygame.draw.rect, screen.blit, screen.fill, pygame.transform.scale
+        wall_textures, game_map, zbuffer, wall_top, wall_thin = (self.wall_textures, GAME_MAP, self.zbuffer,
+                                                                 self.wall_top, self.wall_thin)
+        px, py, angle = p.pos.x, p.pos.y, p.angle
+        textured = col_w <= MAX_TEXTURE_COL
+        light = self.light_timer > 0
+        for i, (offset, fix) in enumerate(self.ray_table):
             # i번째 세로 줄이 바라보는 방향. 화면에 평평하게 펼쳐지도록 tan으로 계산해요
-            ray_angle = p.angle + math.atan(((i + 0.5) * col_w - WIDTH / 2) / proj)
-            floors, walls = cast_ray(p.pos.x, p.pos.y, ray_angle)
-            fix = math.cos(ray_angle - p.angle)     # 물고기 눈 왜곡 보정
+            floors, walls = cast_ray(px, py, angle + offset)
             x = i * col_w
 
             # 1) 바닥: 구간마다 색을 칠해요 (멀수록 지평선 가까이)
@@ -5493,53 +5555,62 @@ class Game:
                 if y_near > y_far and y_far < HEIGHT:
                     # 바닥은 벽보다 안개를 약하게 (바다가 회색으로 안 보이게)
                     color = fog(FLOOR_COLORS[kind], (min(d1, fog_dist) + d0) * 0.3, fog_dist)
-                    pygame.draw.rect(screen, color, (x, y_far, col_w, min(HEIGHT, y_near) - y_far + 1))
+                    draw_rect(screen, color, (x, y_far, col_w, min(HEIGHT, y_near) - y_far + 1))
 
             # 2) 건물: 먼 것부터 그려야 가까운 것이 앞에 보여요
-            self.zbuffer[i] = walls[0][0] * fix if walls else math.inf
+            zbuffer[i] = walls[0][0] * fix if walls else math.inf
             if walls:
                 near = proj / max(0.05, walls[0][0] * fix)
-                self.wall_top[i] = horizon + eye * near - walls[0][3][1] * near
-                self.wall_thin[i] = walls[0][3][1] <= 1.0          # 상자, 모래주머니, 돌담, 쓰레기통
+                wall_top[i] = horizon + eye * near - walls[0][3][1] * near
+                wall_thin[i] = walls[0][3][1] <= 1.0          # 상자, 모래주머니, 돌담, 쓰레기통
             else:
-                self.wall_thin[i] = False
-                self.wall_top[i] = HEIGHT
-            for dist, vertical, wall_x, (color, height, pattern, neon), cx, cy in reversed(walls):
+                wall_thin[i] = False
+                wall_top[i] = HEIGHT
+            # 가까운 벽부터 보며, 앞 벽에 가려지는 아래쪽은 그리지 않아요 (같은 곳을 두 번 칠하지 않게)
+            clip = float(HEIGHT)
+            spans = []
+            for dist, vertical, wall_x, spec, cx, cy in walls:
                 perp = max(0.05, dist * fix)
                 size = proj / perp
                 bottom = horizon + eye * size
-                top = bottom - height * size
-                if top > HEIGHT or bottom < 0:
+                top = bottom - spec[1] * size
+                if top < clip:
+                    spans.append((perp, size, bottom, top, min(bottom, clip), vertical, wall_x, spec, cx, cy))
+                    clip = top
+            for perp, size, bottom, top, vis_b, vertical, wall_x, (color, height, pattern, neon), cx, cy in spans:
+                if top > HEIGHT or vis_b < 0:
                     continue
                 textures = None
-                if col_w <= MAX_TEXTURE_COL and perp < TEXTURE_DISTANCE:     # 먼 벽은 안개에 묻혀서 단색으로
-                    textures = self.wall_textures.get(GAME_MAP[cy][cx])
+                if textured and perp < TEXTURE_DISTANCE:     # 먼 벽은 안개에 묻혀서 단색으로
+                    textures = wall_textures.get(game_map[cy][cx])
                 if textures:
                     # 질감: 그림에서 세로 한 줄을 잘라 화면 높이만큼 늘려 붙여요 (보이는 부분만)
                     level = min(FOG_LEVELS - 1, int(min(1.0, perp / fog_dist) * (FOG_LEVELS - 1) + 0.5))
                     tex = textures[0 if vertical else 1][level]
                     tex_h = tex.get_height()
-                    vis_top, vis_bottom = max(0.0, top), min(float(HEIGHT), bottom)
+                    vis_top, vis_bottom = max(0.0, top), min(float(HEIGHT), vis_b)
+                    if vis_bottom - vis_top < 1:
+                        continue
                     v0 = int((vis_top - top) / (bottom - top) * tex_h)
                     v1 = max(v0 + 1, min(tex_h, int((vis_bottom - top) / (bottom - top) * tex_h + 1)))
                     strip = tex.subsurface((min(TEX - 1, int(wall_x * TEX)), v0, 1, v1 - v0))
-                    screen.blit(pygame.transform.scale(strip, (col_w, int(vis_bottom - vis_top) + 1)), (x, vis_top))
+                    blit(scale(strip, (col_w, int(vis_bottom - vis_top) + 1)), (x, vis_top))
                 else:
                     base = shade(color, 0.82 if vertical else 1.0)
                     if wall_x < 0.03 or wall_x > 0.97:      # 건물 모서리 선
                         base = shade(base, 0.6)
                     elif pattern == "ribs" and (wall_x * 6) % 1 < 0.2:   # 컨테이너/창고의 세로 골
                         base = shade(base, 0.75)
-                    pygame.draw.rect(screen, fog(base, perp, fog_dist), (x, top, col_w, bottom - top + 1))
+                    draw_rect(screen, fog(base, perp, fog_dist), (x, top, col_w, vis_b - top + 1))
                 if perp < 14:
                     # 벽 아래쪽 그림자 (땅과 닿는 곳이 어두워서 건물이 땅에 붙어 보여요)
                     shadow_top = max(top, bottom - 0.12 * size)
-                    if shadow_top < HEIGHT:
-                        screen.fill((150, 150, 155), (x, shadow_top, col_w, min(HEIGHT, bottom) - shadow_top + 1),
+                    if shadow_top < min(HEIGHT, vis_b):
+                        fill((150, 150, 155), (x, shadow_top, col_w, min(HEIGHT, vis_b) - shadow_top + 1),
                                     special_flags=pygame.BLEND_MULT)
-                    if self.light_timer > 0 and perp < 5:      # 총구 불빛이 가까운 벽을 비춰요
+                    if light and perp < 5:      # 총구 불빛이 가까운 벽을 비춰요
                         k = int(self.muzzle_glow * (1 - perp / 5))
-                        screen.fill((k, int(k * 0.8), int(k * 0.5)), (x, max(0, top), col_w, min(HEIGHT, bottom) - max(0, top)),
+                        fill((k, int(k * 0.8), int(k * 0.5)), (x, max(0, top), col_w, min(HEIGHT, vis_b) - max(0, top)),
                                     special_flags=pygame.BLEND_ADD)
                 # 창문: 층마다 두 칸씩. 몇몇 창문은 불이 켜져 있어요
                 if pattern is True and (0.18 < wall_x < 0.42 or 0.58 < wall_x < 0.82):
@@ -5548,14 +5619,14 @@ class Game:
                     half = 0 if wall_x < 0.5 else 1
                     for k in range(int(height / 0.5)):
                         y0 = bottom - (k * 0.5 + 0.42) * size
-                        y1 = bottom - (k * 0.5 + 0.17) * size
-                        if y1 > 0 and y0 < HEIGHT:
+                        y1 = min(vis_b, bottom - (k * 0.5 + 0.17) * size)
+                        if y1 > max(0, y0) and y0 < HEIGHT:
                             lit = (cx * 7 + cy * 13 + k * 5 + half * 3 + vertical) % LIT == 0
-                            pygame.draw.rect(screen, lit_glass if lit else dark_glass, (x, y0, col_w, y1 - y0))
+                            draw_rect(screen, lit_glass if lit else dark_glass, (x, y0, col_w, y1 - y0))
                 # 네온사인: 건물 꼭대기에 빛나는 띠 (안개를 덜 타서 멀리서도 잘 보여요)
                 if neon:
                     glow = fog(neon, perp * 0.3, fog_dist)
-                    pygame.draw.rect(screen, glow, (x, top + 0.06 * size, col_w, max(2, 0.07 * size)))
+                    draw_rect(screen, glow, (x, top + 0.06 * size, col_w, max(2, 0.07 * size)))
 
     def draw_sprites(self, screen):
         items = []     # (화면 위치, 그림, 적 또는 None)
@@ -5833,6 +5904,19 @@ class Game:
             color = (255, int(40 + 60 * (1 - t)), 40)
             pygame.draw.polygon(screen, color, [tip, base + side * 26 * UI, base - side * 26 * UI])
 
+        # 소리 표시: 발소리는 회색 점, 총소리·폭발은 주황 삼각형 (위 = 앞)
+        for angle, kind, t in self.sound_marks:
+            rel = angle_diff(angle, self.player.angle)
+            d = pygame.Vector2(math.sin(rel), -math.cos(rel))
+            spot = pygame.Vector2(cx, cy) + d * 100 * UI
+            alpha = min(1.0, t / 0.4)
+            if kind == "step":
+                pygame.draw.circle(screen, (int(200 * alpha), int(200 * alpha), int(210 * alpha)), spot, 5 * UI)
+            else:
+                side = pygame.Vector2(-d.y, d.x)
+                pygame.draw.polygon(screen, (255, int(150 * alpha), 30), [spot + d * 10 * UI, spot - d * 6 * UI + side * 8 * UI,
+                                                                         spot - d * 6 * UI - side * 8 * UI])
+
         # 점수/메달 글자 (조준점 아래)
         for i, (text, color, t) in enumerate(self.popups[-4:]):
             self.center_text(screen, font, text, color, HEIGHT * 0.58 + i * 30 * UI)
@@ -5921,6 +6005,7 @@ class Game:
             label = self.fonts["tiny"].render(f"PERK: {self.perk}", True, (80, 240, 255))
             screen.blit(label, label.get_rect(center=(WIDTH / 2, HEIGHT - 54 * UI)))
 
+        self.draw_compass(screen)
         # 위쪽 정보
         if self.mode == "mission":
             t = int(self.mission_time)
@@ -6288,6 +6373,10 @@ SETTING_ROWS = [
     ("volume", "VOLUME", "소리 크기", "Sound volume"),
     ("music", "MUSIC", "배경 음악 크기 (컴퓨터에서만, 웹은 없음)", "Background music (desktop only)"),
     ("difficulty", "DIFFICULTY", "난이도: 적 실력과 내가 받는 피해", "Enemy skill and damage taken"),
+    ("hud", "UI SIZE", "글자와 화면 표시 크기 (다음 판부터)", "Text and HUD size (next game)"),
+    ("shake", "SCREEN SHAKE", "쏘거나 맞을 때 화면 흔들림", "Camera shake when shooting or hit"),
+    ("soundviz", "SOUND MARKS", "발소리·총소리 방향을 조준점 둘레에 표시", "Show footstep/gunshot directions"),
+    ("colorblind", "COLORBLIND", "빨강/초록 대신 주황/파랑", "Orange/blue instead of red/green"),
     ("controls", "CONTROLS", "키 바꾸기 (Enter 로 열기)", "Rebind keys (press Enter)"),
 ]
 
@@ -6302,6 +6391,10 @@ def change_setting(key, step):
         SETTINGS[key] = max(56, min(90, SETTINGS[key] + step * 2))
     elif key in ("volume", "music"):
         SETTINGS[key] = max(0, min(100, SETTINGS[key] + step * 10))
+    elif key == "hud":
+        SETTINGS[key] = max(80, min(130, SETTINGS[key] + step * 10))
+    elif key in ("shake", "soundviz", "colorblind"):
+        SETTINGS[key] = 1 - SETTINGS[key]
     elif key == "difficulty":
         SETTINGS[key] = (SETTINGS[key] + step) % len(DIFFICULTIES)
     apply_settings({})
@@ -6319,6 +6412,8 @@ def setting_text(key):
         return f"x{value:.1f}"
     if key == "fov":
         return f"{value}"
+    if key in ("shake", "soundviz", "colorblind"):
+        return "ON" if value else "OFF"
     return f"{value}%"
 
 
@@ -6355,20 +6450,21 @@ async def settings_screen(save):
                 change_setting(SETTING_ROWS[row][0], 1)
         screen.fill((14, 10, 30))
         title = fonts["big"].render("SETTINGS", True, (255, 80, 200))
-        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.08, HEIGHT * 0.1)))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.08)))
         for i, (key, name, desc_ko, desc_en) in enumerate(SETTING_ROWS):
-            rect = pygame.Rect(WIDTH * 0.08, HEIGHT * (0.18 + i * 0.094), WIDTH * 0.84, HEIGHT * 0.085)
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.15 + i * 0.066), WIDTH * 0.88, HEIGHT * 0.06)
             selected = i == row
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
             screen.blit(panel, rect)
             pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1)
-            screen.blit(fonts["normal"].render(name, True, WHITE), (rect.x + 16, rect.y + rect.h * 0.12))
-            screen.blit(fonts["help"].render(desc_ko if ko else desc_en, True, (200, 230, 255)),
-                        (rect.x + 16, rect.y + rect.h * 0.58))
+            label = fonts["normal"].render(name, True, WHITE)
+            screen.blit(label, label.get_rect(midleft=(rect.x + 14, rect.centery)))
+            desc = fonts["help"].render(desc_ko if ko else desc_en, True, (200, 230, 255))
+            screen.blit(desc, desc.get_rect(midleft=(rect.x + rect.w * 0.24, rect.centery)))
             value = setting_text(key)
-            image = fonts["big"].render(f"<  {value}  >" if selected else value, True, YELLOW if selected else WHITE)
-            screen.blit(image, image.get_rect(midright=(rect.right - 20, rect.centery)))
+            image = fonts["normal"].render(f"<  {value}  >" if selected else value, True, YELLOW if selected else WHITE)
+            screen.blit(image, image.get_rect(midright=(rect.right - 16, rect.centery)))
         hint = ("↑↓ 고르기     ←→ 바꾸기     Enter / ESC 저장하고 돌아가기" if ko
                 else "UP/DOWN choose     LEFT/RIGHT change     ENTER / ESC save and back")
         image = fonts["help"].render(hint, True, YELLOW)
