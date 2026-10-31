@@ -2073,7 +2073,7 @@ KO_TEXT = {
     "LOOK SPEED": "시점 속도", "MOUSE SPEED": "마우스 속도", "AIM ASSIST": "조준 보정", "FIELD OF VIEW": "시야각",
     "VOLUME": "소리", "MUSIC": "음악", "FULLSCREEN": "전체 화면", "SQUADMATES": "동료", "UI SIZE": "글자 크기",
     "SCREEN SHAKE": "화면 흔들림", "SOUND MARKS": "소리 표시", "COLORBLIND": "색약 모드", "LANGUAGE": "언어",
-    "WEAPONS": "무기", "RECENT GAMES": "최근 판",
+    "WEAPONS": "무기", "RECENT GAMES": "최근 판", "DISPLAY": "화면", "SOUND": "소리", "INPUT": "조작", "GAME": "게임",
 }
 
 
@@ -7969,22 +7969,53 @@ def setting_text(key):
     return f"{value}%"
 
 
+# 설정 화면 탭: (탭 이름, 그 탭의 설정 키들). 새 설정을 만들면 여기 한 곳에 꼭 넣어요
+SETTING_TABS = [("DISPLAY", ("fullscreen", "fov", "hud", "shake", "colorblind", "lang")),
+                ("SOUND", ("volume", "music", "soundviz")),
+                ("INPUT", ("look", "mouse", "assist", "controls")),
+                ("GAME", ("difficulty", "squad"))]
+
+
+def draw_setting_preview(screen, fonts, key, rect):
+    """고른 설정의 미리보기 (글자 크기, 색약 색, 시야각...)"""
+    if key == "hud":                                             # 이 크기로 HUD 글자가 보여요
+        size = SETTINGS["hud"] / 100
+        font = pygame.font.Font(None, int(56 * HEIGHT / 600 * size))
+        image = font.render("30 / 120", True, WHITE)
+        screen.blit(image, image.get_rect(midright=(rect.right - 20 * UI, rect.centery)))
+    elif key == "colorblind":                                    # 적 조준 / 체력 색
+        for i, color in enumerate((RED, GREEN)):
+            pygame.draw.circle(screen, color, (rect.right - (60 - i * 34) * UI, rect.centery), 12 * UI)
+    elif key == "fov":                                           # 시야각 부채꼴
+        cx, cy, r = rect.right - 70 * UI, rect.bottom - 10 * UI, rect.h * 0.75
+        half = math.radians(SETTINGS["fov"] / 2)
+        points = [(cx, cy)] + [(cx + r * math.sin(a), cy - r * math.cos(a))
+                               for a in (-half + k * half / 6 for k in range(13))]
+        pygame.draw.polygon(screen, (80, 240, 255), points, 2)
+    elif key in ("volume", "music"):                             # 소리 막대
+        bar = pygame.Rect(rect.right - 170 * UI, rect.centery - 6 * UI, 150 * UI, 12 * UI)
+        pygame.draw.rect(screen, (45, 40, 70), bar, border_radius=4)
+        pygame.draw.rect(screen, UI_CYAN, (bar.x, bar.y, bar.w * SETTINGS[key] / 100, bar.h), border_radius=4)
+
+
 async def settings_screen(save):
-    """설정: ↑↓ 고르기, ←→ 바꾸기, Enter/ESC 저장하고 돌아가기"""
+    """설정: 탭(화면 / 소리 / 조작 / 게임). Tab 또는 1~4 탭 바꾸기, ↑↓ 고르기, ←→ 바꾸기, Enter/ESC 저장하고 돌아가기"""
     screen = pygame.display.get_surface()
     fonts = make_fonts()
     ko = fonts["lang"] == "ko"
     clock = pygame.time.Clock()
-    row = 0
+    rows_by_key = {row[0]: row for row in SETTING_ROWS}
+    tab, row = 0, 0
     while True:
         clock.tick(30)
+        keys = SETTING_TABS[tab][1]
         for event in menu_events():
             if event.type == pygame.QUIT:
                 return "closed"
             if event.type != pygame.KEYDOWN:
                 continue
-            if SETTING_ROWS[row][0] == "controls" and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER,
-                                                                     pygame.K_RIGHT, pygame.K_d):
+            key = keys[row]
+            if key == "controls" and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_RIGHT, pygame.K_d):
                 if await controls_screen(save) == "closed":
                     return "closed"
                 continue
@@ -7992,34 +8023,57 @@ async def settings_screen(save):
                 save["settings"] = dict(SETTINGS)
                 write_save(save)
                 return None
-            if event.key in (pygame.K_UP, pygame.K_w):
-                row = (row - 1) % len(SETTING_ROWS)
+            if event.key == pygame.K_TAB or pygame.K_1 <= event.key <= pygame.K_1 + len(SETTING_TABS) - 1:
+                tab = (tab + 1) % len(SETTING_TABS) if event.key == pygame.K_TAB else event.key - pygame.K_1
+                row = 0
+                keys = SETTING_TABS[tab][1]
+            elif event.key in (pygame.K_UP, pygame.K_w):
+                row = (row - 1) % len(keys)
             elif event.key in (pygame.K_DOWN,):
-                row = (row + 1) % len(SETTING_ROWS)
+                row = (row + 1) % len(keys)
             elif event.key in (pygame.K_LEFT, pygame.K_a):
-                change_setting(SETTING_ROWS[row][0], -1)
+                change_setting(key, -1)
             elif event.key in (pygame.K_RIGHT, pygame.K_d):
-                change_setting(SETTING_ROWS[row][0], 1)
+                change_setting(key, 1)
+            if key == "lang" and event.key in (pygame.K_LEFT, pygame.K_a, pygame.K_RIGHT, pygame.K_d):
+                fonts = make_fonts()                       # 언어를 바꾸면 글꼴도 바로
+                ko = fonts["lang"] == "ko"
             screen = pygame.display.get_surface()       # 전체 화면을 바꾸면 새 화면
         draw_backdrop(screen)
         draw_title(screen, fonts, "SETTINGS", (WIDTH * 0.06, HEIGHT * 0.08))
-        for i, (key, name, desc_ko, desc_en) in enumerate(SETTING_ROWS):
-            step = min(0.057, 0.77 / len(SETTING_ROWS))                  # 줄이 많아도 아래 안내 띠 위까지
-            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.13 + i * step), WIDTH * 0.88, HEIGHT * step * 0.9)
+        # 탭
+        tab_w = WIDTH * 0.2
+        for i, (name, _) in enumerate(SETTING_TABS):
+            rect = pygame.Rect(WIDTH * 0.06 + i * (tab_w + WIDTH * 0.0133), HEIGHT * 0.15, tab_w, HEIGHT * 0.065)
+            draw_panel(screen, rect, i == tab)
+            label = fonts["normal"].render(tr(fonts, name), True, WHITE if i == tab else UI_DIM)
+            screen.blit(label, label.get_rect(center=(rect.centerx + 8 * UI, rect.centery)))
+            num = fonts["tiny"].render(str(i + 1), True, YELLOW)
+            screen.blit(num, num.get_rect(midleft=(rect.x + 10 * UI, rect.centery)))
+        # 고른 탭의 설정들
+        step = HEIGHT * 0.075
+        for i, key in enumerate(keys):
+            _, name, desc_ko, desc_en = rows_by_key[key]
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * 0.25 + i * step, WIDTH * 0.88, step * 0.86)
             selected = i == row
-            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
-            panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
-            screen.blit(panel, rect)
-            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1)
-            label = fonts["normal"].render(tr(fonts, name), True, WHITE)
-            screen.blit(label, label.get_rect(midleft=(rect.x + 14, rect.centery)))
-            desc = fonts["help"].render(desc_ko if ko else desc_en, True, (200, 230, 255))
-            screen.blit(desc, desc.get_rect(midleft=(rect.x + rect.w * 0.27, rect.centery)))
+            draw_panel(screen, rect, selected)
+            label = fonts["normal"].render(tr(fonts, name), True, YELLOW if selected else WHITE)
+            screen.blit(label, label.get_rect(midleft=(rect.x + 16 * UI, rect.centery)))
             value = setting_text(key)
             image = fonts["normal"].render(f"<  {value}  >" if selected else value, True, YELLOW if selected else WHITE)
-            screen.blit(image, image.get_rect(midright=(rect.right - 16, rect.centery)))
-        hint = ("↑↓ 고르기     ←→ 바꾸기     Enter / ESC 저장하고 돌아가기" if ko
-                else "UP/DOWN choose     LEFT/RIGHT change     ENTER / ESC save and back")
+            screen.blit(image, image.get_rect(midright=(rect.right - 16 * UI, rect.centery)))
+        # 아래: 고른 설정 설명 + 미리보기
+        key = keys[row]
+        _, name, desc_ko, desc_en = rows_by_key[key]
+        box = pygame.Rect(WIDTH * 0.06, HEIGHT * 0.25 + 6 * step + HEIGHT * 0.01, WIDTH * 0.88,
+                          HEIGHT - 44 * UI - (HEIGHT * 0.26 + 6 * step) - HEIGHT * 0.01)
+        draw_panel(screen, box, False)
+        desc = fit_text(fonts["help"], desc_ko if ko else desc_en, box.w * 0.62)
+        screen.blit(fonts["help"].render(desc, True, (200, 230, 255)),
+                    fonts["help"].render(desc, True, WHITE).get_rect(midleft=(box.x + 16 * UI, box.centery)))
+        draw_setting_preview(screen, fonts, key, box)
+        hint = ("Tab / 1~4 탭     ↑↓ 고르기     ←→ 바꾸기     Enter / ESC 저장하고 돌아가기" if ko
+                else "TAB / 1-4 tabs     UP/DOWN choose     LEFT/RIGHT change     ENTER / ESC save and back")
         draw_hint_bar(screen, fonts, hint)
         present("settings_screen")
         await asyncio.sleep(0)
