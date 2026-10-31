@@ -396,6 +396,19 @@ class GameTest(unittest.TestCase):
         self.assertEqual(len(game.pickups), before + 1)
         self.assertEqual(game.pickups[-1].kind, "health")
 
+    def test_music_follows_the_fight(self):
+        game = shooter.Game({}, 3)
+        for e in game.enemies:
+            e.sees = False
+        self.assertEqual(game.music_state(), "calm")
+        game.director.phase = "peak"
+        self.assertEqual(game.music_state(), "peak")
+        self.assertEqual(len(shooter.MUSIC_MIX["boss"]), len(shooter.MUSIC_LAYERS))
+        game.sounds.levels = [0.0] * len(shooter.MUSIC_LAYERS)
+        for _ in range(120):
+            game.sounds.mix_music(shooter.MUSIC_MIX["boss"], 1 / 60)
+        self.assertGreater(min(game.sounds.levels), 0.9)                  # 2초 안에 모든 겹이 올라와요
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
