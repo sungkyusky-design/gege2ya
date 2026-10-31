@@ -2037,6 +2037,36 @@ def make_fonts():
     return {key: ShadowFont(f) if key != "lang" else f for key, f in fonts.items()}
 
 
+def fit_text(font, text, max_width):
+    """글자가 max_width 보다 길면 뒤를 잘라서 '..' 을 붙여요 (칸 밖으로 안 넘치게)"""
+    if font.size(text)[0] <= max_width:
+        return text
+    while len(text) > 1 and font.size(text + "..")[0] > max_width:
+        text = text[:-1]
+    return text.rstrip() + ".."
+
+
+def weapon_key_label(index):
+    """무기 칸 번호: 1~9, 10번은 0, 11번부터는 번호 키가 없어요 (Tab 휠로 골라요)"""
+    return str(index + 1) if index < 9 else ("0" if index == 9 else "")
+
+
+class MaskedKeys:
+    """몇몇 키를 '안 눌린 것'으로 보여줘요 (무기 휠을 여는 동안 화살표로 시점이 돌지 않게)"""
+
+    def __init__(self, real, hidden):
+        self.real, self.hidden = real, hidden
+
+    def __getitem__(self, key):
+        return False if key in self.hidden else bool(self.real[key])
+
+
+WHEEL_KEYS = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_1, pygame.K_2, pygame.K_3,
+              pygame.K_4, pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_8, pygame.K_9, pygame.K_0)
+WHEEL_HOLD = 0.22          # Tab 을 이만큼(초) 누르고 있으면 무기 휠이 열려요
+WHEEL_SLOW = 0.3           # 휠이 열린 동안 시간이 이만큼 느려져요
+
+
 def wrap_text(font, text, max_width):
     """글자가 max_width보다 길면 띄어쓰기 기준으로 여러 줄로 나눠요."""
     lines, line = [], ""
@@ -3198,6 +3228,7 @@ class Game:
         self.fps = 0.0
         self.hitstop = 0.0         # 쓰러뜨리는 순간 화면이 아주 잠깐 멈춰요 (묵직한 손맛)
         self.slowmo = 0.0          # 라운드 마지막 적을 쓰러뜨리면 잠깐 느리게
+        self.wheel = None          # 무기 휠: dict(t=누른 시간, pick=고른 칸, open=열렸는지)
         self.gun_noise = 0.0       # 방금 총을 쐈으면 적이 듣고 다가와요
         self.pad_aim = False       # 게임패드 왼쪽 트리거를 누르고 있으면 정조준
         self.on_target = False     # 조준점이 적 위에 있는지 (조준선이 빨개지고 시점이 살짝 끈적해져요)
@@ -4828,12 +4859,15 @@ class Game:
                 self.sounds.muted = not self.sounds.muted
                 self.sounds.refresh_background()
                 self.popups.append(["SOUND OFF" if self.sounds.muted else "SOUND ON", WHITE, 1.0])
+            elif self.wheel and self.wheel["open"] and event.key in WHEEL_KEYS:
+                self.move_wheel(event.key)
             elif pygame.K_1 <= event.key <= pygame.K_9 and event.key - pygame.K_1 < len(a.weapons):
                 a.switch(event.key - pygame.K_1)
             elif event.key == pygame.K_0 and len(a.weapons) >= 10:
                 a.switch(9)
-            elif event.key == pygame.K_TAB:          # 다음 무기
-                a.switch(a.index + 1)
+            elif event.key == pygame.K_TAB:          # 짧게: 다음 무기, 꾹: 무기 휠 (update 에서)
+                if self.wheel is None:
+                    self.wheel = dict(t=0.0, pick=a.index, open=False)
             elif event.key == pygame.K_t:
                 self.use_skill("FOCUS")
             elif event.key == pygame.K_y:
@@ -4888,8 +4922,45 @@ class Game:
                 self.buy("upgrade")
 
     # ----- 게임 진행 -----
+    def move_wheel(self, key):
+        """무기 휠: ←↑ 이전, →↓ 다음, 숫자 키는 그 칸으로"""
+        n = len(self.arsenal.weapons)
+        if key in (pygame.K_LEFT, pygame.K_UP):
+            self.wheel["pick"] = (self.wheel["pick"] - 1) % n
+        elif key in (pygame.K_RIGHT, pygame.K_DOWN):
+            self.wheel["pick"] = (self.wheel["pick"] + 1) % n
+        else:
+            index = 9 if key == pygame.K_0 else key - pygame.K_1
+            if index < n:
+                self.wheel["pick"] = index
+        self.sounds.play("beep", 0.25)
+
+    def update_wheel(self, dt, keys):
+        """Tab 을 떼면: 휠이 열렸으면 고른 무기, 아니면 다음 무기"""
+        if self.wheel is None:
+            return keys
+        a = self.arsenal
+        if keys[pygame.K_TAB] and not self.game_over:
+            self.wheel["t"] += dt
+            if not self.wheel["open"] and self.wheel["t"] >= WHEEL_HOLD:
+                self.wheel["open"] = True
+                self.wheel["pick"] = a.index
+        else:
+            if self.wheel["open"]:
+                a.switch(self.wheel["pick"])
+            elif not self.game_over:
+                a.switch(a.index + 1)
+            self.wheel = None
+            return keys
+        if self.wheel["open"]:          # 화살표는 휠에 쓰니까 시점은 안 돌아요
+            return MaskedKeys(keys, (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN))
+        return keys
+
     def update(self, dt, keys, mouse_dx, mouse_dy, buttons):
         self.frame_dt = dt
+        keys = self.update_wheel(dt, keys)
+        if self.wheel and self.wheel["open"]:
+            dt *= WHEEL_SLOW                       # 휠을 보는 동안 시간이 느려져요
         if self.show_help:          # 도움말을 보는 동안은 멈춰요
             return
         if self.briefing is not None:   # 세트 브리핑: 스페이스/사격/클릭(패드 A)으로 시작
@@ -6151,6 +6222,8 @@ class Game:
             self.flash_overlay.set_alpha(int(255 * min(1.0, self.flashed / 1.2)))
             screen.blit(self.flash_overlay, (0, 0))
         self.draw_hud(screen)
+        if self.wheel and self.wheel["open"]:
+            self.draw_wheel(screen)
         if self.round_clear_timer <= 0 and not self.game_over and self.briefing is None:
             self.capture_clip(screen, self.frame_dt)
         elif self.round_clear_timer > 0:
@@ -6743,6 +6816,44 @@ class Game:
         pygame.draw.line(screen, (30, 30, 30), base, base - d * 70 * UI, int(20 * UI))
         draw_glove(screen, base - d * 40 * UI, 26 * UI)
 
+    def draw_wheel(self, screen):
+        """무기 휠: 가진 무기를 타원으로 늘어놓고, 고른 칸을 크게 보여줘요"""
+        weapons = self.arsenal.weapons
+        n = len(weapons)
+        dim = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        dim.fill((8, 6, 20, 150))
+        screen.blit(dim, (0, 0))
+        cx, cy = WIDTH / 2, HEIGHT * 0.48
+        rx, ry = min(WIDTH * 0.36, HEIGHT * 0.62), HEIGHT * 0.34
+        box_w, box_h = min(150 * UI, 2 * math.pi * rx / max(n, 1) * 0.86), 46 * UI
+        tiny, small = self.fonts["tiny"], self.fonts["small"]
+        for i, w in enumerate(weapons):
+            ang = -math.pi / 2 + 2 * math.pi * i / n
+            rect = pygame.Rect(0, 0, box_w, box_h)
+            rect.center = (cx + rx * math.cos(ang), cy + ry * math.sin(ang))
+            chosen = i == self.wheel["pick"]
+            if chosen:
+                rect.inflate_ip(14 * UI, 8 * UI)
+            fill = (70, 40, 100) if chosen else ((40, 34, 60) if i == self.arsenal.index else (22, 18, 38))
+            pygame.draw.rect(screen, fill, rect, border_radius=int(10 * UI))
+            pygame.draw.rect(screen, (255, 80, 200) if chosen else (90, 80, 120), rect, 3 if chosen else 1,
+                             border_radius=int(10 * UI))
+            label = weapon_key_label(i)
+            if label:
+                image = tiny.render(label, True, YELLOW)
+                screen.blit(image, (rect.x + 7 * UI, rect.y + 5 * UI))
+            name = fit_text(small, w.spec["name"], rect.width - 30 * UI)
+            image = small.render(name, True, WHITE if chosen else (200, 200, 220))
+            screen.blit(image, image.get_rect(center=(rect.centerx + 6 * UI, rect.centery - 6 * UI)))
+            ammo = tiny.render(f"{w.mag}/{w.reserve}", True, (150, 220, 255))
+            screen.blit(ammo, ammo.get_rect(center=(rect.centerx + 6 * UI, rect.centery + 12 * UI)))
+        pick = weapons[self.wheel["pick"]]
+        self.center_text(screen, self.fonts["big"], pick.spec["name"], (255, 80, 200), cy - 14 * UI)
+        info = WEAPON_INFO.get(pick.spec["name"], ("", ""))[1]
+        if info:
+            self.center_text(screen, small, fit_text(small, info, rx * 1.4), WHITE, cy + 26 * UI)
+        self.center_text(screen, tiny, "ARROWS / 1-9 0 pick     release TAB to equip", YELLOW, cy + 52 * UI)
+
     def draw_hud(self, screen):
         font, big_font = self.font, self.big_font
         # 다치면 화면 가장자리가 붉게 (체력이 낮을수록 진하게)
@@ -6986,7 +7097,7 @@ class Game:
 
         if self.hint_timer > 0 and not self.game_over:
             hints = ["WASD move   SHIFT sprint   C crouch/slide   ARROWS look   SPACE jump   F fire   E aim",
-                     f"G grenade   V knife   X killstreak   1-{len(self.arsenal.weapons)} weapon   R reload   H help (pause)"]
+                     "G grenade   V knife   X killstreak   1-9 0 weapon   TAB (hold) all weapons   R reload   H help"]
             for i, hint in enumerate(hints):
                 self.center_text(screen, self.small_font, hint, WHITE, HEIGHT - (82 - i * 20) * UI)
         self.draw_objective(screen)
@@ -8483,7 +8594,7 @@ async def loadout_screen(save, choice):
             image = fonts["help"].render(desc, True, (200, 230, 255))
             screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.68))
         # 왼쪽 아래: 무기 인벤토리 (가진 무기는 레벨, 없는 무기는 얻는 조건)
-        title = fonts["small"].render(f"INVENTORY  {len(owned)} / {len(WEAPONS)}   (in game: 1-9, 0, TAB)", True, WHITE)
+        title = fonts["small"].render(f"INVENTORY  {len(owned)} / {len(WEAPONS)}   (in game: 1-9, 0, hold TAB = wheel)", True, WHITE)
         screen.blit(title, (WIDTH * 0.06, HEIGHT * 0.685))
         kills_all = save.get("wkills", {})
         for k, spec in enumerate(WEAPONS):
