@@ -23,6 +23,10 @@
     폭탄병    : 4라운드부터. 수류탄을 던져요. GRENADE! 경고가 뜨면 피하세요
     방패병    : 6라운드부터. 앞에서 쏘면 방패에 막혀요. 머리를 노리거나 옆으로 돌아가세요
     보스      : 5라운드마다. 흰 정장. 체력 900, 연사와 수류탄
+    측면 공격병: 7라운드부터. 크게 피하며 파고들어 가까이서 산탄총
+    의무병    : 8라운드부터. 근처 적을 치료해요. 먼저 노리세요
+    기관총 진지: 9라운드부터. 모래주머니 뒤에서 움직이지 않고 연사
+    (좀비 모드: 좀비, 러너, 브루트, 폭탄 좀비, 침 좀비)
 
 조작 (키보드만으로 다 할 수 있어요):
     W A S D          : 이동
@@ -143,7 +147,8 @@ MAX_SPLATS = 40                   # 바닥에 남는 피 웅덩이 수
 CORPSE_TIME = 12.0                # 쓰러진 적이 남아 있는 시간(초)
 # 총마다 좌우 반동 (쏠 때 조준이 옆으로 살짝 튀어요, 단위: 라디안)
 HORIZONTAL_KICK = {"RIFLE": 0.005, "PISTOL": 0.004, "SNIPER": 0.015, "SHOTGUN": 0.012, "SMG": 0.007,
-                   "ROCKET": 0.01, "LMG": 0.006, "BURST": 0.004, "DMR": 0.008}
+                   "ROCKET": 0.01, "LMG": 0.006, "BURST": 0.004, "DMR": 0.008, "HEAVY AR": 0.008,
+                   "AUTO SHOTGUN": 0.012, "REVOLVER": 0.012, "MACHINE PISTOL": 0.007, "LAUNCHER": 0.01}
 
 # 경험치: 1000마다 계급(RANK)이 올라가요
 XP = dict(kill=100, headshot=50, knife=50, boss=500, double=50, triple=100, multi=150, round=250)
@@ -155,6 +160,9 @@ GRENADE_THROW = 9.0               # 던지는 힘
 GRENADE_BLAST = (3.2, 160)        # (폭발 반경, 가운데 피해)
 ROCKET_SPEED = 16.0
 ROCKET_BLAST = (2.8, 300)
+SHELL_BLAST = (2.6, 190)          # 유탄
+EXPLODER_BLAST = (2.6, 45)        # 다가와서 터지는 좀비
+EXPLODER_SHOT_BLAST = (2.6, 130)  # 총에 맞아 터지면 주변 좀비까지 날려요
 SELF_DAMAGE = 0.35                # 내 폭발에 내가 받는 피해 비율
 ENEMY_GRENADE_FUSE = 1.5          # 적이 던진 수류탄
 ENEMY_GRENADE_BLAST = (2.8, 70)
@@ -170,8 +178,8 @@ DROP_WEIGHTS = {"ammo": 5, "health": 3, "grenade": 2}
 HEALTH_PACK = 35
 
 # 로드아웃: 시작하기 전에 주무기 / 보조무기 / 퍼크(특수 능력)를 골라요
-PRIMARIES = ["RIFLE", "BURST", "SMG", "SHOTGUN", "LMG", "DMR", "SNIPER"]
-SECONDARIES = ["PISTOL", "ROCKET"]
+PRIMARIES = ["RIFLE", "HEAVY AR", "BURST", "SMG", "SHOTGUN", "AUTO SHOTGUN", "LMG", "DMR", "SNIPER"]
+SECONDARIES = ["PISTOL", "REVOLVER", "MACHINE PISTOL", "ROCKET", "LAUNCHER"]
 # 퍼크: (이름, 한국어 설명, 영어 설명)
 PERKS = [
     ("HEAVY ROUNDS", "총알 피해 +25%", "Bullets deal 25% more damage"),
@@ -192,6 +200,11 @@ WEAPON_INFO = {
     "SNIPER": ("저격총 - 조준경, 몸통도 한 방", "Sniper - scope, one shot kills"),
     "PISTOL": ("권총 - 가볍고 빠르게 꺼내요", "Pistol - light and quick"),
     "ROCKET": ("로켓 - 넓은 폭발", "Rocket launcher - big explosion"),
+    "HEAVY AR": ("중돌격소총 - 느리지만 한 발이 묵직해요", "Heavy rifle - slower, hits harder"),
+    "AUTO SHOTGUN": ("자동 산탄총 - 꾹 누르면 연달아 쾅쾅", "Auto shotgun - hold to keep blasting"),
+    "REVOLVER": ("리볼버 - 6발, 머리 한 방", "Revolver - 6 shots, one shot headshots"),
+    "MACHINE PISTOL": ("기관권총 - 보조무기인데 연사돼요", "Machine pistol - full auto sidearm"),
+    "LAUNCHER": ("유탄발사기 - 포물선으로 날아가 닿으면 쾅", "Grenade launcher - lobbed, explodes on impact"),
 }
 
 # 무기 목록
@@ -225,6 +238,17 @@ WEAPONS = [
          burst=3, burst_delay=0.06),
     dict(name="DMR", auto=False, delay=0.25, mag=15, reserve=60, body=55, head=150,
          spread=2, kick=22, reload=2.0, pellets=1, ads=2.2, scope=False, projectile=False),
+    dict(name="HEAVY AR", auto=True, delay=0.12, mag=25, reserve=100, body=42, head=110,
+         spread=5, kick=13, reload=2.0, pellets=1, ads=1.4, scope=False, projectile=False),
+    dict(name="AUTO SHOTGUN", auto=True, delay=0.3, mag=12, reserve=36, body=15, head=30,
+         spread=45, kick=28, reload=2.6, pellets=6, ads=1.15, scope=False, projectile=False, move=0.95),
+    dict(name="REVOLVER", auto=False, delay=0.38, mag=6, reserve=36, body=75, head=170,
+         spread=2, kick=34, reload=2.2, pellets=1, ads=1.35, scope=False, projectile=False),
+    dict(name="MACHINE PISTOL", auto=True, delay=0.055, mag=20, reserve=100, body=18, head=50,
+         spread=8, kick=5, reload=1.3, pellets=1, ads=1.25, scope=False, projectile=False),
+    # lobbed: 포물선으로 날아가 닿는 순간 터지는 유탄
+    dict(name="LAUNCHER", auto=False, delay=0.9, mag=4, reserve=12, body=0, head=0,
+         spread=1, kick=40, reload=2.6, pellets=1, ads=1.25, scope=False, projectile=True, lobbed=True),
 ]
 
 WEAPON_BY_NAME = {spec["name"]: spec for spec in WEAPONS}
@@ -274,6 +298,23 @@ ENEMY_TYPES = {
                  height=1.15, width=0.72, throw=(4, 6), throw_range=(3, 12),
                  look=dict(uniform=(240, 240, 235), vest=(240, 120, 170), pants=(235, 235, 230),
                            head="slick", gun=36)),
+    # 측면 공격병: 빠르게 옆으로 돌아 들어와 가까이서 산탄총 (flank = 크게 좌우로 피해요)
+    "FLANKER": dict(hp=90, speed=2.3, sight=15, reaction=0.5, keep=2.5, range=7,
+                    fire=(0.7, 1.1), damage=(10, 16), accuracy=0.7, falloff=0.05,
+                    height=0.88, width=0.44, flank=True,
+                    look=dict(uniform=(35, 35, 40), vest=(25, 25, 28), pants=(30, 30, 35), head="mask", gun=24)),
+    # 의무병: heal = (회복량, 간격 초, 거리). 근처 적을 치료해요 - 먼저 쓰러뜨리세요!
+    "MEDIC": dict(hp=90, speed=1.2, sight=14, reaction=0.9, keep=6, range=12,
+                  fire=(0.6, 1.1), damage=(5, 9), accuracy=0.5, falloff=0.04,
+                  height=0.9, width=0.45, heal=(20, 1.2, 3.5),
+                  look=dict(uniform=(225, 225, 220), vest=(240, 240, 235), pants=(70, 80, 70),
+                            head="medic", gun=22, cross=True)),
+    # 기관총 진지: 모래주머니 뒤에서 움직이지 않고 쉴 새 없이 쏴요. 옆으로 돌아가거나 수류탄으로
+    "GUNNER": dict(hp=220, speed=0.0, sight=18, reaction=1.2, keep=99, range=18,
+                   fire=(0.08, 0.13), damage=(3, 6), accuracy=0.38, falloff=0.02,
+                   height=0.78, width=0.7,
+                   look=dict(uniform=(70, 85, 60), vest=(45, 50, 40), pants=(40, 40, 45),
+                             head="helmet", gun=40, sandbags=True)),
     # 좀비 모드: 총 대신 가까이 와서 할퀴어요. melee = (피해, 할퀴는 간격 초)
     "ZOMBIE": dict(hp=80, speed=1.25, sight=99, reaction=0, keep=0, range=0,
                    fire=(1, 1), damage=(0, 0), accuracy=0, falloff=0,
@@ -290,8 +331,21 @@ ENEMY_TYPES = {
                   height=1.12, width=0.72, melee=(32, 1.4),
                   look=dict(head="zombie", skin=(95, 120, 90), shirt=(60, 55, 50), pants=(40, 38, 45),
                             eyes=(255, 120, 40), big=True)),
+    # 부풀어 오른 좀비: 다가와서 터져요. 총으로 미리 터뜨리면 주변 좀비까지 날아가요
+    "EXPLODER": dict(hp=45, speed=2.0, sight=99, reaction=0, keep=0, range=0,
+                     fire=(1, 1), damage=(0, 0), accuracy=0, falloff=0,
+                     height=0.9, width=0.56, melee=(0, 0.5), explode=True,
+                     look=dict(head="zombie", skin=(140, 160, 90), shirt=(110, 120, 60), pants=(60, 60, 50),
+                               eyes=(180, 255, 80), bloated=True)),
+    # 침 뱉는 좀비: 거리를 두고 초록 산성 침을 뱉어요 (sound = 쏠 때 소리)
+    "SPITTER": dict(hp=90, speed=1.0, sight=20, reaction=0.8, keep=5, range=9,
+                    fire=(2.0, 2.8), damage=(12, 18), accuracy=0.6, falloff=0.03,
+                    height=0.86, width=0.44, sound="spit",
+                    look=dict(head="zombie", skin=(110, 140, 110), shirt=(70, 90, 60), pants=(45, 50, 40),
+                              eyes=(120, 255, 120), spit=True)),
 }
-ZOMBIE_KINDS = ("ZOMBIE", "RUNNER", "BRUTE")
+ZOMBIE_KINDS = ("ZOMBIE", "RUNNER", "BRUTE", "EXPLODER", "SPITTER")
+ARMORED = ("HEAVY", "BOSS", "BRUTE", "GUNNER")     # 맞으면 '깡' 장갑 소리
 ZOMBIE_POINTS = dict(hit=10, kill=60, headshot=100, knife=130, wave=250)
 ZOMBIE_SHOP = dict(ammo=500, upgrade=2500)     # B: 탄약 가득, U: 들고 있는 총 강화
 
@@ -572,6 +626,79 @@ MAPS = [
             ";;;;;;;;Z;;;;;;;;M;M;;",
             ";P;;;;;;;;;;;;v;;;;;n;",
             ";;;T;;;;;;;E;;;;;;;;;;",
+        ],
+    ),
+    dict(
+        name="SCRAPYARD",
+        sky=[(0.0, (85, 90, 100)), (0.6, (145, 145, 150)), (0.9, (185, 180, 170)), (1.0, (200, 195, 185))],
+        haze=(185, 180, 170), sun=None, stars=False, ground="#", lit=9, fog=0.85, snow=False,
+        camo=dict(uniform=(90, 85, 70), vest=(60, 58, 50), pants=(70, 65, 55)),
+        op="OPERATION RUSTBELT", brief="Hostiles dug in among the wrecks. Every car is cover - for them too.",
+        rows=[
+            "WWWWW###E######v####E#",
+            "W###W##vv##KK###rrr###",
+            "W#a#####v#######rrr#v#",
+            "WW#WW###########rrr###",
+            "###########X##########",
+            "#vv##KK#E####vv##UU##E",
+            "#v###KK#####vv###UU###",
+            "######################",
+            "P##########E######v###",
+            "##rr##uu##KK##oo##vv##",
+            "##rr##uu##KK##oo##v##E",
+            "######################",
+            "#X###vv####h####n###KK",
+            "#####v###E#####vv###KK",
+            "##E######W#WW#########",
+            "#########W#aW####E###v",
+        ],
+    ),
+    dict(
+        name="BAZAAR",
+        sky=[(0.0, (55, 105, 185)), (0.6, (125, 170, 220)), (0.9, (230, 215, 180)), (1.0, (245, 228, 195))],
+        haze=(240, 225, 195), sun=-math.pi / 3, stars=False, ground=";", lit=8, fog=1.0, snow=False,
+        camo=dict(uniform=(185, 160, 110), vest=(150, 125, 85), pants=(165, 140, 100)),
+        op="OPERATION SPICE ROAD", brief="Crowded market streets. Clear every stall and courtyard.",
+        rows=[
+            "MMMMMMM;;;;E;;;;MMMMMM",
+            "M;;a;;M;;CC;CC;;M;;n;M",
+            "M;;;;;;;;CC;CC;;;;;;;M",
+            "MMM;MMM;;;;;;;;;MMM;MM",
+            ";;;;;;;KK;;;;;KK;;;;;;",
+            ";E;C;C;;;;FF;;;;C;C;E;",
+            ";;;C;C;;;;FF;;;;C;C;;;",
+            "xxxxxxxxxxxxxxxxxxxxxx",
+            "P;;;;;;;;;;T;;;;;;;;;E",
+            "MMMMM;CC;CC;CC;CC;MMMM",
+            "M;;;M;CC;CC;CC;CC;M;EM",
+            "M;h;;;;;;;;E;;;;;;;;;M",
+            "MMMMM;KK;;;;;;KK;MMMMM",
+            ";;;;;;;;;MMMM;E;;;;;;;",
+            ";E;;Q;;;;M;aM;;;Q;;;E;",
+            ";;;;;;;;;M;;;;;;;;;;E;",
+        ],
+    ),
+    dict(
+        name="OIL RIG",
+        sky=[(0.0, (5, 8, 15)), (0.6, (20, 28, 40)), (0.9, (45, 55, 70)), (1.0, (60, 70, 85))],
+        haze=(50, 60, 75), sun=None, stars=False, ground=",", lit=4, fog=0.6, snow=False, rain=True, dark=0.62,
+        camo=dict(uniform=(55, 60, 70), vest=(35, 38, 45), pants=(40, 42, 50)),
+        op="OPERATION BLACKWATER", brief="Storm over the rig. Secure the platform before the chopper arrives.",
+        rows=[
+            "~~~~~~~~~~~~~~~~~~~~~~",
+            "~,,,,,,,,,E,,,,,,,,,E~",
+            "~,UU,,X,,,,,,UU,,KK,,~",
+            "~,UU,,,,WWWW,UU,,KK,,~",
+            "~,,,,,,,W,,W,,,,,,,,,~",
+            "~,E,,,,,W,a,,,,,YY,,,~",
+            "~,,KK,,,WWWW,,E,YY,,,~",
+            "~P,,,,,,,,,,,,,,,,,,,~",
+            "~,,,,YY,,,,,,,KK,,,E,~",
+            "~,,,,YY,,UU,,,KK,,,,,~",
+            "~,h,,,,,,UU,,,,,,X,,,~",
+            "~,,,KK,,,,,,,n,,,,,,,~",
+            "~,E,,,,,,,,E,,,,,,,E,~",
+            "~~~~~~~~~~~~~~~~~~~~~~",
         ],
     ),
     # 좀비 모드 전용 맵 (캠페인에는 안 나와요)
@@ -882,6 +1009,9 @@ def make_enemy_image(look, state="normal"):
     if look.get("belt"):
         for x in (18, 26, 34, 42):
             pygame.draw.circle(img, (60, 90, 50), (x, 72), 4)              # 허리의 수류탄
+    if look.get("cross"):
+        pygame.draw.rect(img, (220, 30, 30), (27, 42, 6, 20))              # 조끼의 빨간 십자
+        pygame.draw.rect(img, (220, 30, 30), (20, 49, 20, 6))
 
     head = look["head"]
     if head == "helmet":
@@ -909,6 +1039,15 @@ def make_enemy_image(look, state="normal"):
         pygame.draw.circle(img, skin, (30, 20), 12)
         pygame.draw.rect(img, (40, 30, 25), (17, 5, 26, 9), border_radius=4)        # 넘긴 머리
         pygame.draw.rect(img, BLACK, (21, 17, 18, 5), border_radius=2)              # 선글라스
+    elif head == "mask":
+        pygame.draw.circle(img, (30, 30, 34), (30, 20), 12)                        # 복면
+        pygame.draw.rect(img, skin, (22, 16, 16, 6))
+        pygame.draw.rect(img, (200, 40, 40), (23, 17, 14, 4))                      # 빨간 고글
+    elif head == "medic":
+        pygame.draw.circle(img, skin, (30, 20), 12)
+        pygame.draw.rect(img, (245, 245, 245), (18, 6, 24, 9), border_radius=5)    # 흰 모자
+        pygame.draw.rect(img, (220, 30, 30), (28, 7, 4, 7))                        # 빨간 십자
+        pygame.draw.rect(img, (220, 30, 30), (26, 9, 8, 3))
     else:  # heavy
         pygame.draw.circle(img, (40, 42, 55) if not hurt else pale, (30, 17), 15)   # 통 헬멧
         pygame.draw.rect(img, (120, 200, 230), (20, 14, 20, 6))                     # 바이저
@@ -922,6 +1061,13 @@ def make_enemy_image(look, state="normal"):
         pygame.draw.rect(img, (150, 200, 230), (10, 44, 26, 6), border_radius=2)     # 들여다보는 창
         gun_x = 40
     pygame.draw.rect(img, (25, 25, 25), (gun_x, 52, min(gun, 60 - gun_x), 8 if heavy else 7))   # 총
+    if look.get("sandbags"):
+        # 모래주머니 진지: 다리를 가리고 총을 그 위에 걸쳐요
+        for row, y in enumerate((96, 84, 72)):
+            for k in range(4 - row % 2):
+                x = 2 + k * 15 + (7 if row % 2 else 0)
+                pygame.draw.ellipse(img, (175, 150, 105), (x, y, 16, 14))
+                pygame.draw.ellipse(img, (130, 110, 75), (x, y, 16, 14), 1)
     if state == "flash":
         pygame.draw.circle(img, YELLOW, (min(59, gun_x + gun), 55), 8)            # 총구 불꽃
     if state == "aim":
@@ -971,6 +1117,14 @@ def make_zombie_image(look, state="normal"):
         pygame.draw.ellipse(img, (40, 0, 0), (25, 23, 10, 8))       # 벌린 입
     else:
         pygame.draw.line(img, (40, 10, 10), (25, 27), (35, 26), 2)
+    if look.get("bloated"):
+        # 부풀어 오른 배: 초록빛으로 빛나요
+        pygame.draw.circle(img, (120, 170, 60), (30, 62), 19)
+        pygame.draw.circle(img, (190, 240, 90), (30, 62), 12)
+        pygame.draw.circle(img, (230, 255, 150), (26, 58), 5)
+    if look.get("spit"):
+        for x in (27, 30, 33):
+            pygame.draw.line(img, (120, 255, 100), (x, 27), (x, 34 + (x % 3) * 2), 2)   # 초록 침
     # 팔: 나를 향해 앞으로 뻗어요 (할퀼 때는 높이 들어요)
     hand_y = 24 if state == "flash" else 40
     for side in (-1, 1):
@@ -1234,6 +1388,15 @@ SOUND_RECIPES = {
     "swipe":     (0.16, 16, 1.0, 0.55, 0, 0, 0, 0, 0.40),
     "cash":      (0.25, 10, 0.0, 0.0, 0, 0, 1500, 0.5, 0.45),
     "reload":    (0.05, 80, 1.0, 0.90, 0, 0, 2000, 0.3, 0.40),
+    "heavyar":   (0.22, 20, 1.0, 0.40, 70, 0.8, 0, 0, 0.65),
+    "revolver":  (0.32, 13, 1.0, 0.40, 72, 0.9, 0, 0, 0.75),
+    "mpistol":   (0.09, 50, 1.0, 0.70, 170, 0.25, 0, 0, 0.42),
+    "gl":        (0.22, 18, 0.7, 0.75, 65, 0.9, 0, 0, 0.60),
+    # 타격감: 총알이 귀 옆을 스치는 소리, 장갑에 맞는 '깡', 침 뱉기, 치료
+    "whiz":      (0.10, 28, 1.0, 0.05, 0, 0, 0, 0, 0.35),
+    "armor":     (0.14, 26, 0.2, 0.30, 0, 0, 3400, 0.6, 0.45),
+    "spit":      (0.30, 12, 0.8, 0.90, 0, 0, 300, 0.3, 0.45),
+    "heal":      (0.30, 8, 0.0, 0.0, 0, 0, 1000, 0.3, 0.30),
     "streak":    (0.30, 6, 0.0, 0.0, 0, 0, 880, 0.6, 0.50),
     "knife":     (0.20, 12, 1.0, 0.70, 0, 0, 0, 0, 0.30),
     "throw":     (0.15, 15, 1.0, 0.60, 0, 0, 0, 0, 0.25),
@@ -1256,7 +1419,8 @@ def step_sound_at(pos):
 
 # 총 이름 -> 총소리
 GUN_SOUNDS = {"RIFLE": "rifle", "PISTOL": "pistol", "SNIPER": "sniper", "SHOTGUN": "shotgun", "SMG": "smg",
-              "ROCKET": "rocket", "LMG": "lmg", "BURST": "rifle", "DMR": "dmr"}
+              "ROCKET": "rocket", "LMG": "lmg", "BURST": "rifle", "DMR": "dmr", "HEAVY AR": "heavyar",
+              "AUTO SHOTGUN": "shotgun", "REVOLVER": "revolver", "MACHINE PISTOL": "mpistol", "LAUNCHER": "gl"}
 
 
 class Sounds:
@@ -1491,6 +1655,11 @@ GUN_LOOKS = {
     "LMG":     dict(body=(52, 54, 50), accent=(78, 80, 72), length=1.15, thick=1.25, mag="drum", optic="reddot"),
     "BURST":   dict(body=(165, 145, 105), accent=(62, 62, 62), length=1.0, thick=1.0, mag="curved", optic="reddot"),
     "DMR":     dict(body=(72, 60, 46), accent=(42, 42, 42), length=1.15, thick=0.95, mag="straight", optic="scope_small"),
+    "HEAVY AR": dict(body=(70, 58, 42), accent=(44, 40, 34), length=1.05, thick=1.1, mag="curved", optic="iron"),
+    "AUTO SHOTGUN": dict(body=(36, 36, 40), accent=(58, 58, 64), length=0.95, thick=1.15, mag="drum", optic="reddot"),
+    "REVOLVER": dict(body=(150, 150, 158), accent=(95, 62, 40), length=0.55, thick=0.95, mag="grip", optic="iron"),
+    "MACHINE PISTOL": dict(body=(40, 40, 44), accent=(72, 72, 78), length=0.6, thick=0.9, mag="straight", optic="iron"),
+    "LAUNCHER": dict(body=(72, 82, 56), accent=(50, 56, 40), length=0.8, thick=1.6, mag=None, optic="iron", tube=True),
 }
 
 
@@ -1717,6 +1886,9 @@ class Enemy:
         self.strafe_timer = 0.0
         self.attack_timer = 0.0   # 좀비가 할퀴는 간격
         self.groan_timer = random.uniform(1, 6)   # 좀비가 그르렁거리는 간격
+        self.heal_timer = 1.0     # 의무병이 치료하는 간격
+        self.heal_flash = 0.0     # 치료받은 적 머리 위에 초록 + 표시
+        self.boom = False         # 터지는 좀비가 나에게 닿았는지
 
     @property
     def aiming(self):
@@ -1735,6 +1907,7 @@ class Enemy:
         t = self.t
         self.flash_timer -= dt
         self.hurt_timer -= dt
+        self.heal_flash -= dt
         dist = self.pos.distance_to(player.pos)
         if t.get("melee"):
             return self.update_zombie(dt, player, dist)
@@ -1765,14 +1938,14 @@ class Enemy:
         if dist > t["keep"]:
             move_with_collision(self.pos, self.facing * t["speed"] * dt)
         # 옆으로 왔다 갔다 피해요 (실력이 좋을수록 많이). 저격수와 무거운 적은 안 피해요
-        if self.kind not in ("SNIPER", "HEAVY", "BOSS"):
+        if self.kind not in ("SNIPER", "HEAVY", "BOSS", "GUNNER"):
             self.strafe_timer -= dt
             if self.strafe_timer <= 0:
                 self.strafe_timer = random.uniform(0.5, 1.4)
                 self.strafe = random.choice((-1, 0, 1))
             if self.strafe:
                 side = pygame.Vector2(-self.facing.y, self.facing.x)
-                dodge = min(0.8, 0.25 + (self.skill - 1.0))
+                dodge = 0.95 if t.get("flank") else min(0.8, 0.25 + (self.skill - 1.0))
                 move_with_collision(self.pos, side * self.strafe * t["speed"] * dodge * dt)
         if self.spotted < t["reaction"]:
             return 0
@@ -1824,6 +1997,9 @@ class Enemy:
             return 0
         if dist > 0:
             self.facing = (player.pos - self.pos).normalize()
+        if t.get("explode"):
+            self.boom = True                      # 터져요!
+            return 0
         if self.attack_timer <= 0:
             self.attack_timer = t["melee"][1]
             self.flash_timer = 0.25               # 팔을 들고 할퀴는 모습
@@ -2068,8 +2244,11 @@ class Projectile:
         self.z = z
         self.vel = pygame.Vector2(vel)
         self.vz = vz
+        self.bounced = False                  # 유탄: 어디든 닿았는지
         if kind == "rocket":
             self.timer = 4.0
+        elif kind == "shell":
+            self.timer = 3.0
         else:
             self.timer = GRENADE_FUSE if owner == "player" else ENEMY_GRENADE_FUSE
 
@@ -2082,6 +2261,11 @@ class Projectile:
         for _ in range(steps):
             if self.kind == "grenade":
                 self.bounce_step(sdt)
+            elif self.kind == "shell":
+                self.bounce_step(sdt)
+                if self.bounced or any(e.pos.distance_to(self.pos) < 0.4 and self.z <= e.t["height"]
+                                       for e in enemies):
+                    return True                   # 유탄은 닿는 순간 터져요
             elif self.rocket_step(sdt, enemies):
                 return True
         return self.timer <= 0
@@ -2092,16 +2276,19 @@ class Projectile:
         nx = self.pos.x + self.vel.x * sdt
         if obstacle_height(nx, self.pos.y) > self.z:
             self.vel.x *= -0.5
+            self.bounced = True
         else:
             self.pos.x = nx
         ny = self.pos.y + self.vel.y * sdt
         if obstacle_height(self.pos.x, ny) > self.z:
             self.vel.y *= -0.5
+            self.bounced = True
         else:
             self.pos.y = ny
         self.z += self.vz * sdt
         if self.z < 0:
             self.z = 0.0
+            self.bounced = True
             self.vz = -self.vz * 0.35 if abs(self.vz) > 1 else 0.0
             self.vel *= 0.6
 
@@ -2195,8 +2382,7 @@ class Game:
         self.sounds = get_sounds()
         self.was_reloading = False
         # 총 그림: 무기마다 허리 자세 / 정조준 자세 두 가지를 미리 그려 둬요
-        self.viewmodels = {(spec["name"], ads): make_viewmodel(spec["name"], ads)
-                           for spec in WEAPONS for ads in (False, True)}
+        self.viewmodels = {}       # 총 그림 (처음 들 때 그려서 기억해 둬요)
         self.sway = 0.0            # 고개를 돌리면 총이 살짝 늦게 따라와요
         self.step_timer = 0.0
         self.was_airborne = False
@@ -2216,6 +2402,7 @@ class Game:
         self.slowmo = 0.0          # 라운드 마지막 적을 쓰러뜨리면 잠깐 느리게
         self.gun_noise = 0.0       # 방금 총을 쐈으면 적이 듣고 다가와요
         self.on_target = False     # 조준점이 적 위에 있는지 (조준선이 빨개지고 시점이 살짝 끈적해져요)
+        self.muzzle_screen = (WIDTH * 0.6, HEIGHT * 0.75)   # 화면에서 총구 위치 (총알 궤적 시작점)
         self.reset(start_round)
 
     def set_col_w(self, col_w):
@@ -2223,6 +2410,7 @@ class Game:
         self.col_w = col_w
         self.num_rays = math.ceil(WIDTH / col_w)
         self.zbuffer = [math.inf] * self.num_rays
+        self.wall_top = [HEIGHT] * self.num_rays    # 줄마다 가장 가까운 건물의 위쪽 y (총알 자국 위치 계산용)
 
     def adjust_quality(self, frame_time):
         """한 장면 계산 시간을 보고 선명도를 자동으로 조절해요."""
@@ -2249,7 +2437,7 @@ class Game:
         camo = self.theme["camo"]
         self.enemy_images = {}
         for kind, t in ENEMY_TYPES.items():
-            look = dict(t["look"], **camo) if camo and kind in ("GRUNT", "SNIPER") else t["look"]
+            look = dict(t["look"], **camo) if camo and kind in ("GRUNT", "SNIPER", "GUNNER") else t["look"]
             for state in ("normal", "flash", "hurt", "aim"):
                 self.enemy_images[(kind, state)] = make_enemy_image(look, state)
         # 쓰러지는 모습: 서 있는 그림을 25도, 55도, 90도로 기울인 그림 (왼쪽/오른쪽)
@@ -2323,6 +2511,12 @@ class Game:
             pool += ["BOMBER"] * 2
         if self.round >= 6:
             pool += ["SHIELD"] * 2
+        if self.round >= 7:
+            pool += ["FLANKER"] * 2
+        if self.round >= 8:
+            pool += ["MEDIC"]
+        if self.round >= 9:
+            pool += ["GUNNER"]
         return random.choice(pool)
 
     def start_round(self):
@@ -2366,7 +2560,7 @@ class Game:
         count = min(len(far), 2 + self.round)
         self.enemies = [Enemy(*p, self.pick_enemy_kind(), self.skill) for p in random.sample(far, count)]
         # 새로운 적이 처음 나오는 라운드에는 그 적이 꼭 한 명은 있게. 5라운드마다 보스
-        news = {2: "SNIPER", 3: "HEAVY", 4: "BOMBER", 6: "SHIELD"}
+        news = {2: "SNIPER", 3: "HEAVY", 4: "BOMBER", 6: "SHIELD", 7: "FLANKER", 8: "MEDIC", 9: "GUNNER"}
         special = "BOSS" if self.round % 5 == 0 else news.get(self.round)
         if special:
             first = self.enemies[0]
@@ -2388,6 +2582,9 @@ class Game:
         """라운드(웨이브)마다 새로 시작하는 것들"""
         self.projectiles = []
         self.effects = []
+        self.tracers = []          # 내 총알 궤적: [x0, y0, x1, y1, 남은 시간]
+        self.enemy_tracers = []    # 적 총알 궤적: [적, 남은 시간, 끝점 흔들림]
+        self.pending_blasts = []   # 총에 맞아 터질 좀비 위치
         self.brief_age = 0.0       # 임무 설명이 타자 치듯 나와요
         self.banner_timer = 4.0
         self.round_clear_timer = 0.0
@@ -2448,6 +2645,10 @@ class Game:
             kind, self.brute_due = "BRUTE", False
         elif self.round >= 6 and random.random() < 0.05:
             kind = "BRUTE"
+        elif self.round >= 4 and random.random() < 0.1:
+            kind = "EXPLODER"
+        elif self.round >= 5 and random.random() < 0.12:
+            kind = "SPITTER"
         elif self.round >= 3 and random.random() < min(0.45, 0.08 * self.round):
             kind = "RUNNER"
         else:
@@ -2638,6 +2839,8 @@ class Game:
         self.feed = [[text, t - dt] for text, t in self.feed if t - dt > 0]
         self.popups = [[text, color, t - dt] for text, color, t in self.popups if t - dt > 0]
         self.damage_dirs = [[a, t - dt] for a, t in self.damage_dirs if t - dt > 0]
+        self.tracers = [tr[:4] + [tr[4] - dt] for tr in self.tracers if tr[4] - dt > 0]
+        self.enemy_tracers = [[e, t - dt, off] for e, t, off in self.enemy_tracers if t - dt > 0]
         self.time += dt
         for effect in self.effects:
             effect.age += dt
@@ -2694,7 +2897,9 @@ class Game:
         if ready and (fire_down if spec["auto"] else pressed) and arsenal.try_fire():
             self.sounds.play(GUN_SOUNDS[spec["name"]])
             self.on_fire(spec)
-            if spec["projectile"]:
+            if spec.get("lobbed"):
+                self.launch_shell()
+            elif spec["projectile"]:
                 self.launch_rocket()
             else:
                 self.shoot(spec)
@@ -2734,7 +2939,24 @@ class Game:
                     name = "zstep" if zombie else ENEMY_STEPS[step_sound_at(enemy.pos)]
                     self.play_at(name, enemy.pos, 13, 0.95)
             if enemy.flash_timer == 0.08:          # 방금 쐈어요
-                self.play_at("enemy", enemy.pos, 24)
+                self.play_at(enemy.t.get("sound", "enemy"), enemy.pos, 24)
+                off = pygame.Vector2(random.uniform(-1, 1), random.uniform(-1, 1)) * (40 if damage else 170) * UI
+                self.enemy_tracers.append([enemy, 0.07 if "sound" not in enemy.t else 0.25, off])
+                dist = enemy.pos.distance_to(p.pos)
+                if not damage and "sound" not in enemy.t and dist < 16:
+                    volume, pan = self.spatial(enemy.pos, 16)
+                    self.sounds.play("whiz", 0.4 + volume * 0.5, pan)   # 총알이 귀 옆을 스쳐요
+            heal = enemy.t.get("heal")
+            if heal:                                # 의무병: 근처 적 치료
+                enemy.heal_timer -= dt
+                if enemy.heal_timer <= 0:
+                    enemy.heal_timer = heal[1]
+                    for other in self.enemies:
+                        if (other is not enemy and other.hp < other.t["hp"]
+                                and other.pos.distance_to(enemy.pos) < heal[2]):
+                            other.hp = min(other.t["hp"], other.hp + heal[0])
+                            other.heal_flash = 0.6
+                            self.play_at("heal", other.pos, 12, 0.6)
             if damage:
                 if "melee" in enemy.t:
                     self.sounds.play("swipe")
@@ -2743,6 +2965,16 @@ class Game:
                 self.enemy_throw(enemy, enemy.throw_at)
                 enemy.throw_at = None
 
+        # 터지는 좀비: 나에게 닿았거나(나만 다쳐요) 총에 맞았으면(주변 좀비까지) 쾅
+        for enemy in [e for e in self.enemies if e.boom]:
+            self.enemies.remove(enemy)
+            self.chunks(enemy, 12, (90, 120, 30), 6)
+            self.add_splat(enemy.pos, 1.2)
+            self.explode(enemy.pos, *EXPLODER_BLAST, owner="enemy")
+        for _ in range(10):                        # 연쇄 폭발 (한 장면에 10번까지)
+            if not self.pending_blasts:
+                break
+            self.explode(self.pending_blasts.pop(0), *EXPLODER_SHOT_BLAST)
         self.update_projectiles(dt)
         self.update_streaks(dt)
         self.update_effects(dt)
@@ -2799,6 +3031,42 @@ class Game:
         if len(self.particles) > 300:
             del self.particles[:100]
 
+    def add_impact(self, x, y):
+        """빗나간 총알: 맞은 벽/바닥 자리에서 먼지와 불똥이 튀어요"""
+        col = int(x // self.col_w)
+        if not 0 <= col < self.num_rays:
+            return
+        if self.zbuffer[col] < math.inf and y >= self.wall_top[col]:
+            perp = self.zbuffer[col]
+        elif y > self.horizon + 2:
+            perp = self.eye * self.proj / (y - self.horizon)
+        else:
+            return                                # 하늘
+        near = min(1.0, 4 / max(0.5, perp))
+        for _ in range(6):
+            angle = random.uniform(math.pi * 1.05, math.pi * 1.95)     # 위쪽으로 퍼져요
+            speed = random.uniform(60, 200) * UI * near
+            grey = random.randint(140, 200)
+            self.particles.append([x, y, math.cos(angle) * speed, math.sin(angle) * speed,
+                                   random.uniform(0.2, 0.4), max(1.0, random.uniform(1.5, 3.5) * UI * near),
+                                   (grey, grey - 10, grey - 30), False])
+        self.particles.append([x, y, 0, 0, 0.05, max(2.0, 5 * UI * near), (255, 230, 140), False])   # 불똥
+
+    def chunks(self, enemy, count, color, size, upward=False):
+        """적 몸에서 조각이 튀어요 (헤드샷이면 헬멧, 폭발이면 살점)"""
+        box = self.project(enemy.pos, enemy.t["height"], enemy.t["width"])
+        if not box:
+            return
+        sx, top, bottom, w, perp = box
+        near = min(1.0, 4 / perp)
+        y = top + (bottom - top) * (0.08 if upward else 0.45)
+        for _ in range(count):
+            angle = random.uniform(math.pi * 1.2, math.pi * 1.8) if upward else random.uniform(0, 2 * math.pi)
+            speed = random.uniform(150, 380) * UI * near
+            self.particles.append([sx, y, math.cos(angle) * speed, math.sin(angle) * speed - 150 * UI * near,
+                                   random.uniform(0.5, 0.8), max(2.0, size * random.uniform(0.7, 1.3) * UI * near),
+                                   color, False])
+
     def add_splat(self, pos, size):
         self.splats.append([pygame.Vector2(pos), size])
         if len(self.splats) > MAX_SPLATS:
@@ -2840,6 +3108,8 @@ class Game:
         enemy.sees = True
         if how not in STREAK_KILLS:
             self.sounds.play("hit")
+            if enemy.kind in ARMORED:
+                self.sounds.play("armor", 0.6)     # 장갑에 맞는 '깡' 
             if self.mode == "zombies" and enemy.hp > 0:
                 self.points += ZOMBIE_POINTS["hit"]
         # 움찔: 잠깐 못 쏘고 뒤로 살짝 밀려요
@@ -2854,6 +3124,12 @@ class Game:
             self.enemies.remove(enemy)
             if how not in STREAK_KILLS:
                 self.hitstop = max(self.hitstop, 0.07 if how == "HEADSHOT!" else 0.04)
+            if how == "HEADSHOT!" and enemy.t["look"]["head"] != "zombie":
+                self.chunks(enemy, 1, (55, 62, 48), 9, upward=True)        # 헬멧/모자가 날아가요
+            if how in ("BOOM!", "AIRSTRIKE!"):
+                self.chunks(enemy, 12, (110, 0, 10), 5)                     # 폭발에 살점이 튀어요
+            if enemy.t.get("explode"):
+                self.pending_blasts.append(pygame.Vector2(enemy.pos))       # 맞아서 터지는 좀비
             self.corpses.append(Corpse(enemy, away * (3.0 if how in ("BOOM!", "AIRSTRIKE!") else 1.6)))
             if len(self.corpses) > MAX_CORPSES:
                 self.corpses.pop(0)
@@ -3029,6 +3305,10 @@ class Game:
                 ax, ay = found[3], found[4]       # 피는 적 몸 위에서 튀게
             if target and self.blocked_by_cover(ax, ay, target_dist):
                 target = None                     # 자동차에 막힘
+            if not self.scoped:
+                self.tracers.append([*self.muzzle_screen, ax, ay, 0.05])
+            if not target:
+                self.add_impact(ax, ay)           # 벽이나 바닥에 맞으면 먼지와 불똥
             if target:
                 amount = spec["head"] if head else spec["body"]
                 if self.perk == "HEAVY ROUNDS":
@@ -3117,12 +3397,22 @@ class Game:
         self.projectiles.append(Projectile("rocket", p.pos + forward * 0.3, self.eye - 0.1,
                                            forward * horiz, horiz * slope))
 
+    def launch_shell(self):
+        """유탄: 포물선으로 날아가요 (위를 볼수록 멀리)"""
+        p = self.player
+        forward = pygame.Vector2(math.cos(p.angle), math.sin(p.angle))
+        slope = self.aim_slope()
+        self.projectiles.append(Projectile("shell", p.pos + forward * 0.3, self.eye - 0.1,
+                                           forward * 13, 2.0 + slope * 13))
+
     def update_projectiles(self, dt):
         alive = []
         for proj in self.projectiles:
             if proj.update(dt, self.enemies):
                 if proj.kind == "rocket":
                     radius, damage = ROCKET_BLAST
+                elif proj.kind == "shell":
+                    radius, damage = SHELL_BLAST
                 elif proj.owner == "enemy":
                     radius, damage = ENEMY_GRENADE_BLAST
                 else:
@@ -3240,11 +3530,37 @@ class Game:
         else:
             self.draw_gun(screen)
         self.draw_particles(screen, casings=True)        # 탄피는 총 앞에
+        self.draw_tracers(screen)
         if self.light_timer > 0:
             screen.blit(self.muzzle_light, (0, 0))       # 총구 섬광
         self.draw_hud(screen)
         if self.show_help:
             draw_help(screen, self.fonts, HELP_TEXT[self.fonts["lang"]]["resume"])
+
+    def draw_tracers(self, screen):
+        """총알 궤적: 내 총알은 총구에서 맞은 곳까지, 적 총알은 적에게서 내 쪽으로 (침은 초록)"""
+        for x0, y0, x1, y1, life in self.tracers:
+            start = pygame.Vector2(x0, y0)
+            end = pygame.Vector2(x1, y1)
+            mid = start.lerp(end, 0.35 + (0.05 - life) * 8)  # 총알이 날아가는 것처럼 앞쪽만 그려요
+            pygame.draw.line(screen, (255, 200, 110), mid, end, max(1, int(2 * UI)))
+            pygame.draw.line(screen, (255, 250, 220), mid.lerp(end, 0.5), end, 1)
+        for enemy, life, off in self.enemy_tracers:
+            if enemy not in self.enemies:
+                continue
+            box = self.project(enemy.pos, enemy.t["height"], enemy.t["width"])
+            if not box:
+                continue
+            sx, top, bottom, w, perp = box
+            col = int(sx // self.col_w)
+            if 0 <= col < self.num_rays and perp > self.zbuffer[col]:
+                continue
+            start = (sx + w * 0.35, top + (bottom - top) * 0.45)
+            end = (WIDTH / 2 + off.x, HEIGHT / 2 + off.y)
+            if "sound" in enemy.t:                 # 산성 침: 굵은 초록 줄
+                pygame.draw.line(screen, (120, 230, 80), start, end, max(3, int(6 * UI)))
+            else:
+                pygame.draw.line(screen, (255, 225, 150), start, end, max(1, int(2 * UI)))
 
     def draw_particles(self, screen, casings):
         for x, y, vx, vy, life, size, color, is_casing in self.particles:
@@ -3312,6 +3628,11 @@ class Game:
 
             # 2) 건물: 먼 것부터 그려야 가까운 것이 앞에 보여요
             self.zbuffer[i] = walls[0][0] * fix if walls else math.inf
+            if walls:
+                near = proj / max(0.05, walls[0][0] * fix)
+                self.wall_top[i] = horizon + eye * near - walls[0][3][1] * near
+            else:
+                self.wall_top[i] = HEIGHT
             for dist, vertical, wall_x, (color, height, pattern, neon), cx, cy in reversed(walls):
                 perp = max(0.05, dist * fix)
                 size = proj / perp
@@ -3365,7 +3686,7 @@ class Game:
             if box:
                 items.append((box, self.pickup_images[item.kind], None))
         for proj in self.projectiles:
-            if proj.kind == "grenade":
+            if proj.kind in ("grenade", "shell"):
                 img, h, w = self.grenade_image, 0.18, 0.15
             else:
                 img, h, w = self.rocket_image, 0.2, 0.35
@@ -3397,6 +3718,11 @@ class Game:
             self.draw_sprite_columns(screen, img, *box)
             if enemy and enemy.hp < enemy.t["hp"]:
                 self.draw_hp_bar(screen, enemy, box)
+            if enemy and enemy.heal_flash > 0:     # 치료받는 중: 머리 위에 초록 +
+                sx, top = box[0], box[1]
+                size = max(4, int(10 * UI))
+                pygame.draw.rect(screen, (80, 255, 120), (sx - size / 2, top - 3.2 * size, size, size / 3))
+                pygame.draw.rect(screen, (80, 255, 120), (sx - size / 6, top - 3.6 * size, size / 3, size * 1.1))
 
     def draw_hp_bar(self, screen, enemy, box):
         """다친 적 머리 위에 체력 막대"""
@@ -3454,7 +3780,10 @@ class Game:
         a = self.arsenal
         p = self.player
         ads = self.aiming
-        image, (ox, oy), (mx, my) = self.viewmodels[(a.current.spec["name"], ads)]
+        key = (a.current.spec["name"], ads)
+        if key not in self.viewmodels:
+            self.viewmodels[key] = make_viewmodel(*key)
+        image, (ox, oy), (mx, my) = self.viewmodels[key]
         t = pygame.time.get_ticks() / 1000
         calm = 0.3 if ads else 1.0
         if p.sprinting:
@@ -3475,6 +3804,7 @@ class Game:
         dx = bx + kx + self.sway * calm
         dy = by + ky + down * UI + p.crouch_amt * 10 * UI
         screen.blit(image, (ox + dx, oy + dy))
+        self.muzzle_screen = (mx + dx, my + dy)
         if a.kick > 0.6:
             big = a.current.spec["name"] in ("SHOTGUN", "ROCKET", "SNIPER")
             size = (22 if ads else 34) * UI * (1.4 if big else 1.0)
@@ -3579,7 +3909,8 @@ class Game:
         # 아래 가운데 무기 칸
         slot_w = 76 * UI
         if len(self.arsenal.weapons) <= 3:
-            slot_w = 120 * UI                     # 로드아웃(무기 2개)은 칸을 넓게
+            slot_w = 150 * UI                     # 로드아웃(무기 2개)은 칸을 넓게
+        slot_w = min(slot_w, (WIDTH - 40) / len(self.arsenal.weapons))
         left = WIDTH / 2 - slot_w * len(self.arsenal.weapons) / 2
         for i, weapon in enumerate(self.arsenal.weapons):
             rect = pygame.Rect(left + i * slot_w + 3, HEIGHT - 44 * UI, slot_w - 6, 30 * UI)
