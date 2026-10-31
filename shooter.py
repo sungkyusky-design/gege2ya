@@ -783,6 +783,105 @@ def can_see(a, b):
     return True
 
 
+def walk_clear(a, b, radius=0.18):
+    """a에서 b까지 똑바로 걸어갈 수 있으면 True (몸 폭만큼 양옆도 검사, 닫힌 문은 막힘)"""
+    offset = b - a
+    dist = offset.length()
+    if dist < 0.05:
+        return True
+    step = offset / dist
+    side = pygame.Vector2(-step.y, step.x) * radius
+    for k in range(1, int(dist / 0.3) + 1):
+        q = a + step * (k * 0.3)
+        if is_blocked(q.x, q.y) or is_blocked(q.x + side.x, q.y + side.y) or is_blocked(q.x - side.x, q.y - side.y):
+            return False
+    return True
+
+
+def walkable_cell(col, row):
+    """길찾기용: 걸어갈 수 있는 칸 (문은 가까이 가면 열리니까 지나갈 수 있어요)"""
+    return in_map(col, row) and (not is_blocked(col + 0.5, row + 0.5) or GAME_MAP[row][col] in DOORS)
+
+
+def build_flow(goal):
+    """길찾기 지도: goal 칸에서 시작해 걸어갈 수 있는 칸마다 걸음 수를 적어요 (너비 우선 탐색)"""
+    flow = [[None] * MAP_W for _ in range(MAP_H)]
+    col, row = goal
+    if not in_map(col, row):
+        return flow
+    flow[row][col] = 0
+    queue = deque([goal])
+    while queue:
+        col, row = queue.popleft()
+        d = flow[row][col] + 1
+        for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            c, r = col + dc, row + dr
+            if 0 <= c < MAP_W and 0 <= r < MAP_H and flow[r][c] is None and walkable_cell(c, r):
+                flow[r][c] = d
+                queue.append((c, r))
+    return flow
+
+
+def flow_step(flow, pos):
+    """길찾기 지도에서 목표에 한 걸음 더 가까운 옆 칸의 가운데 (대각선은 모서리를 가로지르지 않게)"""
+    col, row = int(pos.x), int(pos.y)
+    here = flow[row][col] if in_map(col, row) and flow[row][col] is not None else math.inf
+    best, best_d = None, here
+    for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+        c, r = col + dc, row + dr
+        if not in_map(c, r) or flow[r][c] is None:
+            continue
+        if dc and dr and (not walkable_cell(col + dc, row) or not walkable_cell(col, row + dr)):
+            continue
+        d = flow[r][c] + (0.4 if dc and dr else 0)
+        if d < best_d:
+            best, best_d = (c, r), d
+    return pygame.Vector2(best[0] + 0.5, best[1] + 0.5) if best else None
+
+
+class Navigator:
+    """길찾기 지도를 목표 칸마다 만들어 잠깐 기억해 둬요 (Game이 하나 가지고 있어요)"""
+
+    def __init__(self):
+        self.cache = {}
+        self.clock = 0.0
+
+    def clear(self):
+        self.cache = {}
+
+    def flow_to(self, goal):
+        cell = (int(goal.x), int(goal.y))
+        hit = self.cache.get(cell)
+        if hit and self.clock - hit[1] < 2.0:
+            return hit[0]
+        if len(self.cache) > 24:                         # 오래된 것부터 버려요
+            del self.cache[min(self.cache, key=lambda k: self.cache[k][1])]
+        flow = build_flow(cell)
+        self.cache[cell] = (flow, self.clock)
+        return flow
+
+
+def steer(agent, goal, dt):
+    """agent(적/동료)가 goal 로 가려면 지금 어느 쪽으로 가야 하는지 (길이 1인 방향).
+    똑바로 갈 수 있으면 곧장, 막혀 있으면 길찾기 지도를 따라 벽을 돌아가요. 0.25초마다 다시 계산."""
+    agent.nav_timer -= dt
+    target = agent.nav_target
+    if (agent.nav_goal is None or agent.nav_goal.distance_to(goal) > 0.8 or agent.nav_timer <= 0
+            or (target is not None and agent.pos.distance_to(target) < 0.25)):
+        agent.nav_timer = 0.25
+        agent.nav_goal = pygame.Vector2(goal)
+        if walk_clear(agent.pos, goal) or NAVIGATOR is None:
+            agent.nav_target = None                     # 곧장 가요
+        else:
+            agent.nav_target = flow_step(NAVIGATOR.flow_to(goal), agent.pos)
+        target = agent.nav_target
+    offset = (target if target is not None else goal) - agent.pos
+    return offset.normalize() if offset.length() > 1e-6 else pygame.Vector2()
+
+
+NAVIGATOR = None   # 지금 게임의 Navigator (Game.setup_map 에서 정해요)
+
+
 def move_with_collision(pos, delta, radius=0.2):
     """막힌 곳을 뚫지 않게 움직이기. x와 y를 따로 검사해서 벽을 따라 미끄러지게 해요."""
     new_x = pos.x + delta.x
@@ -2085,6 +2184,7 @@ class Enemy:
         self.flinch_pose = "flinch_l"
         self.suppressed = 0.0     # 내 총알이 가까이 지나가면 움츠러들어 덜 맞혀요
         self.walk = 0.0           # 걸은 거리 (다리 그림 바꾸기용)
+        self.nav_timer, self.nav_goal, self.nav_target = 0.0, None, None   # 길찾기 (steer)
         self.role = None          # 분대 역할: "suppress" 제압 사격 / "flank" 옆으로 돌아가기
         self.role_timer = 0.0
         self.flank_spot = None
@@ -2168,9 +2268,9 @@ class Enemy:
             if offset.length() < 0.7:
                 self.role, self.flank_spot = None, None
             else:
-                move_with_collision(self.pos, offset.normalize() * t["speed"] * 1.1 * dt)
+                move_with_collision(self.pos, steer(self, self.flank_spot, dt) * t["speed"] * 1.1 * dt)
         elif dist > t["keep"] * (1.4 if self.role == "suppress" else 1.0):
-            move_with_collision(self.pos, self.facing * t["speed"] * dt)
+            move_with_collision(self.pos, steer(self, player.pos, dt) * t["speed"] * dt)
         # 옆으로 왔다 갔다 피해요 (실력이 좋을수록 많이). 저격수와 무거운 적은 안 피해요
         if self.kind not in ("SNIPER", "HEAVY", "BOSS", "GUNNER", "LASER"):
             self.strafe_timer -= dt
@@ -2220,7 +2320,7 @@ class Enemy:
                 if self.role == "flank":
                     self.role, self.flank_spot = None, None
             else:
-                self.dir = offset.normalize()
+                self.dir = steer(self, self.search, dt) or offset.normalize()
                 move_with_collision(self.pos, self.dir * t["speed"] * dt)
                 self.stuck_timer = self.stuck_timer + dt if self.pos.distance_to(before) < t["speed"] * dt * 0.3 else 0.0
                 if self.stuck_timer > 0.8:                      # 막혔어요: 포기하고 두리번
@@ -2317,7 +2417,7 @@ class Enemy:
         if offset.length() < 0.15:
             return True
         before = pygame.Vector2(self.pos)
-        self.facing = offset.normalize()
+        self.facing = steer(self, target, dt) or offset.normalize()
         move_with_collision(self.pos, self.facing * min(speed * dt, offset.length()))
         self.stuck_timer = self.stuck_timer + dt if self.pos == before else 0.0
         if self.stuck_timer > 0.8:
@@ -2751,6 +2851,7 @@ class Ally:
         self.shoot_timer = random.uniform(0.3, 0.8)
         self.target = None
         self.look_timer = 0.0     # 적 찾기는 0.25초마다
+        self.nav_timer, self.nav_goal, self.nav_target = 0.0, None, None   # 길찾기 (steer)
         self.flash = 0.0
         self.callout = None
 
@@ -2906,6 +3007,8 @@ class Game:
         """맵 바꾸기: 맵 정보, 장식물, 적 출현 위치, 미니맵, 하늘을 새로 만들어요."""
         self.theme = variant_theme(MAPS[index], set_no)
         load_map(index, self.theme)
+        global NAVIGATOR
+        NAVIGATOR = self.navigator = Navigator()
         self.decals = {}           # 벽 자국: (칸 x, 칸 y, 세로벽인지) -> [(위치, 높이, "hole"/"scorch"), ...]
         self.decal_count = 0
         self.broken_windows = set()
@@ -3829,7 +3932,7 @@ class Game:
             dist = offset.length()
             if dist > 0.6:
                 speed = 3.6 if dist > 5 else 2.6
-                move_with_collision(ally.pos, offset.normalize() * speed * dt)
+                move_with_collision(ally.pos, (steer(ally, goal, dt) or offset.normalize()) * speed * dt)
                 if dist > 12 and not can_see(ally.pos, p.pos) and order == "FOLLOW":
                     spot = p.pos - p.forward * 1.0                # 너무 멀리 떨어지면 내 뒤로 따라붙어요
                     if not is_blocked(spot.x, spot.y):
@@ -3964,19 +4067,7 @@ class Game:
 
     def update_flow(self):
         """좀비 길찾기 지도: 플레이어 칸에서 시작해 걸어갈 수 있는 칸마다 걸음 수를 적어요 (너비 우선 탐색)"""
-        start = (int(self.player.pos.x), int(self.player.pos.y))
-        flow = [[None] * MAP_W for _ in range(MAP_H)]
-        flow[start[1]][start[0]] = 0
-        queue = deque([start])
-        while queue:
-            col, row = queue.popleft()
-            d = flow[row][col] + 1
-            for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                c, r = col + dc, row + dr
-                if in_map(c, r) and flow[r][c] is None and not is_blocked(c + 0.5, r + 0.5):
-                    flow[r][c] = d
-                    queue.append((c, r))
-        Enemy.flow = flow
+        Enemy.flow = build_flow((int(self.player.pos.x), int(self.player.pos.y)))
 
     def spawn_zombie(self):
         """내가 안 보는 먼 곳에서 좀비가 나와요"""
@@ -4220,6 +4311,7 @@ class Game:
         self.echoes = waiting
         self.screen_blood = [[x, y, r, t - dt] for x, y, r, t in self.screen_blood if t - dt > 0]
         self.lightning = max(0.0, self.lightning - dt)
+        self.navigator.clock += dt
         if self.doors:
             self.update_doors(dt)
         if self.allies and not self.game_over and self.round_clear_timer <= 0:
@@ -4633,6 +4725,7 @@ class Game:
         row = GAME_MAP[cy]
         GAME_MAP[cy] = row[:cx] + FLOOR_GRID[cy][cx] + row[cx + 1:]
         WALL_GRID[cy][cx] = None
+        self.navigator.clear()                       # 길이 새로 생겼어요
         self.decals.pop((cx, cy, True), None)
         self.decals.pop((cx, cy, False), None)
         center = pygame.Vector2(cx + 0.5, cy + 0.5)
