@@ -2072,6 +2072,7 @@ class Sounds:
         volume = 0.0 if self.muted else SETTINGS["volume"] / 100
         pygame.mixer.Channel(0).set_volume(0.35 * volume)
         music = 0.5 * volume * SETTINGS.get("music", 40) / 100 if self.music_on else 0
+        music *= getattr(self, "duck", 1.0)
         for i, level in enumerate(self.levels):
             pygame.mixer.Channel(1 + i).set_volume(music * level)
 
@@ -2103,6 +2104,8 @@ class Sounds:
         """pan: -1이면 왼쪽, 1이면 오른쪽에서 들려요 (이어폰을 끼면 방향을 알 수 있어요)"""
         sound = self.bank.get(name)
         volume *= SETTINGS["volume"] / 100
+        if name != "ring":
+            volume *= getattr(self, "duck", 1.0)          # 큰 폭발 뒤: 잠깐 다른 소리가 작게
         if sound and not self.muted and volume > 0.02:
             channel = sound.play()
             if channel:
@@ -2397,6 +2400,7 @@ class MaskedKeys:
         return False if key in self.hidden else bool(self.real[key])
 
 
+SPRINT_FOV = 0.07                # 달리면 시야가 이만큼 넓어져요 (7%)
 DIRECTOR_PEAK = 0.85       # 긴장감이 이만큼 차면 클라이맥스
 DIRECTOR_PEAK_TIME = 5.0   # 클라이맥스 길이(초)
 DIRECTOR_RELAX_TIME = 7.0  # 숨 돌리기 최소 길이(초)
@@ -5970,8 +5974,9 @@ class Game:
 
     @property
     def fov(self):
-        # 배율만큼 시야를 좁혀요 (tan을 써야 정확히 '몇 배'가 돼요)
-        return 2 * math.atan(math.tan(NORMAL_FOV / 2) / self.zoom)
+        # 배율만큼 시야를 좁혀요 (tan을 써야 정확히 '몇 배'가 돼요). 달리면 살짝 넓어져요
+        wide = 1 + SPRINT_FOV * round(getattr(self, "sprint_fov", 0.0), 2)
+        return 2 * math.atan(math.tan(NORMAL_FOV * wide / 2) / self.zoom)
 
     @property
     def proj(self):
@@ -5981,7 +5986,8 @@ class Game:
     @property
     def horizon(self):
         """지평선의 화면 y좌표. 위를 보거나 반동이 생기면 아래로 내려가요."""
-        return HEIGHT / 2 + (self.player.pitch + self.arsenal.recoil) * self.zoom + self.shake_offset
+        return HEIGHT / 2 + (self.player.pitch + self.arsenal.recoil) * self.zoom + self.shake_offset + \
+            getattr(self, "cam_offset", 0.0)
 
     @property
     def eye(self):
@@ -6275,6 +6281,7 @@ class Game:
         self.damage_flash = max(0.0, self.damage_flash - dt * 2)
         self.hitmarker = max(0.0, self.hitmarker - dt)
         self.shake = max(0.0, self.shake - dt)
+        self.update_camera(dt)
         # 폭발 흔들림: 이번 장면에서 화면이 위아래로 움직일 양
         self.shake_offset = random.uniform(-1, 1) * self.shake * 30 * UI * SETTINGS.get("shake", 1)
         self.feed = [[text, t - dt] for text, t in self.feed if t - dt > 0]
@@ -6807,6 +6814,7 @@ class Game:
         if self.challenge == "HARDCORE" and damage > 0:
             damage = max(damage, self.player.hp + 1)      # 한 방에 끝
         damage *= 1 - self.director.assist              # 같은 곳에서 여러 번 죽으면 조금 덜 아파요
+        self.stagger = min(1.0, getattr(self, "stagger", 0.0) + damage / 35)    # 맞으면 화면이 휘청
         if self.boons:
             damage = self.boon_on_hurt(damage)
         if source is not None:
@@ -7422,6 +7430,9 @@ class Game:
             return min(1.0, 1.25 * (1 - d / radius))
 
         self.effects.append(Effect(pos, self.explosion_frames, 0.5, radius * 0.9))
+        near = pos.distance_to(self.player.pos)
+        if near < 4.5:
+            self.deafen(0.85 * (1 - near / 4.5))
         if pos.distance_to(self.player.pos) < 10:          # 가까운 폭발: 주변이 확 밝아져요
             self.light_timer = max(self.light_timer, 0.14)
             self.muzzle_glow = max(self.muzzle_glow, 230)
@@ -7672,6 +7683,30 @@ class Game:
             y = (y0 + t * speed * 9) % 1.0 * HEIGHT
             x = (x0 * WIDTH - shift + y * 0.25) % WIDTH
             pygame.draw.line(screen, (150, 165, 200), (x, y), (x - length * 0.25, y + length), 1)
+
+    def update_camera(self, dt):
+        """카메라 연출: 달리기 시야, 맞았을 때 휘청, 착지 쿵, 큰 폭발 뒤 귀 먹먹함"""
+        p = self.player
+        want = 1.0 if p.sprinting else 0.0
+        self.sprint_fov = getattr(self, "sprint_fov", 0.0)
+        self.sprint_fov += (want - self.sprint_fov) * min(1.0, 6 * dt)
+        self.stagger = max(0.0, getattr(self, "stagger", 0.0) - dt * 2.5)
+        self.stagger_t = getattr(self, "stagger_t", 0.0) + dt
+        shake_on = SETTINGS.get("shake", 1)
+        offset = self.stagger * math.sin(self.stagger_t * 28) * 14 * UI * shake_on
+        if self.land_dip > 0:
+            offset += math.sin(self.land_dip / 0.25 * math.pi) * 10 * UI * shake_on
+        self.cam_offset = offset
+        sounds = self.sounds
+        if getattr(sounds, "duck", 1.0) < 1.0:
+            sounds.duck = min(1.0, sounds.duck + dt * 0.35)
+            sounds.refresh_background()
+
+    def deafen(self, amount):
+        """큰 폭발이 가까우면: 귀가 삐- 하고 다른 소리가 잠깐 작아져요"""
+        self.sounds.duck = max(0.25, min(getattr(self.sounds, "duck", 1.0), 1 - amount))
+        if amount > 0.4:
+            self.sounds.play("ring", amount * 0.6)
 
     def mood(self):
         """맵 분위기 이름 (색 보정용)"""
