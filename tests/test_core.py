@@ -255,6 +255,20 @@ class GameTest(unittest.TestCase):
         self.assertEqual(game.arsenal.current.spec["name"], wall["weapon"])
         self.assertEqual(game.price_of(wall), wall["cost"] // 2)           # 다시 사면 탄약만 반값
 
+    def test_mounted_machine_gun(self):
+        game = shooter.Game({}, 5, loadout=LOADOUT)
+        game.briefing, game.allies = None, []
+        self.assertTrue(game.turrets)
+        game.player.pos = pygame.Vector2(game.turrets[0]["pos"]) + pygame.Vector2(0.5, 0)
+        before = [w.spec["name"] for w in game.arsenal.weapons]
+        self.assertTrue(game.toggle_mount())
+        self.assertEqual(game.arsenal.current.spec["name"], "MOUNTED MG")
+        game.player.pos += pygame.Vector2(3, 0)
+        game.update_mounted(0.1)
+        self.assertEqual(game.player.pos, game.turrets[0]["pos"])            # 자리 고정
+        game.toggle_mount()
+        self.assertEqual([w.spec["name"] for w in game.arsenal.weapons], before)
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
