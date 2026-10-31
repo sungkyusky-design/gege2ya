@@ -115,7 +115,7 @@ JUMP_SPEED = 4.2                  # 점프 힘
 GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
 # 설정 (시작 화면에서 S): 저장돼서 다음에도 그대로예요
-SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=2, v2=True)
+SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=2, v2=True, music=40)
 ASSIST_LEVELS = ["OFF", "LOW", "NORMAL", "HIGH"]
 ASSIST_PAD = [0.0, 0.6, 1.0, 1.5]          # 아깝게 빗나간 총알을 몸통에 맞혀 주는 정도
 ASSIST_STICKY = [1.0, 0.75, 0.55, 0.4]     # 조준점이 적 위에 있을 때 시점이 느려지는 정도
@@ -1673,6 +1673,35 @@ def make_enemy_image(look, state="normal"):
     return img
 
 
+def make_back_image(look):
+    """뒷모습: 얼굴 대신 뒤통수나 헬멧 뒤, 조끼 대신 배낭 (총은 반대쪽으로)"""
+    img = pygame.transform.flip(make_enemy_image(look, "normal"), True, False)
+    head = look["head"]
+    back_colors = {"helmet": (50, 60, 45), "cap": (210, 40, 40), "hood": look["vest"], "riot": (30, 35, 60),
+                   "mask": (30, 30, 34), "medic": (245, 245, 245), "heavy": (40, 42, 55)}
+    color = back_colors.get(head, (45, 33, 25))                 # 나머지는 머리카락
+    if head in ("riot", "heavy", "hood"):
+        pygame.draw.circle(img, color, (30, 18), 15)
+    else:
+        pygame.draw.circle(img, color, (30, 19), 13)
+    pack = shade(look["vest"], 0.7)
+    pygame.draw.rect(img, pack, (17, 36, 26, 32), border_radius=5)              # 배낭
+    pygame.draw.rect(img, shade(look["vest"], 0.45), (17, 36, 26, 32), 2, border_radius=5)
+    pygame.draw.rect(img, shade(look["vest"], 0.55), (21, 56, 18, 8), border_radius=2)   # 주머니
+    return img
+
+
+def walk_frame(img, side):
+    """걷는 그림: 한쪽 다리를 들어 올린 모습 (side 0 = 왼다리, 1 = 오른다리)"""
+    frame = img.copy()
+    legs = img.subsurface((0, 80, 60, 40)).copy()
+    frame.fill((0, 0, 0, 0), (0, 84, 60, 36))
+    for half in (0, 1):
+        lift = 7 if half == side else 0
+        frame.blit(legs, (half * 30, 80 - lift), (half * 30, 0, 30, 40))
+    return frame
+
+
 def make_zombie_image(look, state="normal"):
     """좀비 그림: 찢어진 옷, 피 얼룩, 빛나는 눈, 앞으로 뻗은 팔. flash = 할퀴는 모습(팔을 들고 입을 벌려요)"""
     if state == "hurt":
@@ -2045,7 +2074,12 @@ SOUND_RECIPES = {
     "knife":     (0.20, 12, 1.0, 0.70, 0, 0, 0, 0, 0.30),
     "throw":     (0.15, 15, 1.0, 0.60, 0, 0, 0, 0, 0.25),
     "hurt":      (0.12, 20, 0.6, 0.20, 0, 0, 220, 0.5, 0.40),
+    # 총소리 겹치기: 쏠 때마다 "탕" 위에 노리쇠의 "착" + 가슴을 치는 낮은 "쿵"
+    "mech":      (0.05, 80, 0.7, 0.10, 0, 0, 2600, 0.5, 0.30),
+    "punch":     (0.16, 26, 0.0, 0.0, 52, 1.0, 0, 0, 0.55),
 }
+# 벽 너머에서 나는 소리는 먹먹하게 (높은 소리를 깎은 "_m" 소리를 따로 만들어요)
+MUFFLED_SOUNDS = ("enemy", "spit", "explosion", "boot_hard", "boot_soft", "boot_snow", "boot_wood", "zstep", "groan")
 # 바닥 -> 발소리 (없는 바닥은 step_hard)
 STEP_SOUNDS = {".": "step_soft", ";": "step_soft", "g": "step_soft", "#": "step_soft",
                "*": "step_snow", "-": "step_snow", "_": "step_wood", "p": "step_wood"}
@@ -2080,11 +2114,93 @@ class Sounds:
             if size != -16:
                 return                       # 16비트 소리만 만들 줄 알아요
             pygame.mixer.set_num_channels(24)
+            pygame.mixer.set_reserved(2)         # 0번: 배경 소리, 1번: 음악 (효과음이 빼앗지 않게)
             rng = random.Random(1)
             for name, recipe in SOUND_RECIPES.items():
                 self.bank[name] = self.synth(freq, channels, rng, *recipe)
+            for name in MUFFLED_SOUNDS:
+                length, decay, noise, smooth, thump_hz, thump, tone_hz, tone, volume = SOUND_RECIPES[name]
+                self.bank[name + "_m"] = self.synth(freq, channels, rng, length * 1.2, decay * 0.8, noise * 1.8,
+                                                    max(smooth, 0.97), thump_hz, thump * 1.3, tone_hz, tone * 0.1,
+                                                    volume * 0.8)
+            self.format = (freq, channels)
         except Exception:
             self.bank = {}
+        self.loops = {}            # 배경 소리 (한 번 만들면 계속 써요)
+        self.background = None     # 지금 나오는 배경 소리 이름
+        self.music_on = False
+
+    def make_loop(self, kind):
+        """끊김 없이 반복되는 배경 소리. wind 바람 / rain 빗소리 / night 밤벌레 / music 낮게 깔리는 음악"""
+        freq, channels = self.format
+        rng = random.Random(7)
+        seconds = 8.0 if kind == "music" else 3.0
+        step = 4 if kind in ("wind", "music") else 1      # 낮은 소리는 4칸마다 한 번만 계산 (빠르게)
+        n = int(seconds * freq) // step
+        fade = n // 8
+        rate = freq / step
+        values = []
+        low = mid = 0.0
+        notes = (55.0, 43.65, 65.41, 49.0)                 # 라-파-도-솔 (낮은 음, 2초씩)
+        for i in range(n + fade):
+            t = i / rate
+            if kind == "wind":
+                low += 0.01 * (rng.uniform(-1, 1) - low)
+                v = low * 5 * (0.65 + 0.35 * math.sin(2 * math.pi * t / seconds))
+            elif kind == "rain":
+                mid += 0.5 * (rng.uniform(-1, 1) - mid)
+                v = mid * 0.45 + (rng.uniform(-1, 1) * 0.6 if rng.random() < 0.002 else 0)
+            elif kind == "night":
+                low += 0.01 * (rng.uniform(-1, 1) - low)
+                chirp = (t * 6) % 1 < 0.06 and int(t * 6) % 5 in (0, 1)
+                v = low * 3 + (0.18 * math.sin(2 * math.pi * 4300 * t) if chirp else 0)
+            else:   # music
+                beat = (t % seconds) % 2.0
+                note = notes[int((t % seconds) / 2.0)]
+                pad = math.sin(2 * math.pi * note * t) + 0.4 * math.sin(2 * math.pi * note * 1.5 * t)
+                v = 0.32 * pad * min(1.0, beat * 4) * (1 - beat / 2.6)
+                pulse = (t % 0.5)
+                v += 0.45 * math.sin(2 * math.pi * 48 * pulse) * math.exp(-pulse * 18)   # 둥 둥 (심장 박동)
+            values.append(v)
+        for i in range(fade):                              # 끝을 처음에 겹쳐서 이음새가 안 들리게
+            w = i / fade
+            values[i] = values[i] * w + values[n + i] * (1 - w)
+        samples = array.array("h")
+        for v in values[:n]:
+            samples.extend([int(max(-1.0, min(1.0, v)) * 32767)] * (channels * step))
+        return pygame.mixer.Sound(buffer=samples.tobytes())
+
+    def start_background(self, kind, music=False):
+        """맵에 맞는 배경 소리 (+ 음악)를 계속 반복해요"""
+        if not self.bank:
+            return
+        self.music_on = music and not IN_BROWSER     # 웹에서는 음악을 만드는 데 오래 걸려서 빼요
+        for name, channel_no, on in ((kind, 0, True), ("music", 1, self.music_on)):
+            channel = pygame.mixer.Channel(channel_no)
+            if not on:
+                channel.stop()
+                continue
+            if name not in self.loops:
+                self.loops[name] = self.make_loop(name)
+            if channel_no == 1 or self.background != kind or not channel.get_busy():
+                if not (channel_no == 1 and channel.get_busy()):
+                    channel.play(self.loops[name], loops=-1)
+        self.background = kind
+        self.refresh_background()
+
+    def refresh_background(self):
+        """소리 끄기(M)나 설정의 소리 크기를 배경 소리에도 반영해요"""
+        if not self.bank:
+            return
+        volume = 0.0 if self.muted else SETTINGS["volume"] / 100
+        pygame.mixer.Channel(0).set_volume(0.35 * volume)
+        pygame.mixer.Channel(1).set_volume(0.5 * volume * SETTINGS.get("music", 40) / 100 if self.music_on else 0)
+
+    def stop_background(self):
+        if self.bank:
+            pygame.mixer.Channel(0).stop()
+            pygame.mixer.Channel(1).stop()
+        self.background = None
 
     @staticmethod
     def synth(freq, channels, rng, duration, decay, noise, smooth, thump_hz, thump, tone_hz, tone, volume):
@@ -2540,6 +2656,8 @@ class Enemy:
         self.flinch = 0.0         # 맞고 움찔하는 시간
         self.flinch_pose = "flinch_l"
         self.suppressed = 0.0     # 내 총알이 가까이 지나가면 움츠러들어 덜 맞혀요
+        self.walk = 0.0           # 걸은 거리 (다리 그림 바꾸기용)
+        self.moving = 0.0         # 방금 움직였는지
         self.mag, self.reload_time = ENEMY_MAGS.get(kind, (0, 0))
         self.ammo = self.mag
         self.reload_left = 0.0
@@ -3259,6 +3377,16 @@ class Game:
             look = dict(t["look"], **camo) if camo and kind in ("GRUNT", "SNIPER", "GUNNER") else t["look"]
             for state in ("normal", "flash", "hurt", "aim"):
                 self.enemy_images[(kind, state)] = make_enemy_image(look, state)
+            # 걷는 모습 2장, 뒷모습 (+ 걷는 뒷모습). 모래주머니 진지와 방패병은 그대로
+            if not look.get("sandbags") and not look.get("shield"):
+                bases = [("", self.enemy_images[(kind, "normal")])]
+                if look["head"] != "zombie":
+                    back = make_back_image(look)
+                    self.enemy_images[(kind, "back")] = back
+                    bases.append(("back_", back))
+                for prefix, base in bases:
+                    for side in (0, 1):
+                        self.enemy_images[(kind, f"{prefix}walk{side}")] = walk_frame(base, side)
             # 맞고 움찔: 몸통은 옆으로 기울고, 머리를 맞으면 크게 젖혀져요
             hurt = self.enemy_images[(kind, "hurt")]
             self.enemy_images[(kind, "flinch_l")] = pygame.transform.rotate(hurt, 9)
@@ -3294,6 +3422,13 @@ class Game:
         self.muzzle_light.fill((255, 220, 150, int(28 + 90 * (1 - dark))))
         self.muzzle_glow = 50 + 110 * (1 - dark)
         self.night = dark < 0.95 or self.theme.get("stars", False)
+        if self.theme.get("rain"):
+            ambience = "rain"
+        elif self.night and not self.theme["snow"]:
+            ambience = "night"
+        else:
+            ambience = "wind"
+        self.sounds.start_background(ambience, music=True)
         self.minimap = self.make_minimap()
         self.sky = make_sky(self.theme)
 
@@ -3970,6 +4105,7 @@ class Game:
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_m:            # 소리 끄기/켜기
                 self.sounds.muted = not self.sounds.muted
+                self.sounds.refresh_background()
                 self.popups.append(["SOUND OFF" if self.sounds.muted else "SOUND ON", WHITE, 1.0])
             elif pygame.K_1 <= event.key <= pygame.K_9 and event.key - pygame.K_1 < len(a.weapons):
                 a.switch(event.key - pygame.K_1)
@@ -4156,6 +4292,9 @@ class Game:
                 continue                            # 큰 맵: 멀리 있는 적은 가만히 (계산 아끼기)
             before = pygame.Vector2(enemy.pos)
             damage = enemy.update(edt, self.player)
+            moved = enemy.pos.distance_to(before)
+            enemy.walk += moved
+            enemy.moving = 0.15 if moved > 0.0005 else max(0.0, enemy.moving - dt)
             # 걷는 적의 군화 소리: 멀수록 작게, 소리 나는 방향(왼쪽/오른쪽)에서 들려요
             if enemy.pos != before and enemy.pos.distance_to(p.pos) < 13:
                 enemy.step_timer -= dt * enemy.t["speed"] / 1.4
@@ -4241,6 +4380,9 @@ class Game:
 
     def gun_sound(self, spec):
         self.sounds.play(GUN_SOUNDS[spec["name"]], 0.45 if spec.get("suppressed") else 1.0)
+        self.sounds.play("mech", 0.6)                        # 노리쇠 "착"
+        if not spec.get("suppressed"):
+            self.sounds.play("punch", min(1.0, 0.35 + spec["body"] / 90))   # 센 총일수록 묵직한 "쿵"
 
     def on_fire(self, spec):
         """쏠 때마다: 조준이 옆으로 살짝 튀고, 화면이 번쩍이고, 탄피가 튀어나와요"""
@@ -4681,6 +4823,8 @@ class Game:
 
     def play_at(self, name, pos, reach, loud=1.0):
         volume, pan = self.spatial(pos, reach)
+        if volume > 0.02 and name in MUFFLED_SOUNDS and not can_see(self.player.pos, pos):
+            name += "_m"            # 벽 너머: 먹먹한 소리
         self.sounds.play(name, volume * loud, pan)
 
     def throw_grenade(self):
@@ -5028,6 +5172,13 @@ class Game:
                     state = "aim"
                 else:
                     state = "normal"
+                    # 등을 보이고 있으면 뒷모습, 걷고 있으면 다리를 번갈아 들어요
+                    prefix = "back_" if (self.player.pos - enemy.pos).dot(enemy.facing) < 0 else ""
+                    step = int(enemy.walk / 0.32) % 4 if enemy.moving > 0 else 0
+                    name = prefix + ("walk0", "", "walk1", "")[step]
+                    name = {"": "normal", "back_": "back"}.get(name, name)
+                    if (enemy.kind, name) in self.enemy_images:
+                        state = name
                 items.append((box, self.enemy_images[(enemy.kind, state)], enemy))
         for d in self.decor:
             box = self.project(d.pos, d.height, d.width)
@@ -5724,6 +5875,7 @@ SETTING_ROWS = [
     ("assist", "AIM ASSIST", "조준 보정 세기", "Aim assist strength"),
     ("fov", "FIELD OF VIEW", "시야각 (넓을수록 많이 보여요)", "Field of view"),
     ("volume", "VOLUME", "소리 크기", "Sound volume"),
+    ("music", "MUSIC", "배경 음악 크기 (컴퓨터에서만, 웹은 없음)", "Background music (desktop only)"),
     ("difficulty", "DIFFICULTY", "난이도: 적 실력과 내가 받는 피해", "Enemy skill and damage taken"),
 ]
 
@@ -5736,7 +5888,7 @@ def change_setting(key, step):
         SETTINGS[key] = (SETTINGS[key] + step) % len(ASSIST_LEVELS)
     elif key == "fov":
         SETTINGS[key] = max(56, min(90, SETTINGS[key] + step * 2))
-    elif key == "volume":
+    elif key in ("volume", "music"):
         SETTINGS[key] = max(0, min(100, SETTINGS[key] + step * 10))
     elif key == "difficulty":
         SETTINGS[key] = (SETTINGS[key] + step) % len(DIFFICULTIES)
@@ -5786,7 +5938,7 @@ async def settings_screen(save):
         title = fonts["big"].render("SETTINGS", True, (255, 80, 200))
         screen.blit(title, title.get_rect(midleft=(WIDTH * 0.08, HEIGHT * 0.1)))
         for i, (key, name, desc_ko, desc_en) in enumerate(SETTING_ROWS):
-            rect = pygame.Rect(WIDTH * 0.08, HEIGHT * (0.2 + i * 0.12), WIDTH * 0.84, HEIGHT * 0.1)
+            rect = pygame.Rect(WIDTH * 0.08, HEIGHT * (0.19 + i * 0.105), WIDTH * 0.84, HEIGHT * 0.093)
             selected = i == row
             panel = pygame.Surface(rect.size, pygame.SRCALPHA)
             panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
@@ -6270,6 +6422,7 @@ async def run():
             elif choice == "SETTINGS":
                 if await settings_screen(save) == "closed":
                     running, closed = False, True
+                game.sounds.refresh_background()
             elif choice == "QUIT TO MENU":
                 running = False
             if not running:
@@ -6324,6 +6477,7 @@ async def run():
         await asyncio.sleep(0)
 
     write_save(game.save)          # 경험치(계급) 저장
+    game.sounds.stop_background()
     # 마우스 원래대로
     pygame.event.set_grab(False)
     pygame.mouse.set_visible(True)
