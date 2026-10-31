@@ -231,6 +231,15 @@ class GameTest(unittest.TestCase):
         finally:
             shooter.SMOKES.clear()
 
+    def test_save_code_round_trip_and_rejects_typos(self):
+        save = dict(xp=3000, best=21, res=2, wkills={"RIFLE": 50}, lifetime={"kills": 99})
+        code = shooter.export_code(save)
+        back = shooter.import_code(code[:40] + "\n " + code[40:])         # 줄바꿈/빈칸이 섞여도 돼요
+        self.assertEqual(back, {k: v for k, v in save.items() if k != "res"})
+        broken = code[:20] + ("x" if code[20] != "x" else "y") + code[21:]
+        self.assertIsNone(shooter.import_code(broken))
+        self.assertIsNone(shooter.import_code("nothing here"))
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

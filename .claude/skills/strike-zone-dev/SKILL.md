@@ -20,7 +20,8 @@ description: Develop, test and ship the Strike Zone pygame FPS (shooter.py) in t
 - **웹(pygbag)에서도 돌아야 해요**: 반복문은 `async` + `await asyncio.sleep(0)`, 파일 대신 `browser.py` 의 저장 함수.
 - 저장 정보(`save` dict)의 키를 바꾸거나 지우지 말고 추가만 해요 (사용자의 기존 진행이 이어져야 해요).
   쓰는 키: xp, best, continue, res, settings, loadout, wkills, unlocked, skills, zbest, mission, missions_done,
-  keys, lifetime, achievements, camo, challenges, daily, gunsmith (loadout 에 tactical 추가).
+  keys, lifetime, achievements, camo, challenges, daily, gunsmith, history (loadout 에 tactical 추가).
+  저장 코드: `export_code` / `import_code` (SZ1.압축.검사숫자), 클립보드는 browser.py 의 `copy_text` / `paste_text`.
 - 특정 실제 게임(콜오브듀티 등)의 맵·이름을 그대로 베끼지 않아요. 장르 느낌은 OK, 고유 이름/맵 복제는 X.
 
 ## 데이터 파일 (strike/)

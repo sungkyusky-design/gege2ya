@@ -74,6 +74,9 @@ RPG: 계급이 오르면 스킬 포인트(K), 계급/점수로 새 무기를 얻
 """
 
 import array
+import base64
+import json
+import zlib
 import copy
 import asyncio
 import math
@@ -92,7 +95,7 @@ from strike.units import (HORIZONTAL_KICK, START_WEAPONS, UNLOCKS, PERKS, WEAPON
 from strike.sounds import SOUND_RECIPES, SOUND_MARK_KINDS, MUFFLED_SOUNDS, STEP_SOUNDS, ENEMY_STEPS, GUN_SOUNDS
 from strike.story import CHALLENGES, STORY, RADIO, HELP_TEXT
 
-from browser import load_save, prepare_window, write_save
+from browser import load_save, prepare_window, write_save, copy_text, paste_text
 
 # ---------------------------------------------------------------
 # 화면 / 게임 설정값
@@ -245,6 +248,28 @@ CAMOS = [("NONE", 0, None, None), ("ARCTIC", 2, (225, 230, 235), (150, 160, 175)
          ("DIAMOND", 11, (170, 235, 250), (90, 170, 210))]
 CAMO_COLORS = {name: (body, accent) for name, need, body, accent in CAMOS if body}
 CAMO_COLORS["gold"] = ((212, 175, 55), (165, 128, 35))
+
+
+# ----- 저장 코드 (웹 ↔ 맥 진행 옮기기) -----
+def export_code(save):
+    """저장 정보를 글자 코드로: SZ1.<압축한 내용>.<검사 숫자>  (해상도는 기기마다 달라서 빼요)"""
+    data = {k: v for k, v in save.items() if k != "res"}
+    packed = base64.urlsafe_b64encode(zlib.compress(json.dumps(data, separators=(",", ":")).encode(), 9)).decode()
+    return f"SZ1.{packed}.{zlib.crc32(packed.encode()):08x}"
+
+
+def import_code(text):
+    """코드를 저장 정보(dict)로. 틀린 코드면 None (한 글자라도 틀리면 검사 숫자가 안 맞아요)"""
+    try:
+        text = "".join(text.split())                   # 줄바꿈/빈칸 제거
+        start = text.index("SZ1.")
+        _, packed, check = text[start:].split(".")[:3]
+        if f"{zlib.crc32(packed.encode()):08x}" != check[:8]:
+            return None
+        data = json.loads(zlib.decompress(base64.urlsafe_b64decode(packed.encode())).decode())
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
 
 
 def earned_camos(save):
@@ -3022,6 +3047,8 @@ class Game:
         self.radio_msg = None      # 본부 무전 [글자, 지난 시간]
         self.challenge_time = 0.0
         self.challenge_done = False
+        self.game_shots = self.game_hits = 0   # 이번 판 전체 (기록 화면용)
+        self.started = time.time()
         self.loadout = loadout
         self.mission = mission     # 미션 모드: 몇 번째 미션인지
         self.stage = stage         # 미션 모드: 지금 단계 (0부터)
@@ -4344,6 +4371,20 @@ class Game:
             self.popups.append([f"RANK UP!  RANK {self.rank}  (+1 SKILL POINT)", (255, 80, 200), 2.5])
             self.check_unlocks()
 
+    def record_history(self):
+        """판이 끝나면 최근 기록에 한 줄 (최근 10판만)"""
+        if self.mode == "training" or (time.time() - self.started < 20 and self.kills == 0):
+            return
+        mode = f"CHALLENGE {self.challenge}" if self.challenge else self.mode.upper()
+        if self.mode == "mission":
+            mode += f" {MISSIONS[self.mission]['name']}"
+        entry = dict(date=time.strftime("%Y-%m-%d %H:%M"), mode=mode, round=self.round, kills=self.kills,
+                     acc=round(100 * self.game_hits / self.game_shots) if self.game_shots else 0,
+                     minutes=round((time.time() - self.started) / 60, 1))
+        history = self.save.setdefault("history", [])
+        history.append(entry)
+        del history[:-10]
+
     def record_progress(self, next_round):
         """저장: 다음에 이어할 라운드와 최고 기록"""
         self.save["continue"] = next_round
@@ -4848,6 +4889,7 @@ class Game:
         self.gun_noise = 0.5
         self.gun_noise_radius = 6.0 if spec.get("suppressed") else 16.0   # 소음기: 가까운 적만 들어요
         self.stats["shots"] += 1
+        self.game_shots += 1
         self.shake = max(self.shake, 0.03 + spec["kick"] / 450)     # 총이 셀수록 화면이 크게 흔들려요
         if not spec["projectile"]:
             shotgun = spec["name"] == "SHOTGUN"
@@ -5338,6 +5380,7 @@ class Game:
 
         if damage:
             self.stats["hits"] += 1
+            self.game_hits += 1
         for x, y, perp, head in hits:
             self.spray_blood(x, y, perp, head)
         for enemy, amount in damage.items():
@@ -6966,6 +7009,94 @@ async def controls_screen(save):
         await asyncio.sleep(0)
 
 
+async def stats_screen(save):
+    """기록 화면: 누적 기록, 무기별 처치·레벨, 최근 판. E 저장 코드 내보내기, I 가져오기, ESC 돌아가기"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    message, pending = "", None
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if pending is not None:                          # 가져오기 확인: Y 바꾸기 / 다른 키 취소
+                if event.key == pygame.K_y:
+                    res = save.get("res")
+                    save.clear()
+                    save.update(pending)
+                    if res is not None:
+                        save["res"] = res
+                    apply_settings(save.get("settings", {}))
+                    apply_keys(save.get("keys", {}))
+                    write_save(save)
+                    message = "저장을 가져왔어요!" if ko else "Save imported!"
+                else:
+                    message = "취소했어요" if ko else "Cancelled"
+                pending = None
+                continue
+            if event.key == pygame.K_ESCAPE:
+                return None
+            if event.key == pygame.K_e:
+                where = copy_text(export_code(save))
+                message = (f"코드를 복사했어요 ({where})" if ko else f"Code copied ({where})") if where else \
+                    ("복사하지 못했어요" if ko else "Could not copy")
+            elif event.key == pygame.K_i:
+                data = import_code(paste_text())
+                if data is None:
+                    message = "코드가 없거나 틀렸어요 (한 글자도 빠지면 안 돼요)" if ko else "No valid code found"
+                else:
+                    pending = data
+                    message = (f"가져올 저장: 계급 {player_level(data)}, 캠페인 최고 {data.get('best', 0)}라운드. "
+                               "지금 저장을 바꿀까요? Y = 예" if ko else
+                               f"Import: rank {player_level(data)}, best round {data.get('best', 0)}. Replace? Y = yes")
+        screen.fill((14, 10, 30))
+        title = fonts["big"].render("STATS", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.05, HEIGHT * 0.08)))
+        life = save.get("lifetime", {})
+        lines = [f"RANK {player_level(save)}   XP {save.get('xp', 0)}   CAMPAIGN BEST ROUND {save.get('best', 0)}   "
+                 f"ZOMBIES BEST WAVE {save.get('zbest', 0)}   MISSIONS {len(save.get('missions_done', []))}",
+                 f"KILLS {life.get('kills', 0)}   HEADSHOTS {life.get('heads', 0)}   KNIFE {life.get('knife', 0)}   "
+                 f"EXPLOSIVE {life.get('explosive', 0)}   BEST STREAK {life.get('streak', 0)}   ROUNDS {life.get('rounds', 0)}   "
+                 f"ACHIEVEMENTS {len(save.get('achievements', []))}/{len(ACHIEVEMENTS)}"]
+        for i, line in enumerate(lines):
+            screen.blit(fonts["small"].render(line, True, (80, 240, 255)), (WIDTH * 0.05, HEIGHT * (0.15 + i * 0.04)))
+        # 왼쪽: 무기별 처치와 레벨 (많이 쓴 순서)
+        screen.blit(fonts["normal"].render("WEAPONS", True, WHITE), (WIDTH * 0.05, HEIGHT * 0.26))
+        kills = save.get("wkills", {})
+        ranked = sorted(kills.items(), key=lambda kv: -kv[1])[:12]
+        top = max([k for _, k in ranked] + [1])
+        for i, (name, count) in enumerate(ranked):
+            y = HEIGHT * (0.32 + i * 0.045)
+            screen.blit(fonts["small"].render(f"{name}", True, WHITE), (WIDTH * 0.05, y))
+            bar = pygame.Rect(WIDTH * 0.2, y + 3 * UI, WIDTH * 0.18 * count / top, 10 * UI)
+            pygame.draw.rect(screen, (255, 200, 60), bar)
+            screen.blit(fonts["tiny"].render(f"{count} kills  LV {weapon_level(count)}", True, (200, 200, 220)),
+                        (WIDTH * 0.39, y))
+        if not ranked:
+            screen.blit(fonts["help"].render("아직 기록이 없어요" if ko else "No kills yet", True, (150, 150, 170)),
+                        (WIDTH * 0.05, HEIGHT * 0.32))
+        # 오른쪽: 최근 판
+        screen.blit(fonts["normal"].render("RECENT GAMES", True, WHITE), (WIDTH * 0.52, HEIGHT * 0.26))
+        for i, game in enumerate(reversed(save.get("history", []))):
+            y = HEIGHT * (0.32 + i * 0.045)
+            text = (f"{game['date']}  {game['mode']}  R{game['round']}  KILLS {game['kills']}  "
+                    f"ACC {game['acc']}%  {game['minutes']}min")
+            screen.blit(fonts["tiny"].render(text, True, (200, 200, 220)), (WIDTH * 0.52, y))
+        if message:
+            image = fonts["help"].render(message, True, (80, 255, 120))
+            screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.88)))
+        hint = ("E 저장 코드 내보내기(복사)   I 코드 가져오기(붙여넣기)   ESC 돌아가기   - 웹과 맥 사이에 진행을 옮길 수 있어요"
+                if ko else "E export save code   I import save code   ESC back")
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
 async def challenge_screen(save):
     """도전 모드 고르기: ↑↓ 고르기, Enter 시작, ESC 돌아가기"""
     screen = pygame.display.get_surface()
@@ -7117,6 +7248,10 @@ async def intro_screen(save):
                 return dict(mode="zombies", round=1)
             if event.key == pygame.K_r:
                 return dict(mode="training", round=1)
+            if event.key == pygame.K_v:
+                if await stats_screen(save) == "closed":
+                    return "closed"
+                continue
             if event.key == pygame.K_x:
                 picked = await challenge_screen(save)
                 if picked == "closed" or picked:
@@ -7169,6 +7304,7 @@ async def intro_screen(save):
         parts.append("O 미션" if ko else "O missions")
         parts.append("R 사격장" if ko else "R training range")
         parts.append("X 도전" if ko else "X challenges")
+        parts.append("V 기록/저장 옮기기" if ko else "V stats / save code")
         parts.append("A 업적" if ko else "A achievements")
         parts.append("K 스킬" if ko else "K skills")
         parts.append("S 설정" if ko else "S settings")
@@ -7728,6 +7864,7 @@ async def run():
         await asyncio.sleep(0)
 
     if not training:
+        game.record_history()
         write_save(game.save)      # 경험치(계급) 저장
     game.sounds.stop_background()
     # 마우스 원래대로

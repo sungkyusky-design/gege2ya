@@ -59,3 +59,52 @@ def write_save(data):
                 f.write(raw)
     except Exception:
         pass
+
+
+# ----- 저장 옮기기 (웹 ↔ 컴퓨터): 글자 코드로 내보내고 가져와요 -----
+CODE_PATH = os.path.join(os.path.expanduser("~"), "strike_zone_save_code.txt")   # 컴퓨터: 코드도 파일로 남겨요
+
+
+def copy_text(text):
+    """글자를 다른 곳에 붙여 넣을 수 있게 해요. 어디에 남겼는지 설명을 돌려줘요."""
+    if IN_BROWSER:
+        try:
+            import platform
+            platform.window.prompt("Copy this save code (Ctrl+C / Cmd+C):", text)   # 창에서 복사
+            return "browser box"
+        except Exception:
+            return ""
+    where = []
+    try:
+        pygame.scrap.put_text(text)
+        where.append("clipboard")
+    except Exception:
+        pass
+    try:
+        with open(CODE_PATH, "w", encoding="utf-8") as f:
+            f.write(text)
+        where.append(CODE_PATH)
+    except Exception:
+        pass
+    return " + ".join(where)
+
+
+def paste_text():
+    """붙여 넣은 글자 (웹: 입력 창 / 컴퓨터: 클립보드, 없으면 코드 파일)"""
+    if IN_BROWSER:
+        try:
+            import platform
+            return platform.window.prompt("Paste your save code:", "") or ""
+        except Exception:
+            return ""
+    try:
+        text = pygame.scrap.get_text()
+        if text and "SZ1." in text:
+            return text
+    except Exception:
+        pass
+    try:
+        with open(CODE_PATH, encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return ""
