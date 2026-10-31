@@ -96,6 +96,8 @@ START_COL_W = 4 if IN_BROWSER else 2   # 세로 줄 하나의 폭(px). 작을수
 MIN_COL_W = 2 if IN_BROWSER else 1     # 컴퓨터에서는 1px(가장 선명)까지 올라가요
 MAX_COL_W = 8
 FRAME_BUDGET = 0.014              # 한 장면 계산에 이보다 오래 걸리면 줄 폭을 넓혀요(초)
+MAX_TEXTURE_COL = 4               # 세로 줄 폭이 이보다 넓으면(느린 컴퓨터) 벽 질감 대신 단색으로
+TEXTURE_DISTANCE = 9             # 이보다 먼 벽은 질감 없이 단색으로 (빠르게)
 NORMAL_FOV = math.radians(66)     # 시야각
 SCOPE_ZOOMS = [3, 6, 12]          # 저격총 조준경 배율
 MAX_DEPTH = 60                    # 이보다 먼 곳은 안 그려요
@@ -1468,6 +1470,109 @@ load_map(0)       # 처음엔 첫 번째 맵
 # ---------------------------------------------------------------
 # 그림 만들기 (이미지 파일 없이 도형으로 그려요)
 # ---------------------------------------------------------------
+# ---------------------------------------------------------------
+# 벽 질감: 그림 파일 없이 코드로 그려요. 32x32 한 장을 건물 높이만큼 위로 이어 붙여요
+# ---------------------------------------------------------------
+TEXTURE_KINDS = {"R": "brick", "M": "stucco", "A": "stucco", "B": "stucco", "C": "stucco", "D": "stucco",
+                 "N": "panel", "G": "panel", "S": "panel", "W": "metal", "r": "metal", "u": "metal", "o": "metal",
+                 "Y": "metal", "U": "metal", "H": "metal", "K": "planks", "J": "planks", "Q": "metal",
+                 "F": "stone", "O": "concrete", "V": "stone", "Z": "sandbag"}
+TEX = 32                          # 질감 한 장의 크기 (px)
+FOG_LEVELS = 8                    # 안개 단계 (멀수록 안개 색에 가까운 그림을 미리 만들어 둬요)
+
+
+def make_texture_tile(kind, color, seed):
+    """벽 질감 한 장 (32x32)"""
+    rng = random.Random(seed)
+    tile = pygame.Surface((TEX, TEX))
+    tile.fill(color)
+
+    def dot(x, y, amount):
+        tile.set_at((x % TEX, y % TEX), lighter(color, amount))
+
+    if kind == "brick":
+        mortar = lighter(color, 1.25)
+        for row in range(4):                                 # 벽돌 4줄, 줄마다 엇갈리게
+            y = row * 8
+            offset = 8 if row % 2 else 0
+            for col in range(3):
+                x = (col * 16 + offset) % TEX
+                pygame.draw.rect(tile, lighter(color, rng.uniform(0.82, 1.08)), (x, y, 15, 7))
+            pygame.draw.line(tile, mortar, (0, y + 7), (TEX, y + 7))
+            for col in range(3):
+                pygame.draw.line(tile, mortar, ((col * 16 + offset + 15) % TEX, y), ((col * 16 + offset + 15) % TEX, y + 7))
+    elif kind == "stucco":
+        for _ in range(140):                                 # 회벽 얼룩
+            dot(rng.randrange(TEX), rng.randrange(TEX), rng.uniform(0.86, 1.08))
+        pygame.draw.line(tile, lighter(color, 0.85), (0, TEX - 1), (TEX, TEX - 1))
+    elif kind == "planks":
+        for y in range(0, TEX, 6):                           # 나무 판자 (가로)
+            pygame.draw.rect(tile, lighter(color, rng.uniform(0.85, 1.08)), (0, y, TEX, 5))
+            pygame.draw.line(tile, lighter(color, 0.6), (0, y + 5), (TEX, y + 5))
+        for _ in range(30):
+            dot(rng.randrange(TEX), rng.randrange(TEX), 0.75)          # 나뭇결
+    elif kind == "metal":
+        for x in range(0, TEX, 4):                           # 골함석 (세로 골)
+            pygame.draw.line(tile, lighter(color, 1.12), (x, 0), (x, TEX))
+            pygame.draw.line(tile, lighter(color, 0.72), (x + 2, 0), (x + 2, TEX))
+        for _ in range(25):
+            dot(rng.randrange(TEX), rng.randrange(TEX), rng.uniform(0.6, 0.85))   # 녹슨 자국
+    elif kind == "panel":
+        pygame.draw.line(tile, lighter(color, 0.7), (0, TEX - 1), (TEX, TEX - 1))
+        pygame.draw.line(tile, lighter(color, 0.7), (TEX // 2, 0), (TEX // 2, TEX))
+        for _ in range(40):
+            dot(rng.randrange(TEX), rng.randrange(TEX), rng.uniform(0.9, 1.06))
+    elif kind == "concrete":
+        for _ in range(160):
+            dot(rng.randrange(TEX), rng.randrange(TEX), rng.uniform(0.8, 1.06))
+        pygame.draw.line(tile, lighter(color, 0.7), (0, TEX - 1), (TEX, TEX - 1))
+    elif kind == "stone":
+        for _ in range(12):                                  # 울퉁불퉁한 돌
+            w, h = rng.randint(6, 11), rng.randint(5, 8)
+            x, y = rng.randrange(TEX), rng.randrange(TEX)
+            pygame.draw.rect(tile, lighter(color, rng.uniform(0.8, 1.1)), (x, y, w, h), border_radius=3)
+            pygame.draw.rect(tile, lighter(color, 0.62), (x, y, w, h), 1, border_radius=3)
+    elif kind == "sandbag":
+        for row in range(4):
+            for col in range(3):
+                x = col * 12 - (6 if row % 2 else 0)
+                pygame.draw.ellipse(tile, lighter(color, rng.uniform(0.88, 1.05)), (x, row * 8, 13, 9))
+                pygame.draw.ellipse(tile, lighter(color, 0.7), (x, row * 8, 13, 9), 1)
+    return tile
+
+
+def make_wall_textures(letter, color, height, haze):
+    """[세로벽/가로벽][안개 단계] -> 건물 높이만큼 이어 붙인 질감"""
+    tile = make_texture_tile(TEXTURE_KINDS.get(letter, "concrete"), color, letter)
+    repeats = max(1, round(height / 0.5))                    # 0.5칸(한 층의 절반)마다 한 장
+    tall = pygame.Surface((TEX, TEX * repeats))
+    for k in range(repeats):
+        tall.blit(tile, (0, k * TEX))
+    pygame.draw.line(tall, shade(color, 0.6), (0, 0), (0, tall.get_height()))          # 건물 모서리 선
+    pygame.draw.line(tall, shade(color, 0.6), (TEX - 1, 0), (TEX - 1, tall.get_height()))
+    sides = []
+    for side_shade in (0.82, 1.0):                           # 세로벽은 조금 어둡게
+        levels = []
+        for k in range(FOG_LEVELS):
+            t = 0.8 * k / (FOG_LEVELS - 1)                   # fog() 와 같은 섞는 비율
+            img = tall.copy()
+            keep = int(255 * side_shade * (1 - t))
+            img.fill((keep, keep, keep), special_flags=pygame.BLEND_MULT)
+            img.fill(tuple(int(h * t) for h in haze), special_flags=pygame.BLEND_ADD)
+            levels.append(img)
+        sides.append(levels)
+    return sides
+
+
+def make_glow(size, color):
+    """빛 번짐 그림 (검은 바탕 + 가운데가 밝은 원). 더하기(BLEND_ADD)로 붙이면 빛처럼 보여요"""
+    img = pygame.Surface((size, size))
+    for k in range(12, 0, -1):
+        amount = (1 - k / 12) ** 2
+        pygame.draw.circle(img, tuple(int(c * amount) for c in color), (size // 2, size // 2), size // 2 * k // 12)
+    return img
+
+
 def make_enemy_image(look, state="normal"):
     """적 그림. state: normal(평소) / flash(총구 불꽃) / hurt(맞음) / aim(저격 조준 불빛)"""
     if look["head"] == "zombie":
@@ -1931,6 +2036,7 @@ SOUND_RECIPES = {
     # 총소리 뒤에 남는 울림, 바닥에 떨어지는 탄피, 재장전 동작 소리
     "tail":      (0.70, 5, 0.6, 0.95, 40, 0.3, 0, 0, 0.35),
     "beep":      (0.08, 30, 0.0, 0.0, 0, 0, 2000, 0.6, 0.40),
+    "thunder":   (1.80, 1.8, 1.0, 0.97, 32, 0.7, 0, 0, 0.80),
     "casing":    (0.08, 40, 0.0, 0.0, 0, 0, 4200, 0.5, 0.25),
     "magout":    (0.08, 60, 0.8, 0.60, 0, 0, 1200, 0.3, 0.40),
     "magin":     (0.07, 70, 0.9, 0.50, 200, 0.4, 2400, 0.3, 0.45),
@@ -2891,6 +2997,7 @@ class Decor:
         self.height = height
         self.width = width
         self.cover = cover
+        self.glow = False
 
 
 class Pickup:
@@ -3061,6 +3168,11 @@ class Game:
         self.blood_pool = make_blood_pool_image()
         self.hurt_vignette = make_hurt_vignette()
         self.splat_images = [make_screen_splat(i) for i in range(4)]
+        self.glow_image = make_glow(128, (255, 200, 120))      # 가로등 불빛
+        self.flash_overlay = pygame.Surface((WIDTH, HEIGHT))
+        self.flash_overlay.fill((230, 235, 255))
+        self.lightning = 0.0       # 번개 번쩍임 남은 시간
+        self.lightning_timer = 6.0
         self.muzzle_light = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         self.muzzle_light.fill((255, 220, 150, 28))
         self.scope_overlay = make_scope_overlay()
@@ -3138,6 +3250,8 @@ class Game:
         for letter, (height, width) in sizes.items():
             self.decor += [Decor(x, y, images[letter], height, width) for x, y in find_cells(letter)]
         self.decor += [Decor(x, y, images["v"], 0.6, 1.1, cover=True) for x, y in find_cells("v")]
+        for d in self.decor:
+            d.glow = d.image is images["L"]           # 가로등은 밤에 빛나요
         # 적 그림: 맵에 맞는 위장복으로 다시 그려요 (일반병, 저격수)
         camo = self.theme["camo"]
         self.enemy_images = {}
@@ -3168,6 +3282,9 @@ class Game:
         self.decor += [Decor(x, y, cars[int(x * 7 + y * 3) % len(cars)], 0.6, 1.1, cover=True)
                        for x, y in find_cells("c")]
         self.spawn_points = find_cells("E")
+        dark = self.theme.get("dark", 1.0)
+        used = {ch for line in GAME_MAP for ch in line if ch in WALLS}
+        self.wall_textures = {ch: make_wall_textures(ch, shade(WALLS[ch][0], dark), WALLS[ch][1], HAZE) for ch in used}
         Enemy.cover_spots = [pygame.Vector2(col + 0.5, row + 0.5)
                              for row in range(MAP_H) for col in range(MAP_W)
                              if not is_blocked(col + 0.5, row + 0.5)
@@ -3175,6 +3292,8 @@ class Game:
                                      for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)))]
         dark = self.theme.get("dark", 1.0)          # 어두운 맵일수록 쏠 때 주변이 크게 번쩍여요
         self.muzzle_light.fill((255, 220, 150, int(28 + 90 * (1 - dark))))
+        self.muzzle_glow = 50 + 110 * (1 - dark)
+        self.night = dark < 0.95 or self.theme.get("stars", False)
         self.minimap = self.make_minimap()
         self.sky = make_sky(self.theme)
 
@@ -3898,6 +4017,13 @@ class Game:
                 waiting.append(item)
         self.echoes = waiting
         self.screen_blood = [[x, y, r, t - dt] for x, y, r, t in self.screen_blood if t - dt > 0]
+        self.lightning = max(0.0, self.lightning - dt)
+        if self.theme.get("rain"):                 # 폭풍우: 가끔 번개가 번쩍, 조금 뒤 천둥
+            self.lightning_timer -= dt
+            if self.lightning_timer <= 0:
+                self.lightning_timer = random.uniform(8, 16)
+                self.lightning = 0.3
+                self.echoes.append([random.uniform(0.4, 1.5), "thunder", random.uniform(0.6, 1.0)])
         self.suppress = max(0.0, self.suppress - dt * 0.8)
         if self.hitstop > 0:        # 쓰러뜨린 순간: 아주 잠깐 멈춤 (묵직한 손맛)
             self.hitstop -= dt
@@ -4713,6 +4839,9 @@ class Game:
         self.draw_world(screen)
         self.draw_sprites(screen)
         self.draw_particles(screen, casings=False)       # 튀는 피
+        if self.lightning > 0:
+            self.flash_overlay.set_alpha(int(190 * self.lightning / 0.3 * (0.75 + 0.25 * math.sin(self.lightning * 60))))
+            screen.blit(self.flash_overlay, (0, 0))
         if self.theme["snow"]:
             self.draw_snow(screen)
         if self.theme.get("rain"):
@@ -4838,12 +4967,36 @@ class Game:
                 top = bottom - height * size
                 if top > HEIGHT or bottom < 0:
                     continue
-                base = shade(color, 0.82 if vertical else 1.0)
-                if wall_x < 0.03 or wall_x > 0.97:      # 건물 모서리 선
-                    base = shade(base, 0.6)
-                elif pattern == "ribs" and (wall_x * 6) % 1 < 0.2:   # 컨테이너/창고의 세로 골
-                    base = shade(base, 0.75)
-                pygame.draw.rect(screen, fog(base, perp, fog_dist), (x, top, col_w, bottom - top + 1))
+                textures = None
+                if col_w <= MAX_TEXTURE_COL and perp < TEXTURE_DISTANCE:     # 먼 벽은 안개에 묻혀서 단색으로
+                    textures = self.wall_textures.get(GAME_MAP[cy][cx])
+                if textures:
+                    # 질감: 그림에서 세로 한 줄을 잘라 화면 높이만큼 늘려 붙여요 (보이는 부분만)
+                    level = min(FOG_LEVELS - 1, int(min(1.0, perp / fog_dist) * (FOG_LEVELS - 1) + 0.5))
+                    tex = textures[0 if vertical else 1][level]
+                    tex_h = tex.get_height()
+                    vis_top, vis_bottom = max(0.0, top), min(float(HEIGHT), bottom)
+                    v0 = int((vis_top - top) / (bottom - top) * tex_h)
+                    v1 = max(v0 + 1, min(tex_h, int((vis_bottom - top) / (bottom - top) * tex_h + 1)))
+                    strip = tex.subsurface((min(TEX - 1, int(wall_x * TEX)), v0, 1, v1 - v0))
+                    screen.blit(pygame.transform.scale(strip, (col_w, int(vis_bottom - vis_top) + 1)), (x, vis_top))
+                else:
+                    base = shade(color, 0.82 if vertical else 1.0)
+                    if wall_x < 0.03 or wall_x > 0.97:      # 건물 모서리 선
+                        base = shade(base, 0.6)
+                    elif pattern == "ribs" and (wall_x * 6) % 1 < 0.2:   # 컨테이너/창고의 세로 골
+                        base = shade(base, 0.75)
+                    pygame.draw.rect(screen, fog(base, perp, fog_dist), (x, top, col_w, bottom - top + 1))
+                if perp < 14:
+                    # 벽 아래쪽 그림자 (땅과 닿는 곳이 어두워서 건물이 땅에 붙어 보여요)
+                    shadow_top = max(top, bottom - 0.12 * size)
+                    if shadow_top < HEIGHT:
+                        screen.fill((150, 150, 155), (x, shadow_top, col_w, min(HEIGHT, bottom) - shadow_top + 1),
+                                    special_flags=pygame.BLEND_MULT)
+                    if self.light_timer > 0 and perp < 5:      # 총구 불빛이 가까운 벽을 비춰요
+                        k = int(self.muzzle_glow * (1 - perp / 5))
+                        screen.fill((k, int(k * 0.8), int(k * 0.5)), (x, max(0, top), col_w, min(HEIGHT, bottom) - max(0, top)),
+                                    special_flags=pygame.BLEND_ADD)
                 # 창문: 층마다 두 칸씩. 몇몇 창문은 불이 켜져 있어요
                 if pattern is True and (0.18 < wall_x < 0.42 or 0.58 < wall_x < 0.82):
                     dark_glass = fog((60, 80, 120) if vertical else (90, 110, 150), perp, fog_dist)
@@ -4921,6 +5074,13 @@ class Game:
                 items.append((box, effect.frame, None))
         # 먼 것부터 그려야 가까운 것이 앞에 보여요
         items.sort(key=lambda item: -item[0][4])
+        lights = []
+        if self.night:                             # 밤: 가로등 불빛과 바닥의 빛 웅덩이
+            for d in self.decor:
+                if d.glow:
+                    box = self.project(d.pos, d.height, d.width)
+                    if box:
+                        lights.append(box)
         for box, img, enemy in items:
             self.draw_sprite_columns(screen, img, *box)
             if enemy and enemy.hp < enemy.t["hp"]:
@@ -4935,6 +5095,21 @@ class Game:
                 size = max(4, int(10 * UI))
                 pygame.draw.rect(screen, (80, 255, 120), (sx - size / 2, top - 3.2 * size, size, size / 3))
                 pygame.draw.rect(screen, (80, 255, 120), (sx - size / 6, top - 3.6 * size, size / 3, size * 1.1))
+        if lights:
+            self.draw_lights(screen, lights)
+
+    def draw_lights(self, screen, lights):
+        for sx, top, bottom, w, perp in lights:
+            col = int(sx // self.col_w)
+            if not (0 <= col < self.num_rays) or perp > self.zbuffer[col] + 0.5:
+                continue                                # 건물 뒤에 가려진 가로등
+            size = int(min(WIDTH, (bottom - top) * 1.1))
+            if size < 4:
+                continue
+            glow = pygame.transform.scale(self.glow_image, (size, size))
+            screen.blit(glow, glow.get_rect(center=(sx, top + (bottom - top) * 0.05)), special_flags=pygame.BLEND_ADD)
+            pool = pygame.transform.scale(self.glow_image, (size * 2, max(2, size // 3)))
+            screen.blit(pool, pool.get_rect(center=(sx, bottom)), special_flags=pygame.BLEND_ADD)
 
     def draw_hp_bar(self, screen, enemy, box):
         """다친 적 머리 위에 체력 막대"""
