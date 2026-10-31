@@ -381,6 +381,11 @@ ENEMY_TYPES = {
 }
 ZOMBIE_KINDS = ("ZOMBIE", "RUNNER", "BRUTE", "EXPLODER", "SPITTER")
 ARMORED = ("HEAVY", "BOSS", "BRUTE", "GUNNER")     # 맞으면 '깡' 장갑 소리
+# 적 탄창: 이만큼 쏘면 재장전 (그동안 못 쏴요. 머리 위에 RELOADING 표시) -> (탄창, 재장전 초)
+ENEMY_MAGS = {"GRUNT": (12, 2.2), "RUSHER": (8, 1.8), "SNIPER": (4, 2.6), "HEAVY": (45, 3.5), "SHIELD": (10, 2.2),
+              "BOSS": (60, 3.0), "FLANKER": (6, 2.0), "MEDIC": (12, 2.2), "GUNNER": (50, 3.8)}
+# 엄폐물을 쓰는 적: 다치거나 재장전하거나 제압당하면 숨었다가 고개를 내밀어 쏴요
+COVER_USERS = ("GRUNT", "SNIPER", "MEDIC", "BOMBER", "SHIELD")
 ZOMBIE_POINTS = dict(hit=10, kill=60, headshot=100, knife=130, wave=250)
 ZOMBIE_SHOP = dict(ammo=500, upgrade=2500)     # B: 탄약 가득, U: 들고 있는 총 강화
 
@@ -1949,6 +1954,17 @@ class Enemy:
         self.flinch = 0.0         # 맞고 움찔하는 시간
         self.flinch_pose = "flinch_l"
         self.suppressed = 0.0     # 내 총알이 가까이 지나가면 움츠러들어 덜 맞혀요
+        self.mag, self.reload_time = ENEMY_MAGS.get(kind, (0, 0))
+        self.ammo = self.mag
+        self.reload_left = 0.0
+        self.mode = "fight"       # fight 싸우기 / cover 숨기 / peek 고개 내밀어 쏘기
+        self.cover_spot = None
+        self.peek_spot = None
+        self.hide_timer = 0.0
+        self.peek_timer = 0.0
+        self.cover_cycles = 0
+        self.cover_cooldown = random.uniform(0, 3)
+        self.stuck_timer = 0.0
 
     @property
     def aiming(self):
@@ -1977,6 +1993,13 @@ class Enemy:
         if self.los_timer <= 0:
             self.los_timer = 0.2
             self.sees = dist < t["sight"] and can_see(self.pos, player.pos)
+        self.cover_cooldown -= dt
+        if self.reload_left > 0:                  # 재장전 중
+            self.reload_left -= dt
+            if self.reload_left <= 0:
+                self.ammo = self.mag
+        if self.mode != "fight":
+            return self.update_cover(dt, player, dist)
 
         if not self.sees:
             # 못 봤을 때: 어슬렁거리다가 막히면 방향 바꾸기.
@@ -2012,6 +2035,17 @@ class Enemy:
         if self.spotted < t["reaction"]:
             return 0
 
+        # 엄폐: 다쳤거나, 재장전해야 하거나, 제압당하면 가까운 엄폐물 뒤로 숨어요
+        hurt = self.hp < t["hp"] * 0.5
+        if (self.kind in COVER_USERS and self.cover_cooldown <= 0 and dist > 3
+                and (hurt or self.reload_left > 0 or self.suppressed > 0)):
+            spot = self.find_cover(player)
+            if spot:
+                self.mode, self.cover_spot, self.cover_cycles, self.stuck_timer = "cover", spot, 0, 0.0
+                self.hide_timer = random.uniform(1.2, 2.2)
+                return 0
+            self.cover_cooldown = 3.0
+
         # 수류탄 던지기 (폭탄병, 보스)
         throw = t.get("throw")
         if throw and t["throw_range"][0] <= dist <= t["throw_range"][1]:
@@ -2020,13 +2054,22 @@ class Enemy:
                 self.throw_timer = random.uniform(*throw)
                 self.throw_at = pygame.Vector2(player.pos)
 
-        if dist > t["range"]:
+        return self.shoot_at(dt, player, dist)
+
+    def shoot_at(self, dt, player, dist):
+        """쏠 수 있으면 쏴요. 플레이어에게 준 피해를 돌려줘요."""
+        t = self.t
+        if dist > t["range"] or not self.sees or self.reload_left > 0:
             return 0
         self.shoot_timer -= dt
         if self.shoot_timer > 0:
             return 0
         self.shoot_timer = random.uniform(*t["fire"])
         self.flash_timer = 0.08
+        if self.mag:
+            self.ammo -= 1
+            if self.ammo <= 0:
+                self.reload_left = self.reload_time   # 탄창이 비었어요: 재장전
         # 멀수록, 플레이어가 움직이거나 점프 중일수록 잘 안 맞아요
         chance = t["accuracy"] - dist * t["falloff"]
         if player.moving:
@@ -2044,6 +2087,70 @@ class Enemy:
             return random.randint(*t["damage"])
         return 0
 
+
+    # 엄폐할 수 있는 자리: 건물/상자 바로 옆 칸 (Game이 맵마다 정해요)
+    cover_spots = []
+
+    def find_cover(self, player):
+        """가까운 엄폐 자리 중 플레이어에게 안 보이는 곳 (가까운 순서로 몇 개만 검사)"""
+        near = sorted((spot for spot in Enemy.cover_spots if spot.distance_to(self.pos) < 5),
+                      key=lambda spot: spot.distance_to(self.pos))[:12]
+        for spot in near:
+            if spot.distance_to(player.pos) > 3 and not can_see(spot, player.pos):
+                return spot
+        return None
+
+    def find_peek(self, player):
+        """엄폐 자리 옆에서 플레이어가 보이는 곳 (고개를 내밀 자리)"""
+        for k in range(8):
+            spot = self.cover_spot + pygame.Vector2(1, 0).rotate(k * 45)
+            if not is_blocked(spot.x, spot.y) and can_see(spot, player.pos):
+                return spot
+        return None
+
+    def move_to(self, target, speed, dt):
+        """목표 자리로 걸어가요. 도착했으면 True. 오래 막혀 있으면 포기해요."""
+        offset = target - self.pos
+        if offset.length() < 0.15:
+            return True
+        before = pygame.Vector2(self.pos)
+        self.facing = offset.normalize()
+        move_with_collision(self.pos, self.facing * min(speed * dt, offset.length()))
+        self.stuck_timer = self.stuck_timer + dt if self.pos == before else 0.0
+        if self.stuck_timer > 0.8:
+            self.mode, self.cover_cooldown = "fight", 4.0
+        return False
+
+    def update_cover(self, dt, player, dist):
+        """엄폐 행동: 숨기 → (재장전) → 고개를 내밀어 쏘기 → 다시 숨기. 세 번 하거나 가까이 오면 그만둬요."""
+        t = self.t
+        if dist < 3 or self.cover_cycles >= 3:
+            self.mode, self.cover_cooldown = "fight", 6.0
+            return 0
+        if self.mode == "cover":
+            if not self.move_to(self.cover_spot, t["speed"] * 1.3, dt):
+                return 0
+            if dist > 0:
+                self.facing = (player.pos - self.pos).normalize()
+            self.hide_timer -= dt
+            if self.hide_timer <= 0 and self.reload_left <= 0:
+                self.peek_spot = self.find_peek(player)
+                if self.peek_spot is None:
+                    self.mode, self.cover_cooldown = "fight", 4.0
+                    return 0
+                self.mode, self.peek_timer = "peek", random.uniform(1.5, 2.5)
+            return 0
+        # 고개 내밀기: 옆 칸으로 나와서 쏘고, 시간이 되거나 탄창이 비면 다시 숨어요
+        self.move_to(self.peek_spot, t["speed"] * 1.3, dt)
+        if dist > 0:
+            self.facing = (player.pos - self.pos).normalize()
+        self.spotted = max(self.spotted, t["reaction"])
+        self.peek_timer -= dt
+        if self.peek_timer <= 0 or self.reload_left > 0:
+            self.mode, self.hide_timer = "cover", random.uniform(1.2, 2.2)
+            self.cover_cycles += 1
+            return 0
+        return self.shoot_at(dt, player, dist)
 
     # 좀비 길찾기 지도: 칸마다 플레이어까지 몇 걸음인지 (Game이 0.3초마다 새로 만들어요)
     flow = None
@@ -2561,6 +2668,11 @@ class Game:
         self.decor += [Decor(x, y, cars[int(x * 7 + y * 3) % len(cars)], 0.6, 1.1, cover=True)
                        for x, y in find_cells("c")]
         self.spawn_points = find_cells("E")
+        Enemy.cover_spots = [pygame.Vector2(col + 0.5, row + 0.5)
+                             for row in range(MAP_H) for col in range(MAP_W)
+                             if not is_blocked(col + 0.5, row + 0.5)
+                             and any(in_map(col + dc, row + dr) and WALL_GRID[row + dr][col + dc]
+                                     for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)))]
         dark = self.theme.get("dark", 1.0)          # 어두운 맵일수록 쏠 때 주변이 크게 번쩍여요
         self.muzzle_light.fill((255, 220, 150, int(28 + 90 * (1 - dark))))
         self.minimap = self.make_minimap()
@@ -2689,6 +2801,9 @@ class Game:
         self.projectiles = []
         self.effects = []
         self.tracers = []          # 내 총알 궤적: [x0, y0, x1, y1, 남은 시간]
+        self.camp_pos = pygame.Vector2(self.player.pos)   # 한자리에 오래 있으면 적이 수류탄을 던져요
+        self.camp_timer = 0.0
+        self.camp_nade = 5.0
         self.enemy_tracers = []    # 적 총알 궤적: [적, 남은 시간, 끝점 흔들림]
         self.pending_blasts = []   # 총에 맞아 터질 좀비 위치
         self.brief_age = 0.0       # 임무 설명이 타자 치듯 나와요
@@ -2722,6 +2837,19 @@ class Game:
         self.hit_head = False      # 히트마커를 크게 (헤드샷)
         self.last_kill = -99.0
         self.multi = 0
+
+    def punish_camping(self, dt):
+        """한자리에 7초 넘게 숨어 있으면, 나를 보는 적이 수류탄을 던져요"""
+        p = self.player.pos
+        if p.distance_to(self.camp_pos) > 1.2:
+            self.camp_pos, self.camp_timer = pygame.Vector2(p), 0.0
+        self.camp_timer += dt
+        self.camp_nade -= dt
+        if self.camp_timer > 7 and self.camp_nade <= 0:
+            throwers = [e for e in self.enemies if e.sees and 3 < e.pos.distance_to(p) < 12 and "melee" not in e.t]
+            if throwers:
+                random.choice(throwers).throw_at = pygame.Vector2(p)
+                self.camp_nade = 9.0
 
     def update_flow(self):
         """좀비 길찾기 지도: 플레이어 칸에서 시작해 걸어갈 수 있는 칸마다 걸음 수를 적어요 (너비 우선 탐색)"""
@@ -3051,6 +3179,8 @@ class Game:
         p.noise = max(step_noise, 16.0 if self.gun_noise > 0 else 0.0)
         if self.mode == "zombies":
             self.update_zombies(dt)
+        else:
+            self.punish_camping(dt)
 
         for enemy in self.enemies:
             before = pygame.Vector2(enemy.pos)
@@ -3901,6 +4031,11 @@ class Game:
             self.draw_sprite_columns(screen, img, *box)
             if enemy and enemy.hp < enemy.t["hp"]:
                 self.draw_hp_bar(screen, enemy, box)
+            if enemy and enemy.reload_left > 0 and box[4] < 14:   # 재장전 중: 지금이 기회!
+                col = int(box[0] // self.col_w)
+                if 0 <= col < self.num_rays and box[4] < self.zbuffer[col]:
+                    label = self.fonts["tiny"].render("RELOADING", True, YELLOW)
+                    screen.blit(label, label.get_rect(midbottom=(box[0], box[1] - 14 * UI)))
             if enemy and enemy.heal_flash > 0:     # 치료받는 중: 머리 위에 초록 +
                 sx, top = box[0], box[1]
                 size = max(4, int(10 * UI))
