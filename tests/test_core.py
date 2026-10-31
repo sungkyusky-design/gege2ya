@@ -409,6 +409,20 @@ class GameTest(unittest.TestCase):
             game.sounds.mix_music(shooter.MUSIC_MIX["boss"], 1 / 60)
         self.assertGreater(min(game.sounds.levels), 0.9)                  # 2초 안에 모든 겹이 올라와요
 
+    def test_impact_materials(self):
+        from strike.sounds import SOUND_RECIPES
+        materials = set(shooter.WALL_MATERIAL.values()) | set(shooter.FLOOR_MATERIAL.values()) | {"concrete"}
+        self.assertLessEqual(materials, set(shooter.IMPACT_STYLES))
+        for style in shooter.IMPACT_STYLES.values():
+            self.assertIn(style[5], SOUND_RECIPES)
+        game = shooter.Game({}, 3)
+        screen = pygame.display.get_surface()
+        game.draw(screen)
+        before = len(game.particles)
+        game.add_impact(shooter.WIDTH / 2, shooter.HEIGHT * 0.9, 20)          # 바닥
+        game.add_impact(shooter.WIDTH / 2, shooter.HEIGHT / 2, 20)            # 앞쪽
+        self.assertGreater(len(game.particles), before)
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
