@@ -4329,12 +4329,15 @@ class Game:
         - 전투 글자(헤드샷 +150, 수류탄...)는 조준점 아래에서 살짝 떠오르며 사라져요"""
         toasts = [p for p in self.popups if p[0].startswith(TOAST_WORDS)]
         quick = [p for p in self.popups if not p[0].startswith(TOAST_WORDS)]
-        y = HEIGHT * 0.34
-        for p in toasts[-4:]:
+        y = max(HEIGHT * 0.34, 12 + 232 * UI)              # HQ 무전 상자 아래부터
+        limit = HEIGHT * 0.58 - 6 if getattr(self, "contracts", None) else HEIGHT * 0.75   # 계약 목록 위까지
+        for p in reversed(toasts[-4:]):                     # 새 알림부터 위에
             text, color, left = p[0], p[1], p[2]
             age = (p[3] if len(p) > 3 else left) - left
             image = self.small_font.render(text, True, WHITE)
             box = pygame.Rect(0, y, image.get_width() + 34 * UI, image.get_height() + 14 * UI)
+            if box.bottom > limit:
+                break                                       # 자리가 없으면 오래된 알림은 생략
             slide = 1 - min(1.0, age / 0.18)
             box.x = 16 - slide * (box.w + 20)
             alpha = min(1.0, left / 0.4)
@@ -4369,7 +4372,7 @@ class Game:
         brief_lines = wrap_text(self.small_font, brief, WIDTH * 0.7) if brief else []
         title_h, line_h, brief_h = 56 * UI, 30 * UI, 22 * UI
         band_h = title_h + len(lines) * line_h + len(brief_lines) * brief_h + 26 * UI
-        top = max(HEIGHT * 0.24, 12 + 165 * UI)                        # HQ 무전 상자 아래
+        top = max(HEIGHT * 0.24, 12 + 228 * UI)                        # HQ 무전 상자 아래
         grow = min(1.0, age / 0.25)                                        # 띠가 가운데서 양옆으로
         band = pygame.Rect(0, top, WIDTH * grow, band_h)
         band.centerx = WIDTH / 2
@@ -4412,7 +4415,7 @@ class Game:
             shown.append(line[:max(0, left)])
             left -= len(line) + 1
         line_h = font.get_linesize()
-        box = pygame.Rect(16, 12 + 112 * UI, max(font.size(line)[0] for line in lines) + 70 * UI,
+        box = pygame.Rect(16, 12 + 152 * UI, max(font.size(line)[0] for line in lines) + 70 * UI,
                           line_h * len(lines) + 14 * UI)
         alpha = min(1.0, (5.0 - age) * 2, age * 6)
         panel = pygame.Surface(box.size, pygame.SRCALPHA)
@@ -5050,7 +5053,7 @@ class Game:
         piece = self.setpiece
         if not piece or self.game_over:
             return
-        y = HEIGHT * 0.125
+        y = 12 + 108 * UI                                  # 왼쪽 위 정보 아래, 가운데
         if piece["kind"] == "extraction":
             t = max(0, piece["timer"])
             color = RED if t < 10 and pygame.time.get_ticks() // 250 % 2 else (255, 220, 90)
@@ -5633,7 +5636,7 @@ class Game:
                 if c["key"] == "fast":
                     state = f"{max(0, 60 - int(self.round_time))}s"
                 text, color = f"{name}  {state}  - {en}", WHITE
-            screen.blit(tiny.render(fit_text(tiny, text, WIDTH * 0.3), True, color), (16, y))
+            screen.blit(tiny.render(fit_text(tiny, text, WIDTH * 0.24), True, color), (16, y))
 
     def offer_boons(self):
         """DEEP RUN: 강화 3개를 보여줘요 (SECOND WIND 는 하나만)"""
@@ -8557,8 +8560,8 @@ class Game:
         alarm = next((d for d in self.devices if d.kind == "alarm" and d.state == "arming"), None)
         if alarm and not self.game_over:
             text = f"ALARM IN {alarm.timer:.0f}s  -  SHOOT THE YELLOW BOX"
-            if pygame.time.get_ticks() // 300 % 2:
-                self.center_text(screen, self.small_font, text, RED, HEIGHT * 0.15)
+            color = RED if pygame.time.get_ticks() // 300 % 2 else (255, 200, 60)      # 빨강/노랑 깜빡
+            self.center_text(screen, self.small_font, text, color, 12 + 108 * UI + (22 * UI if self.setpiece else 0))
         if self.round_clear_timer > 0 and not self.game_over:
             self.draw_summary(screen, HEIGHT * 0.5)
         if self.banner_timer > 0:
@@ -8596,7 +8599,7 @@ class Game:
         for i, (name, value) in enumerate(items):
             tile = pygame.Rect(rect.x + i * (w + gap), rect.y, w, rect.h)
             draw_panel(screen, tile, False, radius=6)
-            label = self.fonts["tiny"].render(name, True, UI_DIM)
+            label = self.fonts["tiny"].render(fit_text(self.fonts["tiny"], name, tile.w - 8 * UI), True, UI_DIM)
             screen.blit(label, label.get_rect(midtop=(tile.centerx, tile.y + 6 * UI)))
             text = fit_text(self.small_font, str(value), tile.w - 10 * UI)
             image = self.small_font.render(text, True, WHITE)
@@ -10115,23 +10118,28 @@ async def gunsmith_screen(save, name):
         draw_title(screen, fonts, f"GUNSMITH  -  {name}", (WIDTH * 0.05, HEIGHT * 0.08))
         screen.blit(fonts["small"].render(f"WEAPON LEVEL {level}  (level up by getting kills with this weapon)", True,
                                           (255, 200, 60)), (WIDTH * 0.05, HEIGHT * 0.14))
+        label_h, name_h, info_h = (fonts[k].get_linesize() for k in ("small", "normal", "help"))
+        row_h = max(HEIGHT * 0.115, label_h + name_h + info_h + 8 * UI)       # 글자가 커도 안 겹치게
         for i, slot in enumerate(slots):
-            rect = pygame.Rect(WIDTH * 0.05, HEIGHT * (0.2 + i * 0.13), WIDTH * 0.5, HEIGHT * 0.115)
+            rect = pygame.Rect(WIDTH * 0.05, HEIGHT * 0.2 + i * (row_h + HEIGHT * 0.015), WIDTH * 0.5, row_h)
             selected = i == row
             draw_panel(screen, rect, selected)
-            screen.blit(fonts["small"].render(slot, True, (200, 200, 220)), (rect.x + 12, rect.y + 6))
+            screen.blit(fonts["small"].render(slot, True, (200, 200, 220)), (rect.x + 12, rect.y + 4 * UI))
             choice = choices[slot]
             text = f"<  {choice}  >" if selected else choice
-            screen.blit(fonts["normal"].render(text, True, YELLOW if selected else WHITE), (rect.x + 12, rect.y + rect.h * 0.3))
+            screen.blit(fonts["normal"].render(text, True, YELLOW if selected else WHITE),
+                        (rect.x + 12, rect.y + 4 * UI + label_h))
             info = ATTACHMENT_INFO[choice][0 if ko else 1]
             if slot == "OPTIC" and (spec["scope"] or spec["projectile"]):
                 info = "이 무기는 조준경을 바꿀 수 없어요" if ko else "This weapon keeps its own sight"
-            screen.blit(fonts["help"].render(info, True, (200, 230, 255)), (rect.x + 12, rect.y + rect.h * 0.68))
+            info = fit_text(fonts["help"], info, rect.w - 24)
+            screen.blit(fonts["help"].render(info, True, (200, 230, 255)), (rect.x + 12, rect.bottom - info_h - 3 * UI))
             # 오른쪽 끝: 이 칸의 부착물들 (잠긴 것은 필요한 레벨)
             parts = []
             for option, need, _ in ATTACHMENTS[slot]:
                 parts.append(option if attachment_unlocked(save, name, slot, option) else f"LV{need}")
-            label = fonts["tiny"].render("  ".join(parts), True, (150, 150, 175))
+            slot_w = fonts["small"].size(slot)[0] + 30
+            label = fonts["tiny"].render(fit_text(fonts["tiny"], "  ".join(parts), rect.w - slot_w - 20), True, (150, 150, 175))
             screen.blit(label, label.get_rect(topright=(rect.right - 10, rect.y + 8)))
         box = pygame.Rect(WIDTH * 0.58, HEIGHT * 0.2, WIDTH * 0.37, HEIGHT * 0.32)
         pygame.draw.rect(screen, (0, 0, 0), box)
@@ -10261,7 +10269,7 @@ async def loadout_screen(save, choice):
 
         # 왼쪽: 네 칸 (시작 무기 / 두 번째 무기 / 퍼크 / 전술 장비)
         label_h, name_h, desc_h = (fonts[k].get_linesize() for k in ("tiny", "normal", "help"))
-        card_w, card_h = WIDTH * 0.44, max(HEIGHT * 0.112, label_h + name_h + desc_h + 8 * UI)   # 글자가 커도 안 겹치게
+        card_w, card_h = WIDTH * 0.44, max(HEIGHT * 0.112, label_h + name_h + desc_h + 10 * UI)   # 글자가 커도 안 겹치게
         for i in range(4):
             rect = pygame.Rect(WIDTH * 0.06, HEIGHT * 0.2 + i * (card_h + HEIGHT * 0.013), card_w, card_h)
             selected = i == row
@@ -10274,7 +10282,7 @@ async def loadout_screen(save, choice):
                 screen.blit(image, image.get_rect(topright=(rect.right - 14 * UI, rect.y + 7 * UI)))
             arrows = f"<  {name}  >" if selected else name
             image = fonts["normal"].render(arrows, True, YELLOW if selected else WHITE)
-            screen.blit(image, (rect.x + 14 * UI, rect.y + 4 * UI + label_h * 0.9))
+            screen.blit(image, (rect.x + 14 * UI, rect.y + 4 * UI + label_h))
             if i < 2:
                 desc = WEAPON_INFO[name][0 if ko else 1]
             elif i == 2:
@@ -10287,7 +10295,8 @@ async def loadout_screen(save, choice):
         # 왼쪽 아래: 무기 인벤토리를 종류별로 (가진 무기는 레벨, 없는 무기는 자물쇠)
         top = rect.bottom + 10 * UI                       # 마지막 칸 바로 아래부터
         title = fonts["small"].render(tr(fonts, f"INVENTORY  {len(owned)} / {len(WEAPONS)}"), True, WHITE)
-        screen.blit(title, (WIDTH * 0.06, top))
+        if top + title.get_height() <= HEIGHT - 44 * UI:          # 자리가 있을 때만
+            screen.blit(title, (WIDTH * 0.06, top))
         kills_all = save.get("wkills", {})
         chosen = (options[0][picks[0]], options[1][picks[1]])
         rows_needed = (len(WEAPONS) + 1) // 2

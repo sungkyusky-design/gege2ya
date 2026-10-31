@@ -36,6 +36,17 @@ def render(self, text, antialias, color):
 
 
 shooter.ShadowFont.render = render
+_draw_hud = shooter.Game.draw_hud
+
+
+def draw_hud(self, screen):
+    """게임 화면: HUD 를 그리기 시작한 곳을 적어 둬요 (3D 세상 속 이름표는 움직이니까 검사에서 빼요)"""
+    if isinstance(screen, Recorder):
+        screen.hud_from = len(screen.texts)
+    return _draw_hud(self, screen)
+
+
+shooter.Game.draw_hud = draw_hud
 
 
 class Recorder(pygame.Surface):
@@ -44,6 +55,7 @@ class Recorder(pygame.Surface):
     def __init__(self, size):
         super().__init__(size)
         self.texts = []
+        self.hud_from = 0
 
     def blit(self, source, dest, *args, **kwargs):
         rect = super().blit(source, dest, *args, **kwargs)
@@ -68,7 +80,7 @@ def problems_in(texts, size):
             if a == b or b.w < b.h * 1.2:
                 continue                         # 같은 자리에 다시 그린 것 (덧그리기)
             cut = a.clip(b)
-            if cut.w * cut.h > 0.2 * min(a.w * a.h, b.w * b.h):
+            if cut.w * cut.h > 0.12 * min(a.w * a.h, b.w * b.h):
                 found.append(f"overlap {tuple(a)} x {tuple(b)}")
     return found
 
@@ -141,12 +153,22 @@ def check(width, height, hud, shots):
         if after:
             after(game)
         screen.texts.clear()
+        screen.hud_from = 0
         game.draw(screen)
-        results[name] = (list(screen.texts), screen.copy())
+        results[name] = (list(screen.texts[screen.hud_from:]), screen.copy())
 
     scene("hud campaign", lambda: shooter.Game({}, 45), lambda g: setattr(g, "hint_timer", 5))
     scene("hud zombies", lambda: shooter.Game({}, 1, mode="zombies", loadout=LOADOUT))
     scene("round banner", lambda: shooter.Game({}, 2), frames=60)
+
+    def alerts(g):                               # 위쪽 알림이 한꺼번에: 특별 장면 + 경보기 + HQ 무전 + 알림 카드
+        g.banner_timer = 0
+        g.devices.append(shooter.Device("alarm", g.player.pos.x + 3, g.player.pos.y))
+        g.devices[-1].state, g.devices[-1].timer = "arming", 5.0
+        g.radio_msg = ["HQ: Convoy is moving. Keep the road clear and watch the rooftops.", 3.0]
+        g.popups += [["NEW WEAPON: BURST!  press 5", (255, 200, 60), 2.0, 3.0],
+                     ["CONTRACT COMPLETE: HEADHUNTER  +300", (255, 200, 60), 2.0, 3.0]]
+    scene("hud alerts", lambda: shooter.Game({}, 27), alerts, frames=5)
 
     def wheel(g):
         g.wheel = dict(t=1.0, pick=11, open=True)
