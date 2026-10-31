@@ -89,6 +89,10 @@ class WeaponTest(unittest.TestCase):
 
 
 class GameTest(unittest.TestCase):
+    def setUp(self):
+        import random
+        random.seed(12345)                    # 무작위가 들어가는 테스트도 매번 같은 결과가 나오게
+
     def test_old_save_without_new_keys_still_works(self):
         save = dict(xp=1200, best=7)                             # 예전 저장 파일처럼 키가 적어요
         game = shooter.Game(save, 7, loadout=LOADOUT)

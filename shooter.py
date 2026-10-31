@@ -3729,6 +3729,7 @@ class Game:
         self.hurt_vignette = make_hurt_vignette()
         self.splat_images = [make_screen_splat(i) for i in range(4)]
         self.glow_image = make_glow(128, (255, 200, 120))      # 가로등 불빛
+        self.shadow_cache, self.flash_glow_cache = {}, {}
         self.device_images = {"barrel": make_barrel_image(), "alarm": make_alarm_image(False),
                               "alarm_on": make_alarm_image(True)}
         self.devices = []
@@ -7705,6 +7706,34 @@ class Game:
         screen.blit(self.grade_mult, (0, 0), special_flags=pygame.BLEND_MULT)
         screen.blit(self.grade_add, (0, 0), special_flags=pygame.BLEND_ADD)
 
+    def draw_actor_extras(self, screen, box, actor, before):
+        """사람(적·동료) 꾸미기: 발밑 그림자, 걸을 때 위아래 출렁임 / 총 쏠 때 총구 불빛"""
+        sx, top, bottom, w, perp = box
+        col = int(sx // self.col_w)
+        visible = 0 <= col < self.num_rays and perp < self.zbuffer[col] + 0.2
+        if before:
+            if visible and perp < 25 and not getattr(actor, "t", {}).get("lift"):
+                size = max(6, int(w * 0.9) // 4 * 4)                     # 4픽셀 단위로 (그림을 다시 써요)
+                shadow = self.shadow_cache.get(size)
+                if shadow is None:
+                    shadow = pygame.Surface((size, max(3, size // 5)), pygame.SRCALPHA)
+                    pygame.draw.ellipse(shadow, (0, 0, 0, 90), shadow.get_rect())
+                    self.shadow_cache[size] = shadow
+                screen.blit(shadow, shadow.get_rect(center=(sx, bottom - 1)))
+            if getattr(actor, "moving", 0) > 0 and perp < 18:          # 걸음마다 살짝 출렁
+                bob = abs(math.sin(actor.walk * math.pi / 0.32)) * (bottom - top) * 0.025
+                return (sx, top - bob, bottom - bob, w, perp)
+            return box
+        if visible and perp < 9 and getattr(actor, "flash_timer", 0) > 0:   # 적 총구 불빛
+            size = max(8, int(w * 1.6) // 8 * 8)
+            glow = self.flash_glow_cache.get(size)
+            if glow is None:
+                glow = pygame.transform.smoothscale(self.glow_image, (size, size))
+                self.flash_glow_cache[size] = glow
+            screen.blit(glow, glow.get_rect(center=(sx + w * 0.22, top + (bottom - top) * 0.38)),
+                        special_flags=pygame.BLEND_ADD)
+        return box
+
     def draw_sky(self, screen):
         horizon = self.horizon
         screen.blit(self.sky, (0, horizon - self.sky.get_height()))
@@ -7994,7 +8023,11 @@ class Game:
                     if box:
                         lights.append(box)
         for box, img, enemy in items:
+            if enemy is not None:
+                box = self.draw_actor_extras(screen, box, enemy, before=True)
             self.draw_sprite_columns(screen, img, *box)
+            if enemy is not None:
+                self.draw_actor_extras(screen, box, enemy, before=False)
             if isinstance(enemy, Ally):                    # 동료: 파란 이름표 (+ 말풍선)
                 col = int(box[0] // self.col_w)
                 if 0 <= col < self.num_rays and box[4] < self.zbuffer[col] + 0.3 and box[4] < 20:
