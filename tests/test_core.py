@@ -423,6 +423,43 @@ class GameTest(unittest.TestCase):
         game.add_impact(shooter.WIDTH / 2, shooter.HEIGHT / 2, 20)            # 앞쪽
         self.assertGreater(len(game.particles), before)
 
+    def test_vault_over_low_cover_and_lean(self):
+        game = None
+        for rnd in range(1, 60):
+            game = shooter.Game({}, rnd)
+            spot = None
+            for row, line in enumerate(shooter.GAME_MAP):
+                for col in range(1, len(line) - 2):
+                    if (line[col] in shooter.VAULT_WALLS and not shooter.is_blocked(col - 1 + 0.5, row + 0.5)
+                            and not shooter.is_blocked(col + 1 + 0.5, row + 0.5)
+                            and not shooter.is_blocked(col + 2 + 0.5, row + 0.5)):
+                        spot = (col, row)
+                        break
+                if spot:
+                    break
+            if spot:
+                break
+        self.assertIsNotNone(spot, "no low cover found in any map")
+        col, row = spot
+        game.briefing = None
+        game.enemies = [e for e in game.enemies][:1]
+        for e in game.enemies:
+            e.t = dict(e.t, sight=0, speed=0)
+            e.pos.update(1.5, 1.5)
+        game.player.pos.update(col - 0.25, row + 0.5)
+        game.player.angle = 0.0
+        game.player.hp = 10 ** 6
+        keys = Keys({pygame.K_w: True, pygame.K_SPACE: True})
+        game.update(1 / 60, keys, 0, 0, (False, False, False))
+        self.assertIsNotNone(game.vault)
+        for _ in range(40):
+            game.update(1 / 60, Keys(), 0, 0, (False, False, False))
+        self.assertGreater(game.player.pos.x, col + 1)                   # 넘어갔어요
+        self.assertIsNone(game.vault)
+        for _ in range(30):
+            game.update(1 / 60, Keys({pygame.K_PERIOD: True}), 0, 0, (False, False, False))
+        self.assertGreater(game.lean, 0.9)
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

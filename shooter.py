@@ -136,6 +136,9 @@ MOUSE_SENS = 0.0025               # 마우스 좌우 감도
 MOUSE_SENS_Y = 1.0                # 마우스 위아래 감도
 MAX_PITCH = 260 * UI              # 위아래로 볼 수 있는 한계(px)
 JUMP_SPEED = 4.2                  # 점프 힘
+VAULT_WALLS = "KQFVZc"            # 뛰어넘을 수 있는 낮은 것 (상자, 울타리, 낮은 담, 자동차)
+VAULT_TIME = 0.42                 # 뛰어넘는 데 걸리는 시간(초)
+LEAN_DIST = 0.32                  # 몸을 기울이면 눈이 옆으로 이만큼 (칸)
 GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
 # 설정 (시작 화면에서 S): 저장돼서 다음에도 그대로예요
@@ -160,6 +163,7 @@ KEY_ACTIONS = [
     ("FOCUS", pygame.K_t, "스킬: 집중"), ("MEDKIT", pygame.K_y, "스킬: 구급상자"), ("SCAN", pygame.K_j, "스킬: 탐지"),
     ("INSPECT", pygame.K_i, "무기 살펴보기"), ("SQUAD ORDER", pygame.K_k, "동료 명령: 따라와/대기/공격"),
     ("FLASHLIGHT", pygame.K_l, "손전등 켜기/끄기"), ("TACTICAL", pygame.K_n, "전술 장비 던지기"), ("USE / BUY", pygame.K_b, "사용·사기: 고정 기관총, 좀비 상점"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
+    ("LEAN LEFT", pygame.K_COMMA, "몸 기울이기: 왼쪽"), ("LEAN RIGHT", pygame.K_PERIOD, "몸 기울이기: 오른쪽"),
 ]
 # 바꿀 수 없는 키: 메뉴/시점/전체 화면
 KEY_FIXED = (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_UP, pygame.K_DOWN,
@@ -3234,7 +3238,7 @@ class Decor:
 
 
 # 맞은 곳 재질: 벽 글자 / 바닥 글자 → 재질 이름
-WALL_MATERIAL = {"W": "metal", "r": "metal", "u": "metal", "o": "metal", "Y": "metal", "U": "metal", "Z": "metal",
+WALL_MATERIAL = {"W": "metal", "r": "metal", "u": "metal", "o": "metal", "Y": "metal", "U": "metal", "Z": "sand",
                  "R": "brick", "M": "brick", "K": "wood", "J": "wood", "d": "wood", "q": "wood", "y": "wood", "m": "wood",
                  "Q": "foliage", "V": "stone", "O": "stone", "F": "snow"}
 FLOOR_MATERIAL = {"~": "water", ".": "sand", ";": "sand", "_": "dirt", "#": "dirt", "p": "dirt", "g": "grass",
@@ -3596,6 +3600,8 @@ class Game:
         self.wheel = None          # 무기 휠: dict(t=누른 시간, pick=고른 칸, open=열렸는지)
         self.director = Director() # 긴장감 조절 (몰아치기 / 숨 돌리기)
         self.impact_sound_cd = 0.0  # 맞은 곳 소리 간격
+        self.vault = None           # 뛰어넘는 중: dict(start, end, t)
+        self.lean = 0.0             # 몸 기울이기 (-1 왼쪽 ~ 1 오른쪽)
         self.gun_noise = 0.0       # 방금 총을 쐈으면 적이 듣고 다가와요
         self.pad_aim = False       # 게임패드 왼쪽 트리거를 누르고 있으면 정조준
         self.on_target = False     # 조준점이 적 위에 있는지 (조준선이 빨개지고 시점이 살짝 끈적해져요)
@@ -5424,6 +5430,66 @@ class Game:
                 self.buy("upgrade")
 
     # ----- 게임 진행 -----
+    def vault_target(self):
+        """앞에 낮은 엄폐물(한 칸 두께)이 있고 그 뒤가 비어 있으면 넘어갈 자리를 돌려줘요"""
+        p = self.player
+        f = p.forward
+        ahead = p.pos + f * 0.6
+        col, row = int(ahead.x), int(ahead.y)
+        if not in_map(col, row) or GAME_MAP[row][col] not in VAULT_WALLS:
+            return None
+        for k in range(8, 24):                            # 엄폐물 뒤 첫 빈 자리
+            spot = p.pos + f * (k / 10)
+            if (int(spot.x), int(spot.y)) == (col, row):
+                continue
+            if is_blocked(spot.x, spot.y):
+                return None                               # 두 칸 넘게 막혀 있으면 못 넘어요
+            end = spot + f * 0.3
+            return end if not is_blocked(end.x, end.y) else None
+        return None
+
+    def update_movement2(self, dt, keys):
+        """움직임 2.0: 낮은 엄폐물 뛰어넘기(앞으로 가며 스페이스), 몸 기울이기(, .)"""
+        p = self.player
+        want = (1 if keys[pygame.K_PERIOD] else 0) - (1 if keys[pygame.K_COMMA] else 0)
+        if p.sprinting or p.slide_timer > 0 or self.vault:
+            want = 0
+        self.lean += max(-6 * dt, min(6 * dt, want - self.lean))
+        if self.vault:                                    # 넘는 중: 걷기·점프 키는 잠깐 쉬어요
+            return MaskedKeys(keys, (pygame.K_w, pygame.K_a, pygame.K_s, pygame.K_d, pygame.K_SPACE, pygame.K_c))
+        if keys[pygame.K_SPACE] and keys[pygame.K_w] and p.z == 0 and not p.crouch and p.slide_timer <= 0:
+            end = self.vault_target()
+            if end is not None:
+                self.vault = dict(start=pygame.Vector2(p.pos), end=end, t=0.0)
+                self.sounds.play("thunk", 0.45)
+                return MaskedKeys(keys, (pygame.K_SPACE,))
+        return keys
+
+    def finish_vault_step(self):
+        """뛰어넘는 움직임: 앞으로 미끄러지며 살짝 올라갔다 내려와요"""
+        v, p = self.vault, self.player
+        v["t"] += self.frame_dt
+        k = min(1.0, v["t"] / VAULT_TIME)
+        ease = k * k * (3 - 2 * k)
+        p.pos.update(v["start"].lerp(v["end"], ease))
+        p.z = 0.32 * math.sin(math.pi * k)
+        p.vz = 0.0
+        if k >= 1.0:
+            p.z = 0.0
+            self.vault = None
+
+    def lean_offset(self):
+        """기울인 만큼 눈이 옆으로 (벽 안으로는 안 들어가요)"""
+        if abs(self.lean) < 0.02:
+            return pygame.Vector2(0, 0)
+        f = self.player.forward
+        side = pygame.Vector2(-f.y, f.x) * self.lean * LEAN_DIST
+        for scale in (1.0, 0.6, 0.3):
+            spot = self.player.pos + side * scale
+            if not is_blocked(spot.x, spot.y):
+                return side * scale
+        return pygame.Vector2(0, 0)
+
     def move_wheel(self, key):
         """무기 휠: ←↑ 이전, →↓ 다음, 숫자 키는 그 칸으로"""
         n = len(self.arsenal.weapons)
@@ -5589,8 +5655,12 @@ class Game:
         sticky = ASSIST_STICKY[SETTINGS["assist"]] if self.on_target and not self.scoped else 1.0
         sens = min(1.0, 1.5 / self.zoom) * sticky
         angle_before = self.player.angle
+        keys = self.update_movement2(dt, keys)
+        speed *= 1 - 0.45 * abs(self.lean)                # 기울이고 있으면 천천히
         self.player.update(dt, keys, mouse_dx, mouse_dy, sens, speed,
-                           allow_sprint=not self.aiming and not fire_down)
+                           allow_sprint=not self.aiming and not fire_down and abs(self.lean) < 0.2)
+        if self.vault:
+            self.finish_vault_step()
         turn = self.player.angle - angle_before
         self.sway = max(-50 * UI, min(50 * UI, self.sway * 0.85 - turn * 900 * UI))
         arsenal.update(dt)
@@ -6720,6 +6790,15 @@ class Game:
 
     # ----- 화면 그리기 -----
     def draw(self, screen, hud=True):
+        """기울이고 있으면 옆으로 옮긴 눈 위치에서 그려요 (몸은 그대로)"""
+        shift = self.lean_offset() if not self.game_over else pygame.Vector2(0, 0)
+        self.player.pos += shift
+        try:
+            self.draw_frame(screen, hud)
+        finally:
+            self.player.pos -= shift
+
+    def draw_frame(self, screen, hud=True):
         if self.game_over and self.killcam_from is not None and self.killcam_time < KILLCAM_TIME:
             self.draw_killcam(screen)
             return
@@ -8338,7 +8417,8 @@ async def controls_screen(save):
         draw_title(screen, fonts, "CONTROLS", (WIDTH * 0.06, HEIGHT * 0.08))
         for i, (name, default, desc) in enumerate(KEY_ACTIONS):
             col, line = divmod(i, half)
-            rect = pygame.Rect(WIDTH * (0.05 + col * 0.46), HEIGHT * (0.15 + line * 0.066), WIDTH * 0.44, HEIGHT * 0.058)
+            step = min(0.066, 0.7 / half)                     # 키가 늘어도 아래 안내 줄 위까지
+            rect = pygame.Rect(WIDTH * (0.05 + col * 0.46), HEIGHT * (0.15 + line * step), WIDTH * 0.44, HEIGHT * step * 0.88)
             selected = i == row
             draw_panel(screen, rect, selected, radius=6)
             label = fonts["help"].render(desc if ko else name, True, WHITE)

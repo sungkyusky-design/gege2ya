@@ -66,7 +66,7 @@ HELP_TEXT = {
     "ko": dict(
         title="조작법",
         keys=[("W A S D", "이동"), ("Shift", "달리기 (W와 함께)"), ("C", "앉기 / 달리다가: 슬라이딩"),
-              ("← → ↑ ↓", "시점 (마우스도 돼요)"), ("스페이스바", "점프"),
+              ("← → ↑ ↓", "시점 (마우스도 돼요)"), ("스페이스바", "점프 (W 와 함께: 낮은 엄폐물 뛰어넘기)"), (",  .", "몸 기울이기 (왼쪽 / 오른쪽)"),
               ("F,  왼쪽 클릭", "사격 (꾹 누르면 연사)"), ("E,  오른쪽 클릭", "정조준 / 저격총 조준경"), ("Z", "조준경 배율 3·6·12배"),
               ("G", "수류탄"), ("V", "칼"), ("X", "킬스트릭 쓰기"), ("1~9, 0, Q", "무기 바꾸기,  Q: 방금 쓰던 무기"), ("Tab", "짧게: 다음 무기,  꾹: 무기 휠 (← → 고르고 떼기)"), ("T,  Y,  J", "스킬: 집중 / 구급상자 / 탐지"),
               ("R,  B,  U", "재장전,  좀비 상점 (탄약 / 강화)"), ("H,  M", "도움말 (일시정지),  소리 끄기"), ("P,  Enter", "FPS 표시,  전체 화면"),
@@ -84,7 +84,7 @@ HELP_TEXT = {
     "en": dict(
         title="HOW TO PLAY",
         keys=[("W A S D", "move"), ("SHIFT", "sprint (with W)"), ("C", "crouch / slide (sprinting)"),
-              ("ARROWS", "look (or mouse)"), ("SPACE", "jump"),
+              ("ARROWS", "look (or mouse)"), ("SPACE", "jump (with W: vault low cover)"), (", .", "lean left / right"),
               ("F, LEFT CLICK", "fire (hold for auto)"), ("E, RIGHT CLICK", "aim / sniper scope"), ("Z", "scope zoom 3/6/12x"),
               ("G", "grenade"), ("V", "knife"), ("X", "use killstreak"), ("1-9, 0, Q", "weapons, Q = last one"), ("TAB", "next weapon, hold = wheel"), ("T, Y, J", "focus / medkit / scan"),
               ("R, B, U", "reload, zombie shop"), ("H, M", "help (pause), mute"), ("P, ENTER", "show FPS, fullscreen"), ("ESC", "pause menu")],
