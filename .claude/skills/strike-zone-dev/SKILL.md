@@ -73,6 +73,9 @@ AI 디렉터: `Director` (긴장감, build/peak/relax, `assist`), `update_direct
 세트 마지막 보스: `BOSS_STYLES`, `update_boss_pattern`, `update_boss_effects`, `boss_armor`, `draw_boss_telegraphs`. DEEP RUN: `BOONS`, `offer_boons`/`pick_boon`, `Game.deeprun`, `save["deeprun"]`.
 계약: `CONTRACTS`, `roll_contracts`, `contract_progress`. 장치: `Device` (드럼통/경보기), `place_devices`, `shoot_device`, 가로등 `Decor.glow`. 무기 손맛: `RELOAD_STYLES`, `strafe_tilt`, `land_dip`.
 특별 장면: `SETPIECE_PLAN` (세트의 7·14번째 라운드), `start_setpiece`, `update_setpiece`, 호송 `update_convoy` + `grid_path`.
+그래픽 품질: `SETTINGS["gfx"]` (LOW/NORMAL/HIGH), 색 보정 `GRADES` + `post_process`, 바닥 깊이 `FLOOR_DEPTH`. **특수 효과는 fill(special_flags) 말고 미리 칠한 그림의 blit 으로** (fill 은 매우 느려요).
+사람 꾸미기 `draw_actor_extras` (그림자·출렁임·총구 빛), 카메라 `update_camera` (달리기 시야 `SPRINT_FOV`, 휘청, 착지, `deafen`), 울림 `acoustics`, 아이콘 `make_icon`, 오프닝 `splash_screen`, 엔딩 `draw_ending`, 공정한 시작 `fair_spawns`.
+안정성: 저장은 browser.py 가 임시 파일 → 바꾸기 + `.bak` 백업, 장면 오류는 `report_error` 로 `~/.gege2ya_errors.log`.
 랭킹: `RANK_MODES`, `add_ranking`, `Game.start_run` / `finish_run` (점수 `run_score` = 그 판 경험치), `ranking_screen` (L), `save["rankings"]`.
 업적: `ACHIEVEMENTS` 에 (이름, 한, 영, 검사 함수) 한 줄, 누적 기록은 `save["lifetime"]`.
 
