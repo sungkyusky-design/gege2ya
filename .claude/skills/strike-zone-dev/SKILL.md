@@ -12,7 +12,7 @@ description: Develop, test and ship the Strike Zone pygame FPS (shooter.py) in t
 
 - **키보드만으로 모든 것이 돼야 해요.** 새 기능에는 키를 주고 (마우스/패드는 덤), 시작 화면·도움말(`HELP_TEXT`)·README에 적어요.
   이미 쓰는 키: WASD Shift C Space 화살표 F E Z G V X Q R B U M H P T Y J Tab 0-9 Enter Esc (게임 중) /
-  Enter Z C O K S D T R A X V E L H ↑↓←→ Esc (시작 화면: 메뉴 칸은 `INTRO_ITEMS` 에 한 줄씩). 게임패드는 `PAD_GAME_KEYS` / `PAD_MENU_KEYS` 에 연결.
+  Enter Z G C O K S D T R A X V E L H ↑↓←→ Esc (시작 화면: 메뉴 칸은 `INTRO_ITEMS` 에 한 줄씩). 게임패드는 `PAD_GAME_KEYS` / `PAD_MENU_KEYS` 에 연결.
   키 바꾸기: 게임 코드는 언제나 **기본 키**(`pygame.K_f` 등)로 쓰면 돼요. `run()` 이 `remap_event` / `RemappedKeys` 로
   사용자가 바꾼 키를 기본 키로 바꿔서 넘겨줘요. 새 게임 키를 만들면 `KEY_ACTIONS` 에도 한 줄 넣어요.
 - **주석과 화면 설명은 한국어, 쉬운 말**로 (사용자가 코드를 읽어요). 화면에 나오는 게임 글자는 영어 대문자 위주
@@ -20,7 +20,7 @@ description: Develop, test and ship the Strike Zone pygame FPS (shooter.py) in t
 - **웹(pygbag)에서도 돌아야 해요**: 반복문은 `async` + `await asyncio.sleep(0)`, 파일 대신 `browser.py` 의 저장 함수.
 - 저장 정보(`save` dict)의 키를 바꾸거나 지우지 말고 추가만 해요 (사용자의 기존 진행이 이어져야 해요).
   쓰는 키: xp, best, continue, res, settings, loadout, wkills, unlocked, skills, zbest, mission, missions_done,
-  keys, lifetime, achievements, camo, challenges, daily, gunsmith, history, custom_maps, rankings (loadout 에 tactical 추가).
+  keys, lifetime, achievements, camo, challenges, daily, gunsmith, history, custom_maps, rankings, deeprun (loadout 에 tactical 추가).
   저장 코드: `export_code` / `import_code` (SZ1.압축.검사숫자), 클립보드는 browser.py 의 `copy_text` / `paste_text`.
 - 특정 실제 게임(콜오브듀티 등)의 맵·이름을 그대로 베끼지 않아요. 장르 느낌은 OK, 고유 이름/맵 복제는 X.
 

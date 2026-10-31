@@ -268,7 +268,8 @@ CAMO_COLORS["gold"] = ((212, 175, 55), (165, 128, 35))
 # ----- 저장 코드 (웹 ↔ 맥 진행 옮기기) -----
 # 내 컴퓨터 랭킹: 모드마다 점수가 높은 판을 10개까지 save["rankings"] 에 저장해요
 # (모드 키, 화면 이름, 어디까지 갔는지 이름)
-RANK_MODES = [("zombies", "ZOMBIES", "WAVE"), ("campaign", "CAMPAIGN", "ROUND"), ("mission", "MISSIONS", "STAGE")]
+RANK_MODES = [("zombies", "ZOMBIES", "WAVE"), ("campaign", "CAMPAIGN", "ROUND"), ("mission", "MISSIONS", "STAGE"),
+              ("deeprun", "DEEP RUN", "DEPTH")]
 RANK_SIZE = 10
 
 
@@ -2137,7 +2138,7 @@ KO_TEXT = {
     "LOOK SPEED": "시점 속도", "MOUSE SPEED": "마우스 속도", "AIM ASSIST": "조준 보정", "FIELD OF VIEW": "시야각",
     "VOLUME": "소리", "MUSIC": "음악", "FULLSCREEN": "전체 화면", "SQUADMATES": "동료", "UI SIZE": "글자 크기",
     "SCREEN SHAKE": "화면 흔들림", "SOUND MARKS": "소리 표시", "COLORBLIND": "색약 모드", "LANGUAGE": "언어",
-    "WEAPONS": "무기", "RECENT GAMES": "최근 판", "DISPLAY": "화면", "SOUND": "소리", "INPUT": "조작", "GAME": "게임",
+    "WEAPONS": "무기", "RECENT GAMES": "최근 판", "DEEP RUN": "딥 런", "DEPTH": "깊이", "DISPLAY": "화면", "SOUND": "소리", "INPUT": "조작", "GAME": "게임",
 }
 
 
@@ -3270,6 +3271,31 @@ BOSS_SNIPE = (32, 1.3)            # 저격 보스: (피해, 레이저 조준 시
 BOSS_STRIKE = (2.2, 40, 2.0)      # 공습 표시: (반경, 피해, 터지기까지 초)
 
 
+# ----- DEEP RUN (로그라이트) -----
+# 라운드를 깰 때마다 강화(boon) 3개 중 1개를 골라요. 죽으면 처음부터 (강화도 없어져요).
+# 대신 내려간 깊이를 모두 더한 "총 깊이"가 쌓이면 새 강화가 풀려요 (save["deeprun"]).
+BOONS = [  # (키, 이름, 한국어 설명, 영어 설명, 풀리는 총 깊이)
+    ("vampire", "VAMPIRE", "처치할 때마다 체력 +8", "+8 HP per kill", 0),
+    ("glass", "GLASS CANNON", "주는 피해 +35%, 최대 체력 -25", "+35% damage, -25 max HP", 0),
+    ("thick", "THICK SKIN", "최대 체력 +30", "+30 max HP", 0),
+    ("feet", "QUICK FEET", "이동 속도 +15%", "+15% move speed", 0),
+    ("steady", "STEADY AIM", "탄 퍼짐 -30%", "-30% bullet spread", 0),
+    ("adrenaline", "ADRENALINE", "처치하면 탄창에 3발", "Kills put 3 rounds in the mag", 0),
+    ("boom", "EXPLOSIVE HEADSHOTS", "헤드샷으로 쓰러뜨리면 그 자리가 폭발", "Headshot kills explode", 8),
+    ("shield", "RELOAD SHIELD", "재장전 중 받는 피해 -40%", "-40% damage taken while reloading", 15),
+    ("wind", "SECOND WIND", "라운드마다 한 번, 쓰러질 피해를 체력 30으로 버텨요", "Once per round, survive a lethal hit", 25),
+    ("scav", "SCAVENGER", "상자가 두 배로 떨어져요", "Double drop chance", 35),
+    ("nades", "DEMOLITIONIST", "라운드마다 수류탄 +2", "+2 grenades each round", 50),
+]
+BOON_BY_KEY = {b[0]: b for b in BOONS}
+DEEP_STEP = 2                     # 깊이 1 내려갈 때마다 캠페인 라운드 2개만큼 강해져요
+
+
+def unlocked_boons(save):
+    total = save.get("deeprun", {}).get("total", 0)
+    return [b for b in BOONS if b[4] <= total]
+
+
 class Director:
     """AI 디렉터: 싸움의 긴장감을 재서 '몰아치기 → 클라이맥스 → 숨 돌리기' 흐름을 만들어요.
     - intensity(0~1): 내가 맞거나 가까이서 싸우면 오르고, 조용하면 내려가요
@@ -3505,7 +3531,7 @@ class Effect:
 # ---------------------------------------------------------------
 class Game:
     def __init__(self, save, start_round=1, mode="campaign", loadout=None, mission=0, stage=0, challenge=None,
-                 custom=None):
+                 custom=None, deeprun=False):
         """save: 저장 정보(dict). 라운드를 깨거나 죽을 때마다 고쳐서 파일에 써요.
         mode: "campaign"(라운드마다 맵이 바뀌는 전투) 또는 "zombies"(좀비 웨이브 버티기)
         loadout: 고른 주무기/보조무기/퍼크 (없으면 모든 무기를 들고 시작)"""
@@ -3546,7 +3572,8 @@ class Game:
         self.mission_complete = False
         self.perk = loadout["perk"] if loadout else None
         ranks = save.get("skills", {})
-        self.max_hp = (130 if self.perk == "IRON SKIN" else 100) + 15 * ranks.get("VITALITY", 0)
+        self.base_max_hp = (130 if self.perk == "IRON SKIN" else 100) + 15 * ranks.get("VITALITY", 0)
+        self.max_hp = self.base_max_hp
         self.cooldowns = {}        # 액티브 스킬 다시 쓰기까지 남은 시간
         self.focus = 0.0           # FOCUS: 적이 느려지는 남은 시간
         self.scan = 0.0            # SCAN: 적이 다 보이는 남은 시간
@@ -3610,6 +3637,14 @@ class Game:
         self.slowmo = 0.0          # 라운드 마지막 적을 쓰러뜨리면 잠깐 느리게
         self.wheel = None          # 무기 휠: dict(t=누른 시간, pick=고른 칸, open=열렸는지)
         self.director = Director() # 긴장감 조절 (몰아치기 / 숨 돌리기)
+        self.deeprun = deeprun      # DEEP RUN (로그라이트) 인지
+        self.boons = {}             # 고른 강화: {키: 개수}
+        self.boon_choice = None     # 고르는 중인 강화 3개 (키 목록)
+        self.boon_sel = 0
+        self.depth = 1
+        self.wind_used = False
+        self.deeprun_saved = False
+        self.boon_blasts = []       # 헤드샷 폭발 (다음 장면에 터져요)
         self.boss_marks = []        # 공습 표시: [위치, 남은 시간]
         self.boss_laser = None      # 저격 보스 레이저: [보스, 남은 시간]
         self.boss_tip = ""
@@ -3757,6 +3792,9 @@ class Game:
 
     def reset(self, start_round=1):
         """새 게임 (또는 저장된 라운드부터 시작)"""
+        if getattr(self, "deeprun", False):
+            self.boons, self.boon_choice, self.depth, self.deeprun_saved = {}, None, 1, False
+            self.max_hp = self.base_max_hp
         self.round = start_round
         self.fail_reason = ""
         self.killcam_from = None
@@ -3779,16 +3817,19 @@ class Game:
         """한 판이 끝나면 (죽음, 미션 완료, 메뉴로 나가기) 랭킹에 기록해요. 한 판에 한 번만."""
         if self.run_recorded or self.practice or self.challenge or self.run_score <= 0:
             return
-        if self.mode not in [m for m, _, _ in RANK_MODES]:
+        mode = "deeprun" if self.deeprun else self.mode
+        if mode not in [m for m, _, _ in RANK_MODES]:
             return
         self.run_recorded = True
-        if self.mode == "mission":
+        if self.deeprun:
+            reached, where = self.depth, self.theme["name"]
+        elif self.mode == "mission":
             reached, where = min(self.stage + 1, len(MISSION_STAGES)), MISSIONS[self.mission]["name"]
         else:
             reached, where = self.round, self.theme["name"]
         entry = dict(score=self.run_score, reached=reached, kills=self.kills - self.run_kills_start,
                      map=where, date=time.strftime("%Y-%m-%d %H:%M"))
-        self.run_place = add_ranking(self.save, self.mode, entry)
+        self.run_place = add_ranking(self.save, mode, entry)
         if self.run_place:
             self.popups.append([f"NEW RECORD!  RANK #{self.run_place}", (255, 200, 60), 3.0])
         write_save(self.save)
@@ -3799,9 +3840,14 @@ class Game:
         self.streaks_ready = []    # 받은 킬스트릭 (X로 하나씩 써요)
 
     def retry_round(self):
-        """죽은 라운드부터 다시 (처치 수는 그대로). 좀비 모드는 1웨이브부터"""
+        """죽은 라운드부터 다시 (처치 수는 그대로). 좀비 모드는 1웨이브부터. DEEP RUN 은 깊이 1부터"""
         self.fail_reason = ""
         self.killcam_from = None
+        if self.deeprun:
+            self.map_key = None
+            self.map_index = None
+            self.reset(1)
+            return
         self.map_key = None                      # 부서진 상자, 깨진 창문을 원래대로 (맵을 다시 불러요)
         self.map_index = None
         if self.mode == "zombies":
@@ -3959,6 +4005,14 @@ class Game:
         self.reset_round_state()
         if self.mode == "mission":
             self.banner_timer = 5.0
+        if self.deeprun:
+            self.wind_used = False
+            self.arsenal.grenades += 2 * self.boons.get("nades", 0)
+            self.player.hp = self.max_hp
+            self.banner = f"DEPTH {self.depth}"
+            names = ", ".join(f"{BOON_BY_KEY[k][1]}" + (f" x{n}" if n > 1 else "") for k, n in self.boons.items())
+            self.sub_banners = [(f"DEEP RUN  -  {self.theme['name']}", WHITE)] + \
+                ([(fit_text(self.font, names, WIDTH * 0.8), (80, 240, 255))] if names else [])
 
     def start_custom(self):
         """내가 만든 맵: 웨이브마다 적이 늘고 강해져요 (E 자리에서 나와요)"""
@@ -4526,7 +4580,7 @@ class Game:
                                   timer=BOMB_TIME, spawn=7.0, beep=0.0)
             self.sub_banners.insert(1, (f"OBJECTIVE: {OBJECTIVES[kind]['title']}", OBJECTIVES[kind]["color"]))
         if not self.challenge:
-            if in_set == 0 and set_no not in self.briefed and self.round <= CAMPAIGN_ROUNDS:
+            if in_set == 0 and set_no not in self.briefed and self.round <= CAMPAIGN_ROUNDS and not self.deeprun:
                 self.briefing = 0.0                     # 새 세트: 작전 브리핑부터
                 self.briefed.add(set_no)
             self.pending_radio = "boss" if special == "BOSS" else "start"
@@ -5198,6 +5252,82 @@ class Game:
             return "alert"
         return "calm"
 
+    def offer_boons(self):
+        """DEEP RUN: 강화 3개를 보여줘요 (SECOND WIND 는 하나만)"""
+        pool = [b[0] for b in unlocked_boons(self.save) if not (b[0] == "wind" and self.boons.get("wind"))]
+        self.boon_choice = random.sample(pool, min(3, len(pool)))
+        self.boon_sel = 0
+        self.sounds.play("streak", 0.6)
+
+    def pick_boon(self, index):
+        key = self.boon_choice[index]
+        self.boons[key] = self.boons.get(key, 0) + 1
+        self.boon_choice = None
+        self.max_hp = max(40, self.base_max_hp + 30 * self.boons.get("thick", 0) - 25 * self.boons.get("glass", 0))
+        self.popups.append([f"NEW BOON: {BOON_BY_KEY[key][1]}", (255, 200, 60), 2.0])
+        self.sounds.play("heal", 0.6)
+
+    def boon_on_kill(self, enemy, how):
+        b = self.boons
+        if b.get("vampire"):
+            self.player.hp = min(self.max_hp, self.player.hp + 8 * b["vampire"])
+        if b.get("adrenaline"):
+            w = self.arsenal.current
+            w.mag = min(w.spec["mag"], w.mag + 3 * b["adrenaline"])
+        if b.get("boom") and how == "HEADSHOT!" and enemy.pos.distance_to(self.player.pos) > 2.2:
+            self.boon_blasts.append((pygame.Vector2(enemy.pos), 1.6, 60 + 20 * b["boom"]))   # 다음 장면에 쾅
+
+    def boon_on_hurt(self, damage):
+        if self.boons.get("shield") and self.arsenal.reload_left > 0:
+            damage *= 0.6
+        if self.boons.get("wind") and not self.wind_used and self.player.hp - damage <= 0:
+            self.wind_used = True
+            self.popups.append(["SECOND WIND!", (80, 240, 255), 2.0])
+            return self.player.hp - 30                      # 맞고 나면 체력 30 (낮았으면 오히려 채워져요)
+        return damage
+
+    def end_deeprun(self):
+        """DEEP RUN 이 끝나면 기록: 최고 깊이, 총 깊이 (새 강화가 풀려요)"""
+        if self.deeprun_saved:
+            return
+        self.deeprun_saved = True
+        data = self.save.setdefault("deeprun", {})
+        before = len(unlocked_boons(self.save))
+        data["best"] = max(data.get("best", 0), self.depth)
+        data["total"] = data.get("total", 0) + self.depth
+        data["runs"] = data.get("runs", 0) + 1
+        for boon in unlocked_boons(self.save)[before:]:
+            self.popups.append([f"NEW BOON UNLOCKED: {boon[1]}", (255, 200, 60), 3.5])
+        write_save(self.save)
+
+    def draw_boon_choice(self, screen):
+        """강화 고르기 카드 3장"""
+        dim = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        dim.fill((5, 4, 12, 170))
+        screen.blit(dim, (0, 0))
+        ko = self.fonts["lang"] == "ko"
+        self.center_text(screen, self.big_font, "CHOOSE A BOON", (255, 200, 60), HEIGHT * 0.2)
+        n = len(self.boon_choice)
+        card_w, gap = min(WIDTH * 0.27, 330 * UI), WIDTH * 0.02
+        left = WIDTH / 2 - (n * card_w + (n - 1) * gap) / 2
+        for i, key in enumerate(self.boon_choice):
+            _, name, desc_ko, desc_en, _ = BOON_BY_KEY[key]
+            rect = pygame.Rect(left + i * (card_w + gap), HEIGHT * 0.3, card_w, HEIGHT * 0.36)
+            draw_panel(screen, rect, i == self.boon_sel, radius=12)
+            draw_keycap(screen, self.small_font, str(i + 1), rect.x + 14 * UI, rect.y + 24 * UI)
+            have = self.boons.get(key, 0)
+            if have:
+                tag = self.fonts["tiny"].render(f"HAVE x{have}", True, UI_CYAN)
+                screen.blit(tag, tag.get_rect(topright=(rect.right - 12 * UI, rect.y + 14 * UI)))
+            title = fit_text(self.font, name, rect.w - 24 * UI)
+            image = self.font.render(title, True, YELLOW if i == self.boon_sel else WHITE)
+            screen.blit(image, image.get_rect(center=(rect.centerx, rect.y + rect.h * 0.38)))
+            for k, line in enumerate(wrap_text(self.fonts["help"], desc_ko if ko else desc_en, rect.w - 30 * UI)[:3]):
+                text = self.fonts["help"].render(line, True, (200, 230, 255))
+                screen.blit(text, text.get_rect(center=(rect.centerx, rect.y + rect.h * 0.58 + k * self.fonts["help"].get_linesize())))
+        draw_key_text(screen, self.small_font, [("1-3", "pick"), ("LEFT/RIGHT", "move"), ("SPACE", "take")],
+                      (WIDTH / 2, HEIGHT * 0.74))
+
     def update_director(self, dt):
         """디렉터: 긴장감 계산, 숨 돌리기에 들어가면 체력/탄약이 모자랄 때 보급 상자 하나"""
         d = self.director
@@ -5472,6 +5602,16 @@ class Game:
 
     # ----- 입력 -----
     def handle_event(self, event):
+        if event.type == pygame.KEYDOWN and self.boon_choice:      # DEEP RUN 강화 고르기
+            if pygame.K_1 <= event.key < pygame.K_1 + len(self.boon_choice):
+                self.pick_boon(event.key - pygame.K_1)
+            elif event.key in (pygame.K_LEFT, pygame.K_a):
+                self.boon_sel = (self.boon_sel - 1) % len(self.boon_choice)
+            elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                self.boon_sel = (self.boon_sel + 1) % len(self.boon_choice)
+            elif event.key in (pygame.K_SPACE, pygame.K_f):
+                self.pick_boon(self.boon_sel)
+            return
         if event.type == pygame.KEYDOWN and self.mode == "training":
             self.keys_seen.add(event.key)
         if event.type == pygame.KEYDOWN and event.key in (pygame.K_p, pygame.K_F3):
@@ -5704,6 +5844,9 @@ class Game:
                 self.echoes.append([random.uniform(0.4, 1.5), "thunder", random.uniform(0.6, 1.0)])
         self.suppress = max(0.0, self.suppress - dt * 0.8)
         self.impact_sound_cd -= dt
+        blasts, self.boon_blasts = self.boon_blasts, []
+        for pos, radius, damage in blasts:
+            self.explode(pos, radius, damage)
         if self.boss_marks or self.boss_laser:
             self.update_boss_effects(dt)
         if self.hitstop > 0:        # 쓰러뜨린 순간: 아주 잠깐 멈춤 (묵직한 손맛)
@@ -5759,9 +5902,15 @@ class Game:
                 return
 
         if self.round_clear_timer > 0:
+            if self.boon_choice:
+                return                     # 강화를 고를 때까지 기다려요
             self.round_clear_timer -= dt
             if self.round_clear_timer <= 0:
-                self.round += 1
+                if self.deeprun:
+                    self.round += DEEP_STEP
+                    self.depth += 1
+                else:
+                    self.round += 1
                 self.start_round()
             if self.mode != "zombies":
                 return                     # 좀비 모드는 쉬는 동안에도 움직이고 상점을 쓸 수 있어요
@@ -5782,6 +5931,7 @@ class Game:
         if self.perk == "LIGHTFOOT":
             speed *= 1.12
         speed *= 1 + 0.06 * self.rank_of("RUNNER")
+        speed *= 1 + 0.15 * self.boons.get("feet", 0)
         # 조준점이 적 위에 있으면 시점이 살짝 느리게 돌아요 (키보드로도 적을 놓치지 않게)
         self.on_target = self.enemy_at(WIDTH / 2, HEIGHT / 2) is not None
         sticky = ASSIST_STICKY[SETTINGS["assist"]] if self.on_target and not self.scoped else 1.0
@@ -5985,6 +6135,8 @@ class Game:
             if self.mode == "zombies":
                 self.save["zbest"] = max(self.save.get("zbest", 0), self.round)
                 write_save(self.save)
+            elif self.deeprun:
+                self.end_deeprun()
             elif not self.challenge and not self.practice:
                 self.record_progress(self.round)      # 다음에 이 라운드부터 이어할 수 있게
             if self.mode != "mission":                # 미션은 체크포인트에서 이어지니까 아직 안 끝났어요
@@ -6026,7 +6178,12 @@ class Game:
             self.banner_timer = 4.0
             self.add_xp(XP["round"], f"ROUND CLEAR  +{XP['round']}")
             self.count_round()
-            self.record_progress(self.round + 1)
+            if self.deeprun:
+                self.banner = f"DEPTH {self.depth} CLEAR"
+                self.sub_banners = []
+                self.offer_boons()
+            else:
+                self.record_progress(self.round + 1)
 
     def heat_up(self, spec):
         """고정 기관총 과열"""
@@ -6232,6 +6389,8 @@ class Game:
         if self.challenge == "HARDCORE" and damage > 0:
             damage = max(damage, self.player.hp + 1)      # 한 방에 끝
         damage *= 1 - self.director.assist              # 같은 곳에서 여러 번 죽으면 조금 덜 아파요
+        if self.boons:
+            damage = self.boon_on_hurt(damage)
         if source is not None:
             self.last_source = pygame.Vector2(source)
         self.director.on_damage(damage)
@@ -6256,6 +6415,7 @@ class Game:
                 spread *= spec.get("ads_spread", 0.45)   # 정조준하면 덜 퍼져요 (조준경이 좋을수록 더)
             else:
                 spread *= spec.get("hip", 1.0)
+        spread *= 0.7 ** self.boons.get("steady", 0)
         if self.player.moving:
             spread += 40 if spec["scope"] else (8 if self.aiming else 16)
         if self.player.z > 0:
@@ -6322,12 +6482,14 @@ class Game:
                 for i, kind in enumerate(("ammo", "health", "grenade", "health")):
                     offset = pygame.Vector2(0.5, 0).rotate(i * 90)
                     self.pickups.append(Pickup(enemy.pos.x + offset.x, enemy.pos.y + offset.y, kind))
-            elif random.random() < (0.12 if self.mode == "zombies" else DROP_CHANCE):
+            elif random.random() < (0.12 if self.mode == "zombies" else DROP_CHANCE) * (2 if self.boons.get("scav") else 1):
                 kind = random.choices(list(DROP_WEIGHTS), weights=list(DROP_WEIGHTS.values()))[0]
                 self.pickups.append(Pickup(enemy.pos.x, enemy.pos.y, kind))
 
     def on_kill(self, enemy, how):
         """처치 보상: 경험치, 연속 처치 메달, 킬스트릭"""
+        if self.boons:
+            self.boon_on_kill(enemy, how)
         self.director.on_kill(enemy.pos.distance_to(self.player.pos))
         self.sounds.play("headshot" if how == "HEADSHOT!" else "kill")
         if not self.practice and how != "ALLY":   # 누적 기록 (업적용, 내가 쓰러뜨린 것만)
@@ -6612,6 +6774,7 @@ class Game:
                 continue                          # 헤드샷 도전: 몸에 맞으면 피해 없음
             if target:
                 amount = spec["head"] * (1 + 0.15 * self.rank_of("MARKSMAN")) if head else spec["body"]
+                amount *= 1 + 0.35 * self.boons.get("glass", 0)          # DEEP RUN: 유리 대포
                 if self.challenge == "HARDCORE":
                     amount *= 2
                 if self.perk == "HEAVY ROUNDS":
@@ -6972,6 +7135,8 @@ class Game:
             self.draw_wheel(screen)                       # 휠을 보는 동안은 HUD 대신 휠만
         else:
             self.draw_hud(screen)
+        if self.boon_choice and not self.game_over:
+            self.draw_boon_choice(screen)
         if self.round_clear_timer <= 0 and not self.game_over and self.briefing is None:
             self.capture_clip(screen, self.frame_dt)
         elif self.round_clear_timer > 0:
@@ -7888,6 +8053,8 @@ class Game:
         elif self.mode == "zombies":
             info = (f"WAVE {self.round}   {self.theme['name']}   "
                     f"ZOMBIES {len(self.enemies) + self.zombies_left}   KILLS {self.kills}")
+        elif self.deeprun:
+            info = f"DEEP RUN   DEPTH {self.depth}   {self.theme['name']}   ENEMIES {len(self.enemies)}   KILLS {self.kills}"
         else:
             info = (f"ROUND {self.round}/{CAMPAIGN_ROUNDS}   SET {set_of(self.round)}   {self.theme['name']}   "
                     f"ENEMIES {len(self.enemies)}   KILLS {self.kills}")
@@ -9079,6 +9246,7 @@ INTRO_ITEMS = [
     (pygame.K_o, "O", "MISSIONS", "큰 맵에서 5단계 작전", "Five-stage operations on huge maps", 0),
     (pygame.K_x, "X", "CHALLENGES", "오늘의 도전, 헤드샷만, 권총만...", "Daily, headshots only, pistol only...", 0),
     (pygame.K_r, "R", "TRAINING", "사격장에서 연습 (기록 안 바뀜)", "Practice range (no progress)", 0),
+    (pygame.K_g, "G", "DEEP RUN", "로그라이트: 깰 때마다 강화를 골라 더 깊이", "Roguelite: pick a boon after every clear", 0),
     (pygame.K_e, "E", "MY MAPS", "맵을 직접 그리고 플레이해요", "Draw your own maps and play them", 0),
     (pygame.K_l, "L", "LEADERBOARD", "모드별 점수 TOP 10", "Top 10 scores per mode", 1),
     (pygame.K_v, "V", "STATS", "누적 기록, 최근 판, 저장 옮기기", "Lifetime stats, recent games, save code", 1),
@@ -9183,6 +9351,8 @@ async def intro_screen(save):
                 write_save(save)
             if key == pygame.K_z:
                 return dict(mode="zombies", round=1)
+            if key == pygame.K_g:
+                return dict(mode="campaign", round=1, deeprun=True)
             if key == pygame.K_r:
                 return dict(mode="training", round=1)
             if key == pygame.K_h:
@@ -9615,6 +9785,9 @@ async def loadout_screen(save, choice):
             mode_text = f"MISSION  -  {MISSIONS[choice['mission']]['name']}"
         elif choice["mode"] == "custom":
             mode_text = f"CUSTOM MAP  -  {choice['custom_map']['name']}  (PRACTICE)"
+        elif choice.get("deeprun"):
+            best = save.get("deeprun", {}).get("best", 0)
+            mode_text = f"DEEP RUN  -  BEST DEPTH {best}"
         else:
             mode_text = f"CAMPAIGN  -  ROUND {choice['round']}"
         mode_text += f"     RANK {player_level(save)}   SKILL POINTS {skill_points(save)}"
@@ -9923,7 +10096,7 @@ async def run():
     # 사격장은 저장 정보의 복사본으로 (무엇을 해도 진짜 저장에는 남지 않아요)
     game = Game(copy.deepcopy(save) if training else save, choice["round"], mode=choice["mode"], loadout=loadout,
                 mission=choice.get("mission", 0), stage=choice.get("stage", 0), challenge=choice.get("challenge"),
-                custom=choice.get("custom_map"))
+                custom=choice.get("custom_map"), deeprun=choice.get("deeprun", False))
     running = True
     closed = False             # 창을 닫았는지 여부
     work_time, frames, check_timer = 0.0, 0, 0.0   # 자동 해상도 조절용 기록
