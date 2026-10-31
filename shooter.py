@@ -3233,6 +3233,28 @@ class Decor:
         self.glow = False
 
 
+# 맞은 곳 재질: 벽 글자 / 바닥 글자 → 재질 이름
+WALL_MATERIAL = {"W": "metal", "r": "metal", "u": "metal", "o": "metal", "Y": "metal", "U": "metal", "Z": "metal",
+                 "R": "brick", "M": "brick", "K": "wood", "J": "wood", "d": "wood", "q": "wood", "y": "wood", "m": "wood",
+                 "Q": "foliage", "V": "stone", "O": "stone", "F": "snow"}
+FLOOR_MATERIAL = {"~": "water", ".": "sand", ";": "sand", "_": "dirt", "#": "dirt", "p": "dirt", "g": "grass",
+                  "*": "snow", "-": "snow", "w": "wood"}
+# 재질 → (파편 개수, 색들, 속도 범위, 수명 범위, 크기 범위, 소리)
+IMPACT_STYLES = {
+    "metal": (9, [(255, 230, 120), (255, 200, 80), (255, 255, 220)], (180, 420), (0.08, 0.22), (1.0, 2.2), "ping"),
+    "wood": (7, [(150, 105, 60), (190, 140, 85), (110, 75, 45)], (60, 190), (0.3, 0.6), (2.0, 4.0), "thunk"),
+    "brick": (8, [(170, 90, 70), (200, 120, 95), (150, 140, 130)], (60, 200), (0.25, 0.5), (1.5, 3.5), "chip"),
+    "concrete": (7, [(170, 165, 155), (200, 195, 185), (140, 135, 130)], (60, 200), (0.2, 0.45), (1.5, 3.5), "chip"),
+    "stone": (7, [(150, 150, 140), (120, 120, 112), (190, 185, 170)], (60, 210), (0.2, 0.45), (1.5, 3.5), "chip"),
+    "water": (10, [(120, 180, 240), (200, 230, 255), (80, 140, 210)], (120, 300), (0.3, 0.6), (1.5, 3.0), "splash"),
+    "sand": (8, [(225, 200, 150), (200, 175, 125), (240, 220, 180)], (40, 140), (0.35, 0.7), (2.0, 4.0), "puff"),
+    "dirt": (8, [(130, 95, 65), (100, 75, 50), (160, 120, 80)], (40, 150), (0.35, 0.7), (2.0, 4.0), "puff"),
+    "grass": (8, [(95, 160, 80), (70, 130, 60), (130, 95, 65)], (40, 150), (0.3, 0.6), (1.5, 3.5), "puff"),
+    "snow": (10, [(240, 245, 255), (220, 230, 245), (255, 255, 255)], (40, 160), (0.4, 0.8), (2.0, 4.5), "puff"),
+    "foliage": (8, [(60, 140, 70), (90, 170, 80), (40, 110, 60)], (40, 140), (0.4, 0.8), (2.0, 4.0), "thunk"),
+}
+
+
 class Director:
     """AI 디렉터: 싸움의 긴장감을 재서 '몰아치기 → 클라이맥스 → 숨 돌리기' 흐름을 만들어요.
     - intensity(0~1): 내가 맞거나 가까이서 싸우면 오르고, 조용하면 내려가요
@@ -3573,6 +3595,7 @@ class Game:
         self.slowmo = 0.0          # 라운드 마지막 적을 쓰러뜨리면 잠깐 느리게
         self.wheel = None          # 무기 휠: dict(t=누른 시간, pick=고른 칸, open=열렸는지)
         self.director = Director() # 긴장감 조절 (몰아치기 / 숨 돌리기)
+        self.impact_sound_cd = 0.0  # 맞은 곳 소리 간격
         self.gun_noise = 0.0       # 방금 총을 쐈으면 적이 듣고 다가와요
         self.pad_aim = False       # 게임패드 왼쪽 트리거를 누르고 있으면 정조준
         self.on_target = False     # 조준점이 적 위에 있는지 (조준선이 빨개지고 시점이 살짝 끈적해져요)
@@ -5484,6 +5507,7 @@ class Game:
                 self.lightning = 0.3
                 self.echoes.append([random.uniform(0.4, 1.5), "thunder", random.uniform(0.6, 1.0)])
         self.suppress = max(0.0, self.suppress - dt * 0.8)
+        self.impact_sound_cd -= dt
         if self.hitstop > 0:        # 쓰러뜨린 순간: 아주 잠깐 멈춤 (묵직한 손맛)
             self.hitstop -= dt
             return
@@ -5876,30 +5900,46 @@ class Game:
             self.screen_blood.append([x, y, random.uniform(0.8, 1.8) * UI, 1.5])
 
     def add_impact(self, x, y, damage=0):
-        """빗나간 총알: 맞은 벽/바닥 자리에서 먼지와 불똥이 튀어요"""
+        """빗나간 총알: 맞은 곳의 재질(쇠, 나무, 벽돌, 물, 흙, 눈...)에 맞는 파편과 소리"""
         col = int(x // self.col_w)
         if not 0 <= col < self.num_rays:
             return
+        material = "concrete"
         if self.zbuffer[col] < math.inf and y >= self.wall_top[col]:
             perp = self.zbuffer[col]
-            if damage and self.wall_hit[col]:
+            if self.wall_hit[col]:
                 cx, cy, vertical, wall_x, spec = self.wall_hit[col]
-                size = self.proj / max(0.05, perp)
-                height = (self.horizon + self.eye * size - y) / size       # 맞은 높이 (땅에서 몇 칸 위)
-                self.hit_wall(cx, cy, vertical, wall_x, height, damage, spec)
+                material = WALL_MATERIAL.get(GAME_MAP[cy][cx], "concrete")
+                if damage:
+                    size = self.proj / max(0.05, perp)
+                    height = (self.horizon + self.eye * size - y) / size       # 맞은 높이 (땅에서 몇 칸 위)
+                    self.hit_wall(cx, cy, vertical, wall_x, height, damage, spec)
         elif y > self.horizon + 2:
             perp = self.eye * self.proj / (y - self.horizon)
         else:
             return                                # 하늘
-        near = min(1.0, 4 / max(0.5, perp))
-        for _ in range(6):
+        ray = self.player.angle + math.atan((x - WIDTH / 2) / self.proj)
+        spot = self.player.pos + pygame.Vector2(math.cos(ray), math.sin(ray)) * perp / max(0.2, math.cos(ray - self.player.angle))
+        if material == "concrete" and not (self.zbuffer[col] < math.inf and y >= self.wall_top[col]):
+            col_, row_ = int(spot.x), int(spot.y)
+            material = FLOOR_MATERIAL.get(FLOOR_GRID[row_][col_] if in_map(col_, row_) else ":", "concrete")
+        self.impact_particles(x, y, min(1.0, 4 / max(0.5, perp)), material)
+        if self.impact_sound_cd <= 0:                 # 산탄총 여러 발이어도 소리는 한 번
+            self.impact_sound_cd = 0.06
+            self.play_at(IMPACT_STYLES[material][5], spot, 14, 0.8)
+
+    def impact_particles(self, x, y, near, material):
+        """재질별 파편: (개수, 색들, 속도, 수명, 크기, 소리)"""
+        count, colors, speed_range, life_range, size_range, _ = IMPACT_STYLES[material]
+        for _ in range(count):
             angle = random.uniform(math.pi * 1.05, math.pi * 1.95)     # 위쪽으로 퍼져요
-            speed = random.uniform(60, 200) * UI * near
-            grey = random.randint(140, 200)
+            speed = random.uniform(*speed_range) * UI * near
             self.particles.append([x, y, math.cos(angle) * speed, math.sin(angle) * speed,
-                                   random.uniform(0.2, 0.4), max(1.0, random.uniform(1.5, 3.5) * UI * near),
-                                   (grey, grey - 10, grey - 30), False])
-        self.particles.append([x, y, 0, 0, 0.05, max(2.0, 5 * UI * near), (255, 230, 140), False])   # 불똥
+                                   random.uniform(*life_range), max(1.0, random.uniform(*size_range) * UI * near),
+                                   random.choice(colors), False])
+        flash = (255, 240, 170) if material == "metal" else (255, 230, 140)
+        if material in ("metal", "concrete", "brick", "stone"):
+            self.particles.append([x, y, 0, 0, 0.05, max(2.0, (7 if material == "metal" else 4) * UI * near), flash, False])
 
     def add_decal(self, cx, cy, vertical, wall_x, height, kind):
         marks = self.decals.setdefault((cx, cy, vertical), [])
