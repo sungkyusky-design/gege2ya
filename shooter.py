@@ -2268,6 +2268,10 @@ class MaskedKeys:
         return False if key in self.hidden else bool(self.real[key])
 
 
+DIRECTOR_PEAK = 0.85       # 긴장감이 이만큼 차면 클라이맥스
+DIRECTOR_PEAK_TIME = 5.0   # 클라이맥스 길이(초)
+DIRECTOR_RELAX_TIME = 7.0  # 숨 돌리기 최소 길이(초)
+DIRECTOR_MAX_ASSIST = 0.25
 WHEEL_KEYS = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_1, pygame.K_2, pygame.K_3,
               pygame.K_4, pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_8, pygame.K_9, pygame.K_0)
 # 이 말로 시작하는 알림은 왼쪽 카드로 (나머지는 조준점 아래 짧은 글자)
@@ -3169,6 +3173,58 @@ class Decor:
         self.glow = False
 
 
+class Director:
+    """AI 디렉터: 싸움의 긴장감을 재서 '몰아치기 → 클라이맥스 → 숨 돌리기' 흐름을 만들어요.
+    - intensity(0~1): 내가 맞거나 가까이서 싸우면 오르고, 조용하면 내려가요
+    - phase: "build"(조금씩 세짐) → "peak"(가장 거셈, 몇 초) → "relax"(잠깐 쉬어요, 보급 상자)
+    - assist: 같은 라운드에서 여러 번 죽으면 적 피해를 조금 줄여줘요 (최대 25%)"""
+
+    def __init__(self):
+        self.intensity = 0.0
+        self.phase = "build"
+        self.timer = 0.0           # 지금 단계에서 지난 시간
+        self.supplied = False      # 이번 숨 돌리기에서 보급을 줬는지
+        self.assist = 0.0
+        self.deaths_here = 0
+
+    def on_damage(self, damage):
+        self.intensity = min(1.0, self.intensity + damage / 90)
+
+    def on_kill(self, distance):
+        self.intensity = min(1.0, self.intensity + (0.09 if distance < 5 else 0.04))
+
+    def on_death(self):
+        self.deaths_here += 1
+        self.assist = min(DIRECTOR_MAX_ASSIST, 0.08 * self.deaths_here)
+
+    def new_round(self):
+        """라운드가 바뀌면(다시 하기 포함) 긴장감은 처음부터"""
+        self.intensity, self.phase, self.timer, self.supplied = 0.0, "build", 0.0, False
+
+    def on_clear(self):
+        """라운드를 깨면 도움은 천천히 줄여요"""
+        self.deaths_here = 0
+        self.assist = max(0.0, self.assist - 0.08)
+
+    def update(self, dt, in_combat):
+        self.timer += dt
+        decay = 0.05 if in_combat else 0.12
+        if self.phase == "relax":
+            decay *= 1.8
+        self.intensity = max(0.0, self.intensity - decay * dt)
+        if self.phase == "build" and self.intensity >= DIRECTOR_PEAK:
+            self.phase, self.timer = "peak", 0.0
+        elif self.phase == "peak" and self.timer > DIRECTOR_PEAK_TIME:
+            self.phase, self.timer, self.supplied = "relax", 0.0, False
+        elif self.phase == "relax" and self.timer > DIRECTOR_RELAX_TIME and self.intensity < 0.4:
+            self.phase, self.timer = "build", 0.0
+
+    @property
+    def spawn_mult(self):
+        """좀비가 나오는 빠르기 배율"""
+        return {"build": 1.0, "peak": 1.45, "relax": 0.15}[self.phase]
+
+
 class Pickup:
     """바닥에 놓인 상자 (탄약 / 체력 / 수류탄)"""
 
@@ -3456,6 +3512,7 @@ class Game:
         self.hitstop = 0.0         # 쓰러뜨리는 순간 화면이 아주 잠깐 멈춰요 (묵직한 손맛)
         self.slowmo = 0.0          # 라운드 마지막 적을 쓰러뜨리면 잠깐 느리게
         self.wheel = None          # 무기 휠: dict(t=누른 시간, pick=고른 칸, open=열렸는지)
+        self.director = Director() # 긴장감 조절 (몰아치기 / 숨 돌리기)
         self.gun_noise = 0.0       # 방금 총을 쐈으면 적이 듣고 다가와요
         self.pad_aim = False       # 게임패드 왼쪽 트리거를 누르고 있으면 정조준
         self.on_target = False     # 조준점이 적 위에 있는지 (조준선이 빨개지고 시점이 살짝 끈적해져요)
@@ -4391,6 +4448,7 @@ class Game:
 
     def reset_round_state(self):
         """라운드(웨이브)마다 새로 시작하는 것들"""
+        self.director.new_round()
         self.low_warned = False        # 체력 낮음 무전을 이번 라운드에 했는지
         self.tactical_left = TACTICAL_COUNT + (1 if self.perk == "SCAVENGER" else 0)
         self.mounted, self.mg_heat = None, 0.0
@@ -4904,6 +4962,32 @@ class Game:
                     self.play_at("door", center, 14, 0.7)
                 self.doors[(cx, cy)] = max(0.0, timer)
 
+    def update_director(self, dt):
+        """디렉터: 긴장감 계산, 숨 돌리기에 들어가면 체력/탄약이 모자랄 때 보급 상자 하나"""
+        d = self.director
+        before = d.phase
+        d.update(dt, any(e.sees for e in self.enemies))
+        if d.phase == "relax" and before != "relax":
+            self.relax_supply()
+
+    def relax_supply(self):
+        """숨 돌리기 보급: 체력이 낮으면 구급상자, 탄약이 적으면 탄약 상자를 가까운 곳에"""
+        d = self.director
+        if d.supplied:
+            return
+        w = self.arsenal.current
+        kind = "health" if self.player.hp < 55 else ("ammo" if w.reserve < w.spec["mag"] * 1.5 else None)
+        if kind is None:
+            return
+        p = self.player.pos
+        for _ in range(40):
+            spot = p + pygame.Vector2(random.uniform(2.5, 5), 0).rotate(random.uniform(0, 360))
+            if in_map(int(spot.x), int(spot.y)) and not is_blocked(spot.x, spot.y) and can_see(p, spot):
+                self.pickups.append(Pickup(spot.x, spot.y, kind))
+                self.popups.append(["SUPPLY DROP NEARBY", (80, 240, 255), 2.0])
+                d.supplied = True
+                return
+
     def update_squad(self, dt):
         """분대 AI: 한 명이 나를 보면 무전으로 동료에게 알리고, 여럿이면 제압조와 측면조로 나눠요"""
         p = self.player
@@ -4929,7 +5013,9 @@ class Game:
             if e.shout:
                 self.shout(e, e.shout)
                 e.shout = None
-        self.squad_timer -= dt
+        self.squad_timer -= dt * (1.6 if self.director.phase == "peak" else 1.0)
+        if self.director.phase == "relax":
+            return                                   # 숨 돌리기: 새 작전(제압·측면)은 잠깐 쉬어요
         if self.squad_timer > 0 or len(seers) < 2 or self.mode == "zombies":
             return
         self.squad_timer = 1.0
@@ -5021,7 +5107,7 @@ class Game:
             self.update_flow()
         cap = min(24, 6 + self.round * 2)          # 한 번에 나와 있는 좀비 수 한도
         if self.zombies_left > 0 and len(self.enemies) < cap:
-            self.spawn_timer -= dt
+            self.spawn_timer -= dt * self.director.spawn_mult
             if self.spawn_timer <= 0:
                 self.spawn_timer = max(0.35, 1.6 - self.round * 0.08)
                 self.spawn_zombie()
@@ -5485,6 +5571,8 @@ class Game:
         if self.body_timer <= 0 and self.mode != "zombies":
             self.body_timer = 0.5
             self.check_bodies()
+        if self.mode not in ("training", "custom") and not self.challenge:
+            self.update_director(dt)
         if self.mode == "zombies":
             self.update_zombies(edt)
         else:
@@ -5586,6 +5674,7 @@ class Game:
         if self.player.hp <= 0 and not self.game_over:
             self.player.hp = 0
             self.game_over = True
+            self.director.on_death()
             self.start_killcam()
             if self.mode == "zombies":
                 self.save["zbest"] = max(self.save.get("zbest", 0), self.round)
@@ -5820,8 +5909,10 @@ class Game:
             damage *= 0.7                                  # 기관총 방패와 담 뒤라서 덜 아파요
         if self.challenge == "HARDCORE" and damage > 0:
             damage = max(damage, self.player.hp + 1)      # 한 방에 끝
+        damage *= 1 - self.director.assist              # 같은 곳에서 여러 번 죽으면 조금 덜 아파요
         if source is not None:
             self.last_source = pygame.Vector2(source)
+        self.director.on_damage(damage)
         self.player.hp -= int(damage)
         if 0 < self.player.hp < 35 and not self.low_warned:
             self.low_warned = True
@@ -5914,6 +6005,7 @@ class Game:
 
     def on_kill(self, enemy, how):
         """처치 보상: 경험치, 연속 처치 메달, 킬스트릭"""
+        self.director.on_kill(enemy.pos.distance_to(self.player.pos))
         self.sounds.play("headshot" if how == "HEADSHOT!" else "kill")
         if not self.practice and how != "ALLY":   # 누적 기록 (업적용, 내가 쓰러뜨린 것만)
             life = self.save.setdefault("lifetime", {})
@@ -6040,6 +6132,7 @@ class Game:
 
     def count_round(self):
         """라운드/웨이브/미션 단계를 깰 때마다 누적 기록"""
+        self.director.on_clear()
         life = self.save.setdefault("lifetime", {})
         life["rounds"] = life.get("rounds", 0) + 1
         self.check_achievements()
@@ -7481,7 +7574,9 @@ class Game:
         bar.width = int(bar.width * (self.xp % XP_PER_RANK) / XP_PER_RANK)
         pygame.draw.rect(screen, (255, 80, 200), bar)
         if self.show_fps:
-            text = f"FPS {self.fps:.0f}   RES {self.col_w}px   {WIDTH}x{HEIGHT}"
+            d = self.director
+            text = (f"FPS {self.fps:.0f}   RES {self.col_w}px   {WIDTH}x{HEIGHT}   "
+                    f"DIRECTOR {d.phase.upper()} {d.intensity:.2f} ASSIST {d.assist:.2f}")
             screen.blit(self.small_font.render(text, True, YELLOW), (16, 12 + 54 * UI))
         map_bottom = self.draw_minimap(screen)
         for i, (text, _) in enumerate(self.feed[-4:]):
