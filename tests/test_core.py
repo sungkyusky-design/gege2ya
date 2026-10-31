@@ -646,6 +646,18 @@ class GameTest(unittest.TestCase):
         self.assertEqual(game.sounds.duck, 1.0)
         self.assertEqual(game.stagger, 0.0)
 
+    def test_acoustics_indoor_and_open(self):
+        game = shooter.Game({}, 22)                                      # OFFICE BLOCK: 실내가 있는 맵
+        indoor = [(c, r) for r, line in enumerate(shooter.FLOOR_GRID) for c, f in enumerate(line)
+                  if f in shooter.INDOOR_FLOORS and not shooter.is_blocked(c + 0.5, r + 0.5)]
+        game._acoustics = None
+        self.assertIn(game.acoustics()[2], ("open", "alley", "indoor"))
+        self.assertTrue(indoor)
+        if indoor:
+            game.player.pos.update(indoor[0][0] + 0.5, indoor[0][1] + 0.5)
+            game._acoustics = None
+            self.assertEqual(game.acoustics()[2], "indoor")
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

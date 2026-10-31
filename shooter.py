@@ -6638,10 +6638,12 @@ class Game:
         self.shot_index += 1
         self.light_timer = 0.05
         # 메아리와 울림: 맵마다 달라요. 탄피는 조금 뒤에 바닥에 '짤랑'
-        delay, echo = ECHOES.get(self.theme["name"], (0.25, 0.2))
+        delay, echo, room = self.acoustics()
         loud = 0.5 if spec.get("suppressed") else 1.0
-        self.sounds.play("tail", 0.6 * loud)
+        self.sounds.play("tail", (0.85 if room == "indoor" else 0.6) * loud)
         self.echoes.append([delay, GUN_SOUNDS[spec["name"]], echo * loud])
+        if room in ("indoor", "alley"):                   # 좁은 곳: 짧게 한 번 더 튕겨 울려요
+            self.echoes.append([delay * 2.1, GUN_SOUNDS[spec["name"]], echo * 0.45 * loud])
         if not spec["projectile"] and (not spec["auto"] or random.random() < 0.4):
             self.echoes.append([random.uniform(0.3, 0.45), "casing", random.uniform(0.2, 0.35)])
         self.heat_up(spec)
@@ -7274,6 +7276,27 @@ class Game:
                 best = (enemy, perp, head, hx, hy, pierced)
         return best
 
+    def acoustics(self):
+        """내가 선 곳의 울림: (메아리 시간, 크기, 공간 이름). 실내 / 좁은 골목 / 탁 트인 곳
+        0.5초마다 한 번만 주변 칸을 세어서 계산해요"""
+        now = self.time
+        cached = getattr(self, "_acoustics", None)
+        if cached and abs(now - cached[0]) < 0.5:
+            return cached[1]
+        col, row = int(self.player.pos.x), int(self.player.pos.y)
+        floor = FLOOR_GRID[row][col] if in_map(col, row) else ":"
+        walls = sum(1 for dr in range(-2, 3) for dc in range(-2, 3)
+                    if (dr or dc) and (not in_map(col + dc, row + dr) or WALL_GRID[row + dr][col + dc]))
+        base_delay, base_echo = ECHOES.get(self.theme["name"], (0.25, 0.2))
+        if floor in INDOOR_FLOORS:
+            result = (0.07, 0.55, "indoor")
+        elif walls >= 10:
+            result = (0.11, max(base_echo, 0.38), "alley")
+        else:
+            result = (base_delay, base_echo, "open")
+        self._acoustics = (now, result)
+        return result
+
     def spatial(self, pos, reach):
         """pos에서 난 소리의 (크기, 방향). reach보다 멀면 안 들려요. 뒤에서 난 소리는 조금 작게."""
         offset = pos - self.player.pos
@@ -7292,8 +7315,8 @@ class Game:
             offset = pos - self.player.pos
             if offset.length() > 0.5:
                 self.sound_marks.append([math.atan2(offset.y, offset.x), SOUND_MARK_KINDS[name], 0.9])
-        if volume > 0.02 and name in MUFFLED_SOUNDS and not can_see(self.player.pos, pos):
-            name += "_m"            # 벽 너머: 먹먹한 소리
+        if volume > 0.02 and name in MUFFLED_SOUNDS and (volume < 0.3 or not can_see(self.player.pos, pos)):
+            name += "_m"            # 벽 너머이거나 아주 멀면: 먹먹한 소리 (높은 소리가 먼저 사라져요)
         self.sounds.play(name, volume * loud, pan)
 
     def update_cooking(self, dt, keys):
