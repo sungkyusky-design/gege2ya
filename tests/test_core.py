@@ -371,6 +371,31 @@ class GameTest(unittest.TestCase):
         self.assertEqual(sorted(in_tabs), sorted(row[0] for row in shooter.SETTING_ROWS))
         self.assertEqual(len(in_tabs), len(set(in_tabs)))
 
+    def test_director_rhythm_and_assist(self):
+        d = shooter.Director()
+        d.on_damage(90)                                                   # 크게 맞으면 클라이맥스
+        d.update(0.1, True)
+        self.assertEqual(d.phase, "peak")
+        d.update(shooter.DIRECTOR_PEAK_TIME + 0.1, True)
+        self.assertEqual(d.phase, "relax")
+        self.assertLess(d.spawn_mult, 0.5)                                # 숨 돌리기: 좀비가 천천히
+        for _ in range(int(shooter.DIRECTOR_RELAX_TIME * 10) + 20):
+            d.update(0.1, False)
+        self.assertEqual(d.phase, "build")
+        for _ in range(5):
+            d.on_death()
+        self.assertEqual(d.assist, shooter.DIRECTOR_MAX_ASSIST)
+        d.on_clear()
+        self.assertLess(d.assist, shooter.DIRECTOR_MAX_ASSIST)
+
+    def test_relax_supply_drops_health_when_hurt(self):
+        game = shooter.Game({}, 3)
+        game.player.hp = 30
+        before = len(game.pickups)
+        game.relax_supply()
+        self.assertEqual(len(game.pickups), before + 1)
+        self.assertEqual(game.pickups[-1].kind, "health")
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
