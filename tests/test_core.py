@@ -345,6 +345,19 @@ class GameTest(unittest.TestCase):
         ordered = shooter.class_order(["PISTOL", "SMG", "RIFLE"])
         self.assertEqual(ordered, ["RIFLE", "SMG", "PISTOL"])
 
+    def test_menu_translation(self):
+        fonts = dict(ko_ui=True)
+        self.assertEqual(shooter.tr(fonts, "SETTINGS"), "설정")
+        self.assertEqual(shooter.tr(fonts, "ACHIEVEMENTS  3 / 16"), "업적  3 / 16")
+        self.assertEqual(shooter.tr(fonts, "RIFLE"), "RIFLE")                  # 없는 글자는 그대로
+        self.assertEqual(shooter.tr(dict(ko_ui=False), "SETTINGS"), "SETTINGS")
+        before = shooter.SETTINGS["lang"]
+        shooter.SETTINGS["lang"] = 0
+        shooter.change_setting("lang", 1)                                    # 한국어 → 영어
+        self.assertEqual(shooter.setting_text("lang"), "ENGLISH")
+        self.assertFalse(shooter.make_fonts()["ko_ui"])
+        shooter.SETTINGS["lang"] = before
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
