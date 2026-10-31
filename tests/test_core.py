@@ -358,6 +358,14 @@ class GameTest(unittest.TestCase):
         self.assertFalse(shooter.make_fonts()["ko_ui"])
         shooter.SETTINGS["lang"] = before
 
+    def test_key_labels_follow_rebinding(self):
+        self.assertEqual(shooter.kl(pygame.K_g), "G")
+        self.assertEqual(shooter.kl(pygame.K_LSHIFT), "SHIFT")
+        shooter.rebind(pygame.K_g, pygame.K_y)                           # 수류탄을 Y 로
+        self.assertEqual(shooter.kl(pygame.K_g), "Y")
+        shooter.apply_keys({})                                           # 처음대로
+        self.assertEqual(shooter.kl(pygame.K_g), "G")
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
