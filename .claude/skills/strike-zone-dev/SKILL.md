@@ -75,9 +75,10 @@ README 무기 표 / 얻는 조건 표. 포물선 유탄은 `lobbed=True`, 로켓
 캠페인 등장은 `pick_enemy_kind` (라운드 조건) 와 `start_battle` 의 `news` (처음 나오는 라운드) →
 미션은 `mission_enemy_kind`. 좀비는 `melee=(피해, 간격)` 을 넣고 `ZOMBIE_KINDS` 와 `spawn_zombie`.
 
-**손으로 그린 맵**: `MAPS` 에 테마 dict (name, sky, haze, sun, stars, ground, lit, fog, snow, camo, op, brief, rows).
-`P` 하나, 먼 `E` 6개 이상. 다 그리면 반드시 `check_maps.py`. 캠페인 맵은 `CAMPAIGN_MAPS` 순서대로 20개
+**손으로 그린 맵**: `strike/maps.py` 의 `MAPS` 에 테마 dict (name, sky, haze, sun, stars, ground, lit, fog, snow, camo, op, brief, rows).
+`P` 하나, 먼 `E` 6개 이상. 다 그리면 반드시 `check_maps.py`. 캠페인 맵은 `CAMPAIGN_MAPS` 순서대로 22개
 (늘리면 `SET_SIZE` 와 README 표도 확인). 메아리는 `ECHOES` 에 맵 이름으로.
+실내: 바닥 `w` 위에는 천장(`INDOOR_FLOORS`, `CEILING`), 실내 벽 `i`, 문 `d` (`DOORS`, `Game.update_doors`). 실내 벽은 천장 높이(1.4)로.
 
 **생성 맵**: `MAP_STYLES` 에 스타일 → `GENERATED_MAPS` 에 `generate_map(style, 26, 18, seed)` 로 테마 추가.
 생성기는 막힌 칸을 스스로 메우지만, 결과는 `check_maps.py` 와 `screenshot.py --map NAME` 으로 꼭 눈으로 확인.

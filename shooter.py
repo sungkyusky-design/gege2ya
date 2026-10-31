@@ -86,7 +86,7 @@ import datetime
 import pygame
 
 # 데이터 표는 strike/ 폴더에 나눠 두었어요 (맵, 무기·적, 소리, 이야기)
-from strike.maps import MAPS, WALLS, FLOORS
+from strike.maps import MAPS, WALLS, FLOORS, OFFICE_BLOCK
 from strike.units import HORIZONTAL_KICK, START_WEAPONS, UNLOCKS, PERKS, WEAPON_INFO, WEAPONS, ENEMY_TYPES, ARMORED, ENEMY_MAGS, COVER_USERS, GUN_LOOKS
 from strike.sounds import SOUND_RECIPES, SOUND_MARK_KINDS, MUFFLED_SOUNDS, STEP_SOUNDS, ENEMY_STEPS, GUN_SOUNDS
 from strike.story import CHALLENGES, STORY, RADIO, HELP_TEXT
@@ -109,6 +109,12 @@ DESTRUCTIBLE = {"K": 160, "Z": 260}
 SHELL_RELOAD = {"SHOTGUN": 0.42}    # 한 발씩 넣는 총: 한 발 넣는 시간(초). 쏘면 바로 멈추고 쏴요
 BOLT_ACTION = ("SNIPER",)            # 쏠 때마다 노리쇠를 당기는 총
 MAX_DECALS = 240                     # 벽에 남는 총알 자국/그을음 최대 개수
+# 실내: 이 바닥 위에는 천장이 있어요. 천장 높이는 실내 벽 높이와 같아요
+INDOOR_FLOORS = ("w",)
+CEILING = 1.4
+CEILING_COLOR = (200, 196, 188)
+DOORS = ("d",)                       # 문: 사람이 가까이 오면 열리고, 아무도 없으면 4초 뒤 닫혀요
+DOOR_OPEN_RANGE = 1.15
 MAX_TEXTURE_COL = 4               # 세로 줄 폭이 이보다 넓으면(느린 컴퓨터) 벽 질감 대신 단색으로
 TEXTURE_DISTANCE = 9             # 이보다 먼 벽은 질감 없이 단색으로 (빠르게)
 NORMAL_FOV = math.radians(66)     # 시야각
@@ -387,7 +393,7 @@ def apply_mods(spec, mods, level=1):
 
 
 # 맵마다 총소리 메아리: (늦게 들리는 시간 초, 크기). 좁은 골목·실내는 크게, 탁 트인 곳은 작게
-ECHOES = {"NEON BEACH": (0.35, 0.12), "DOWNTOWN": (0.18, 0.35), "HARBOR": (0.22, 0.3), "DESERT TOWN": (0.25, 0.2),
+ECHOES = {"OFFICE BLOCK": (0.12, 0.45), "NEON BEACH": (0.35, 0.12), "DOWNTOWN": (0.18, 0.35), "HARBOR": (0.22, 0.3), "DESERT TOWN": (0.25, 0.2),
           "SNOW BASE": (0.3, 0.2), "FOREST VILLAGE": (0.3, 0.22), "RAIN DISTRICT": (0.15, 0.4),
           "CARGO SHIP": (0.12, 0.3), "MOTEL": (0.2, 0.25), "SCRAPYARD": (0.2, 0.25), "BAZAAR": (0.12, 0.35),
           "OIL RIG": (0.3, 0.2), "LIGHTHOUSE POINT": (0.3, 0.18), "BLOOD MOON": (0.3, 0.3)}
@@ -944,7 +950,7 @@ LIGHTHOUSE_POINT = dict(
                "IgEggIggggggIggggEgggggIgg",
     ],
 )
-MAPS[-1:-1] = [LIGHTHOUSE_POINT] + GENERATED_MAPS     # 좀비 맵(마지막) 앞에 넣어요 (등대는 13번째 맵)
+MAPS[-1:-1] = [LIGHTHOUSE_POINT] + GENERATED_MAPS + [OFFICE_BLOCK]   # 좀비 맵(마지막) 앞에 (등대 13번째, 사무실 22번째)
 
 # 장기 미션: 아주 큰 맵(64x44칸)에서 다섯 단계 작전. 단계를 마칠 때마다 체크포인트에 저장돼요
 MISSION_STAGES = [("REACH", "INFILTRATE - REACH THE RALLY POINT"), ("HOSTAGE", "RESCUE THE DOWNED PILOT"),
@@ -973,12 +979,12 @@ for _m in MISSIONS:
                      brief=_m["desc"][1], rows=generate_map(_m["style"], 64, 44, _m["seed"], spawns=55, pickups=10)))
     _m["map"] = len(MAPS) - 1
 
-# 캠페인에서 라운드마다 돌아가며 나오는 맵 (좀비, 미션 맵은 빼고) - 21개.
+# 캠페인에서 라운드마다 돌아가며 나오는 맵 (좀비, 미션 맵은 빼고) - 22개.
 # 세트는 20라운드씩이라 세트마다 시작 맵이 하나씩 밀려요
 CAMPAIGN_MAPS = [i for i, m in enumerate(MAPS) if not m.get("zombie") and not m.get("mission")]
 ZOMBIE_MAP = next(i for i, m in enumerate(MAPS) if m.get("zombie"))
 
-# 캠페인 100라운드 = 20라운드 x 5세트 (맵 21개가 차례로 돌아요). 세트마다 분위기가 바뀌고 적이 강해져요
+# 캠페인 100라운드 = 20라운드 x 5세트 (맵 22개가 차례로 돌아요). 세트마다 분위기가 바뀌고 적이 강해져요
 CAMPAIGN_ROUNDS = 100
 SET_SIZE = 20
 SETS = ["RECON", "ASSAULT", "NIGHT OPS", "STORM", "VETERAN"]
@@ -1017,7 +1023,7 @@ load_map(0)       # 처음엔 첫 번째 맵
 TEXTURE_KINDS = {"R": "brick", "M": "stucco", "A": "stucco", "B": "stucco", "C": "stucco", "D": "stucco",
                  "N": "panel", "G": "panel", "S": "panel", "W": "metal", "r": "metal", "u": "metal", "o": "metal",
                  "Y": "metal", "U": "metal", "H": "metal", "K": "planks", "J": "planks", "Q": "metal",
-                 "F": "stone", "O": "concrete", "V": "stone", "Z": "sandbag"}
+                 "F": "stone", "O": "concrete", "V": "stone", "Z": "sandbag", "i": "stucco", "d": "planks"}
 TEX = 32                          # 질감 한 장의 크기 (px)
 FOG_LEVELS = 8                    # 안개 단계 (멀수록 안개 색에 가까운 그림을 미리 만들어 둬요)
 
@@ -2877,6 +2883,8 @@ class Game:
         self.decal_count = 0
         self.broken_windows = set()
         self.cover_hp = {}         # 부서지는 엄폐물 남은 체력
+        self.doors = {cell: 0.0 for cell in ((x, y) for y, row in enumerate(GAME_MAP) for x, ch in enumerate(row)
+                                              if ch in DOORS)}   # 문 칸 -> 닫히기까지 남은 시간 (0이면 닫힘)
         self.map_index = index
         self.map_key = (index, set_no)
         self.decor = []
@@ -2941,6 +2949,7 @@ class Game:
         self.muzzle_light.fill((255, 220, 150, int(28 + 90 * (1 - dark))))
         self.muzzle_glow = 50 + 110 * (1 - dark)
         self.night = dark < 0.95 or self.theme.get("stars", False)
+        self.door_spec = (shade(WALLS["d"][0], dark), *WALLS["d"][1:])   # 닫힌 문 모양 (밤이면 어둡게)
         if self.theme.get("rain"):
             ambience = "rain"
         elif self.night and not self.theme["snow"]:
@@ -3732,6 +3741,29 @@ class Game:
             elif boss.charge_timer <= -1.2:
                 boss.charge_timer = 6.0
 
+    def update_doors(self, dt):
+        """문: 나나 적이 가까이 오면 열리고, 4초 동안 아무도 없으면 닫혀요 (그 칸에 아무도 없을 때만)"""
+        people = [self.player.pos] + [e.pos for e in self.enemies]
+        for (cx, cy), timer in self.doors.items():
+            center = pygame.Vector2(cx + 0.5, cy + 0.5)
+            near = min(center.distance_to(q) for q in people)
+            if near < DOOR_OPEN_RANGE:
+                if timer <= 0:                                   # 열기: 그 칸을 바닥으로
+                    row = GAME_MAP[cy]
+                    GAME_MAP[cy] = row[:cx] + INDOOR_FLOORS[0] + row[cx + 1:]
+                    WALL_GRID[cy][cx] = None
+                    FLOOR_GRID[cy][cx] = INDOOR_FLOORS[0]
+                    self.play_at("door", center, 14)
+                self.doors[(cx, cy)] = 4.0
+            elif timer > 0:                                      # 아무도 없으면 시간이 줄고, 다 되면 닫혀요
+                timer -= dt
+                if timer <= 0:
+                    row = GAME_MAP[cy]
+                    GAME_MAP[cy] = row[:cx] + DOORS[0] + row[cx + 1:]
+                    WALL_GRID[cy][cx] = self.door_spec
+                    self.play_at("door", center, 14, 0.7)
+                self.doors[(cx, cy)] = max(0.0, timer)
+
     def update_squad(self, dt):
         """분대 AI: 한 명이 나를 보면 무전으로 동료에게 알리고, 여럿이면 제압조와 측면조로 나눠요"""
         p = self.player
@@ -4055,6 +4087,8 @@ class Game:
         self.echoes = waiting
         self.screen_blood = [[x, y, r, t - dt] for x, y, r, t in self.screen_blood if t - dt > 0]
         self.lightning = max(0.0, self.lightning - dt)
+        if self.doors:
+            self.update_doors(dt)
         if self.theme.get("rain"):                 # 폭풍우: 가끔 번개가 번쩍, 조금 뒤 천둥
             self.lightning_timer -= dt
             if self.lightning_timer <= 0:
@@ -5193,14 +5227,28 @@ class Game:
             # 1) 바닥: 구간마다 색을 칠해요 (멀수록 지평선 가까이)
             for d0, d1, kind in floors:
                 y_near = HEIGHT if d0 < 0.05 else horizon + eye * proj / (d0 * fix)
-                y_far = horizon if d1 == math.inf else horizon + eye * proj / (d1 * fix)
+                y_far = horizon if d1 == math.inf else horizon + eye * proj / (max(d1, 0.01) * fix)
                 if y_near > y_far and y_far < HEIGHT:
                     # 바닥은 벽보다 안개를 약하게 (바다가 회색으로 안 보이게)
                     color = fog(FLOOR_COLORS[kind], (min(d1, fog_dist) + d0) * 0.3, fog_dist)
                     draw_rect(screen, color, (x, y_far, col_w, min(HEIGHT, y_near) - y_far + 1))
+                if kind in INDOOR_FLOORS and d1 != math.inf:
+                    # 천장: 바닥을 위아래로 뒤집은 모양 (실내 바닥 위에만)
+                    c_near = 0.0 if d0 < 0.05 else horizon + (eye - CEILING) * proj / (d0 * fix)
+                    c_far = horizon + (eye - CEILING) * proj / (max(d1, 0.01) * fix)
+                    if c_far > max(0.0, c_near):
+                        draw_rect(screen, fog(CEILING_COLOR, (d0 + d1) * 0.5, fog_dist),
+                                  (x, max(0.0, c_near), col_w, c_far - max(0.0, c_near) + 1))
 
             # 2) 건물: 먼 것부터 그려야 가까운 것이 앞에 보여요
             zbuffer[i] = walls[0][0] * fix if walls else math.inf
+            indoor = bool(floors) and floors[-1][2] in INDOOR_FLOORS     # 첫 벽 바로 앞이 실내 바닥
+            if indoor and walls and walls[0][3][1] > CEILING:
+                first = walls[0]
+                spec = first[3]
+                walls = [(first[0], first[1], first[2], (spec[0], CEILING, spec[2], None), first[4], first[5])]
+            elif indoor:
+                walls = walls[:1]                    # 천장 위로 보이는 먼 건물은 없어요
             if walls:
                 near = proj / max(0.05, walls[0][0] * fix)
                 wall_top[i] = horizon + eye * near - walls[0][3][1] * near
@@ -5244,6 +5292,8 @@ class Game:
                     base = shade(color, 0.82 if vertical else 1.0)
                     if wall_x < 0.03 or wall_x > 0.97:      # 건물 모서리 선
                         base = shade(base, 0.6)
+                    elif pattern == "door" and 0.08 < wall_x < 0.14:      # 문 손잡이 쪽 어두운 줄
+                        base = shade(base, 0.7)
                     elif pattern == "ribs" and (wall_x * 6) % 1 < 0.2:   # 컨테이너/창고의 세로 골
                         base = shade(base, 0.75)
                     draw_rect(screen, fog(base, perp, fog_dist), (x, top, col_w, vis_b - top + 1))

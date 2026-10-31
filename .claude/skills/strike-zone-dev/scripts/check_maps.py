@@ -24,7 +24,7 @@ sys.path.insert(0, os.getcwd())
 
 import shooter  # noqa: E402  (저장소 맨 위 폴더에서 실행해야 해요)
 
-BLOCKERS = set(shooter.WALLS) | set("~TcXIv")      # shooter.is_blocked 와 같은 기준
+BLOCKERS = (set(shooter.WALLS) | set("~TcXIv")) - set(shooter.DOORS)   # shooter.is_blocked 기준 (문은 열려요)
 SAFE = shooter.SAFE_SPAWN
 
 
