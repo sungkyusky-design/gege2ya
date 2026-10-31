@@ -5,7 +5,7 @@ description: Develop, test and ship the Strike Zone pygame FPS (shooter.py) in t
 
 # Strike Zone 개발 스킬
 
-`shooter.py` 하나에 들어 있는 레이캐스팅 FPS (pygame, 약 6000줄)를 고치고, 검사하고, 배포하는 방법.
+`shooter.py` (게임 코드, 약 7000줄) 와 `strike/` (데이터 표) 로 된 레이캐스팅 FPS (pygame)를 고치고, 검사하고, 배포하는 방법.
 사용자는 **Python 초보, 맥북(Apple Silicon), 키보드 위주(마우스 불편)** 로 플레이해요.
 
 ## 꼭 지킬 것
@@ -22,6 +22,19 @@ description: Develop, test and ship the Strike Zone pygame FPS (shooter.py) in t
   쓰는 키: xp, best, continue, res, settings, loadout, wkills, unlocked, skills, zbest, mission, missions_done,
   keys, lifetime, achievements, camo, challenges, daily.
 - 특정 실제 게임(콜오브듀티 등)의 맵·이름을 그대로 베끼지 않아요. 장르 느낌은 OK, 고유 이름/맵 복제는 X.
+
+## 데이터 파일 (strike/)
+
+| 파일 | 들어 있는 것 |
+| --- | --- |
+| `strike/maps.py` | `MAPS` (손으로 그린 맵, 글자 설명 주석), `WALLS`, `FLOORS` |
+| `strike/units.py` | `WEAPONS`, `WEAPON_INFO`, `UNLOCKS`, `PERKS`, `HORIZONTAL_KICK`, `ENEMY_TYPES`, `ENEMY_MAGS`, `COVER_USERS`, `GUN_LOOKS` |
+| `strike/sounds.py` | `SOUND_RECIPES`, `GUN_SOUNDS`, `STEP_SOUNDS`, `ENEMY_STEPS`, `MUFFLED_SOUNDS`, `SOUND_MARK_KINDS` |
+| `strike/story.py` | `CHALLENGES`, `STORY`, `RADIO`, `HELP_TEXT` |
+
+`shooter.py` 맨 위에서 `from strike.xxx import ...` 로 가져와요. 표에 **새 이름**을 만들면 그 import 줄에도 추가하세요.
+화면 크기(`WIDTH`, `UI`)나 지금 맵(`GAME_MAP`, `WALL_GRID`)처럼 **게임 중에 바뀌는 전역 값을 쓰는 코드는 shooter.py 에 두세요**
+(다른 파일로 옮기면 옛 값을 보게 돼요).
 
 ## 코드 지도 (shooter.py, 위에서 아래로)
 
@@ -81,7 +94,8 @@ README 무기 표 / 얻는 조건 표. 포물선 유탄은 `lobbed=True`, 로켓
 
 ## 테스트 (모두 저장소 맨 위 폴더에서)
 
-1. 문법/실수: `python -m pyflakes shooter.py` (없으면 `pip install pyflakes`)
+1. 문법/실수: `python -m pyflakes shooter.py strike tests` (없으면 `pip install pyflakes`)
+   단위 테스트: `python -m unittest discover -s tests -v` (핵심 규칙 12개, 새 규칙을 만들면 `tests/test_core.py` 에 추가)
 2. 맵: `python .claude/skills/strike-zone-dev/scripts/check_maps.py` → 문제 0개여야 해요
 3. 전체 자동 플레이: `python .claude/skills/strike-zone-dev/scripts/smoke_test.py --seconds 20`
    → 메뉴 + 캠페인 여러 세트 + 좀비 + 미션 3개, 모두 `OK` 여야 해요. ms/frame 이 25를 넘으면 느려진 거예요.
@@ -92,7 +106,7 @@ README 무기 표 / 얻는 조건 표. 포물선 유탄은 `lobbed=True`, 로켓
    `game.update(1/60, Keys({...}), 0, 0, (False, False, False))` 로 장면을 진행하며 값을 출력해요.
 6. 웹: `bash .claude/skills/strike-zone-dev/scripts/web_smoke.sh [z|o]` → `browser errors: none` 이어야 해요.
 7. 밸런스: `python .claude/skills/strike-zone-dev/scripts/balance.py` (무기 처치 시간, 적 초당 피해). 숫자를 바꿨으면 전후 비교.
-8. PR을 만들면 `.github/workflows/test.yml` 이 2~4번을 GitHub에서 자동으로 돌려요. 병합 전에 결과(초록 체크)를 확인하세요.
+8. PR을 만들면 `.github/workflows/test.yml` 이 1~4번과 단위 테스트를 GitHub에서 자동으로 돌려요. 병합 전에 결과(초록 체크)를 확인하세요.
 
 ## 테스트할 때 함정 (실제로 겪은 것)
 
@@ -102,6 +116,7 @@ README 무기 표 / 얻는 조건 표. 포물선 유탄은 `lobbed=True`, 로켓
 - 총은 연사 간격(`arsenal.cooldown`), 교체 시간(`switch_left`) 이 남아 있으면 안 나가요. 테스트에선 0으로.
 - 적을 테스트 위치에 둘 때 벽 안이나 벽 뒤면 안 보여요 (`shooter.can_see`, `shooter.is_blocked` 로 확인).
 - `shooter.write_save` 를 테스트에서 덮어써서 진짜 저장 파일(`~/.gege2ya_save.json`)을 건드리지 마세요.
+- `web_smoke.sh` 는 매번 빈 포트를 써요. 화면이 'Directory listing' 이면 오류로 알려줘요.
 - 셸에서 `pkill -f pygbag` 처럼 넓게 죽이면 **지금 실행 중인 명령 자체가 죽어요** (exit 144). 백그라운드 서버는 `timeout` 으로 띄우세요.
 - 큰 패치는 Python 스크립트의 `rep(old, new)` (개수 확인 assert) 로 하면, 하나라도 안 맞을 때 파일이 안 바뀌어서 안전해요.
   단, 다음 명령을 `&&` 로 잇지 않으면 실패한 채로 커밋될 수 있어요.
