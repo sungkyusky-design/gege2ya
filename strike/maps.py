@@ -349,23 +349,23 @@ MAPS = [
             "IgIggIgg#gggIggIggIgggIg",
             "gEgggggg#ggggggggggggEgg",
             "ggJJJJgg#ggVgVgVgggJJJgg",
-            "ggJggJgg#gggggggggJ;aJgg",
+            "ggyggJgg#gggggggggJ;aygg",
             "ggJgaJgg#ggVgVgVgggJ;Jgg",
-            "ggJJgJgg#gggggggggggg;gg",
+            "ggJJqJgg#gggggggggggq;gg",
             "Egggggg########L#######E",
             "ggVVggg#gggggggggg#ggggg",
             "gggggLg#ggJJJJJJgg#gIggg",
             "gIggggg#ggJggggJgg#ggggg",
-            "ggggggg#gggghggJgg#gVVgg",
+            "ggggggg#ggqghgmJgg#gVVgg",
             "gggVVgg#ggJggggJgg#ggggg",
-            "Egggggg#ggJJgJJJgg#ggggE",
+            "Egggggg#ggJJqJJJgg#ggggE",
             "gggggLg#gggggggggg#gggLg",
-            "########L####P#########g",
+            "########LzzzzP#########g",
             "ggIggggg#gggggggg#gggggg",
             "gggJJJgg#ggVVgVVg#gJJJgg",
-            "gggJnJgg#ggggggg#ggJgaJg",
+            "gggynJgg#ggggggg#ggJgaJg",
             "gEgJ;Jgg#gggg#ggggggJ;Jg",
-            "IgggggIgggEgggIggggEgggI",
+            "IgggggIgggEgggIggggEgqgI",
         ],
     ),
 ]
@@ -399,6 +399,9 @@ WALLS = {
     "H": ((240, 238, 230), 3.2, "ribs", (255, 225, 120)),     # 등대: 높은 흰 탑, 꼭대기에 불빛
     "i": ((225, 220, 205), 1.4, False, None),                 # 실내 벽 (천장 높이)
     "d": ((150, 100, 60), 1.4, "door", None),                 # 문 (닫혀 있을 때)
+    "q": ((120, 85, 55), 1.0, "ribs", None),                  # 좀비 모드: 사서 여는 바리케이드 (판자)
+    "y": ((125, 85, 50), 1.5, "weapon", None),                # 좀비 모드: 벽에 걸린 무기 (B 로 사요)
+    "m": ((90, 50, 150), 0.8, "box", None),                   # 좀비 모드: 미스터리 상자
 }
 
 
@@ -418,6 +421,7 @@ FLOORS = {
     "*": (232, 238, 245),
     "-": (190, 198, 210),
     "w": (165, 125, 90),           # 실내 나무 바닥 (위에 천장이 있어요)
+    "z": (70, 75, 95),             # 좀비 모드: 전기 함정 바닥 (B 로 켜요)
 }
 
 

@@ -189,6 +189,12 @@ ENEMY_TYPES = {
                   height=1.12, width=0.72, melee=(32, 1.4),
                   look=dict(head="zombie", skin=(95, 120, 90), shirt=(60, 55, 50), pants=(40, 38, 45),
                             eyes=(255, 120, 40), big=True)),
+    # 타이탄: 10웨이브마다 나오는 보스 좀비. 아주 단단하고, 가까이 오면 땅을 내리쳐요
+    "TITAN": dict(hp=2600, speed=0.8, sight=99, reaction=0, keep=0, range=0,
+                  fire=(1, 1), damage=(0, 0), accuracy=0, falloff=0,
+                  height=1.55, width=1.0, melee=(48, 1.7),
+                  look=dict(head="zombie", skin=(120, 70, 70), shirt=(40, 30, 35), pants=(30, 28, 35),
+                            eyes=(255, 230, 60), big=True)),
     # 부풀어 오른 좀비: 다가와서 터져요. 총으로 미리 터뜨리면 주변 좀비까지 날아가요
     "EXPLODER": dict(hp=45, speed=2.0, sight=99, reaction=0, keep=0, range=0,
                      fire=(1, 1), damage=(0, 0), accuracy=0, falloff=0,
