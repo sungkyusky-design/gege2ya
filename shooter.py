@@ -158,7 +158,7 @@ KEY_ACTIONS = [
     ("STREAK", pygame.K_x, "킬스트릭"), ("NEXT WEAPON", pygame.K_q, "무기 바꾸기"), ("SCOPE ZOOM", pygame.K_z, "조준경 배율"),
     ("FOCUS", pygame.K_t, "스킬: 집중"), ("MEDKIT", pygame.K_y, "스킬: 구급상자"), ("SCAN", pygame.K_j, "스킬: 탐지"),
     ("INSPECT", pygame.K_i, "무기 살펴보기"), ("SQUAD ORDER", pygame.K_k, "동료 명령: 따라와/대기/공격"),
-    ("FLASHLIGHT", pygame.K_l, "손전등 켜기/끄기"), ("TACTICAL", pygame.K_n, "전술 장비 던지기"), ("SHOP AMMO", pygame.K_b, "좀비 상점: 탄약"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
+    ("FLASHLIGHT", pygame.K_l, "손전등 켜기/끄기"), ("TACTICAL", pygame.K_n, "전술 장비 던지기"), ("USE / BUY", pygame.K_b, "사용·사기: 고정 기관총, 좀비 상점"), ("SHOP UPGRADE", pygame.K_u, "좀비 상점: 강화"),
 ]
 # 바꿀 수 없는 키: 메뉴/시점/전체 화면
 KEY_FIXED = (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_UP, pygame.K_DOWN,
@@ -310,8 +310,9 @@ SLIDE_TIME = 0.7                  # 슬라이딩 시간(초)
 SLIDE_SPEED = 2.3                 # 슬라이딩 처음 속도 (점점 느려져요)
 
 # 킬스트릭: 죽지 않고 연속으로 쓰러뜨린 수 -> 받는 보상 (X 키로 사용)
-STREAKS = [(3, "RADAR"), (5, "AIRSTRIKE"), (7, "SENTRY")]
-STREAK_KILLS = ("AIRSTRIKE!", "SENTRY", "ALLY", "TRAP")   # 킬스트릭으로 쓰러뜨린 건 연속 처치 수에 안 세요
+STREAKS = [(3, "RADAR"), (5, "AIRSTRIKE"), (7, "SENTRY"), (10, "CHOPPER")]
+STREAK_KILLS = ("AIRSTRIKE!", "SENTRY", "ALLY", "TRAP", "CHOPPER")
+CHOPPER_TIME, CHOPPER_RADIUS, CHOPPER_LIFT = 20.0, 5.5, 3.2   # 헬기 지원: 시간, 도는 반지름, 높이   # 킬스트릭으로 쓰러뜨린 건 연속 처치 수에 안 세요
 RADAR_TIME = 20                   # 레이더: 미니맵에 적이 다 보이는 시간(초)
 AIRSTRIKE_BLAST = (2.6, 220)
 SENTRY_TIME = 30                  # 자동 포탑이 버티는 시간(초)
@@ -536,6 +537,12 @@ def apply_gunsmith(spec, choices):
 
 
 WEAPON_BY_NAME = {spec["name"]: spec for spec in WEAPONS}
+# 고정 기관총 (맵의 모래주머니·돌담 뒤에 놓여 있어요, B 로 타고 내려요)
+MOUNTED_MG = dict(WEAPON_BY_NAME["LMG"], name="MOUNTED MG", delay=0.07, mag=999, reserve=0, body=40, head=110,
+                  spread=4, kick=4, move=0.0)
+GUN_LOOKS["MOUNTED MG"] = GUN_LOOKS["LMG"]
+GUN_SOUNDS["MOUNTED MG"] = "lmg"
+MG_HEAT_PER_SHOT, MG_COOL, MG_OVERHEAT = 0.04, 0.45, 2.5   # 열: 한 발에 4%, 쉬면 1초에 45% 식음, 과열되면 2.5초 못 쏴요
 
 ZOMBIE_POINTS = dict(hit=10, kill=60, headshot=100, knife=130, wave=250)
 ZOMBIE_SHOP = dict(ammo=500, upgrade=2500)     # B: 탄약 가득, U: 들고 있는 총 강화
@@ -1695,6 +1702,33 @@ def make_hurt_vignette(color=(140, 0, 0)):
         pad_x, pad_y = int(WIDTH * 0.22 * t), int(HEIGHT * 0.22 * t)
         pygame.draw.rect(img, (*color, alpha), (pad_x, pad_y, WIDTH - 2 * pad_x, HEIGHT - 2 * pad_y),
                          int(WIDTH * 0.22 / steps) + 2, border_radius=int(60 * UI))
+    return img
+
+
+def make_chopper_image(flash=False):
+    """지원 헬기 (옆모습): 몸통, 꼬리, 프로펠러"""
+    img = pygame.Surface((120, 50), pygame.SRCALPHA)
+    pygame.draw.ellipse(img, (55, 70, 55), (30, 16, 52, 28))                    # 몸통
+    pygame.draw.ellipse(img, (150, 200, 230), (62, 20, 18, 14))                 # 조종석 유리
+    pygame.draw.rect(img, (55, 70, 55), (2, 24, 34, 7))                         # 꼬리
+    pygame.draw.rect(img, (40, 50, 40), (0, 16, 6, 16))                         # 꼬리 날개
+    pygame.draw.rect(img, (30, 30, 30), (8, 6, 104, 3))                         # 위 프로펠러
+    pygame.draw.rect(img, (30, 30, 30), (52, 8, 6, 9))
+    pygame.draw.line(img, (30, 30, 30), (40, 46), (80, 46), 3)                 # 다리
+    pygame.draw.rect(img, (25, 25, 25), (74, 38, 16, 5))                        # 기관총
+    if flash:
+        pygame.draw.circle(img, YELLOW, (92, 41), 6)
+    return img
+
+
+def make_mg_image():
+    """고정 기관총: 삼각대 위의 큰 총"""
+    img = pygame.Surface((70, 50), pygame.SRCALPHA)
+    for x in (12, 35, 58):                                                     # 삼각대 다리
+        pygame.draw.line(img, (40, 40, 45), (35, 22), (x, 49), 4)
+    pygame.draw.rect(img, (45, 48, 52), (8, 12, 56, 12), border_radius=3)        # 총몸
+    pygame.draw.rect(img, (30, 30, 34), (0, 15, 14, 5))                          # 총열
+    pygame.draw.rect(img, (70, 75, 60), (36, 6, 14, 8))                          # 탄통
     return img
 
 
@@ -3041,6 +3075,10 @@ class Game:
         self.allies = []           # AI 동료 (설정 SQUADMATES)
         self.squad_order = 0       # SQUAD_ORDERS 중 몇 번째
         self.flashlight = False    # 손전등 (L)
+        self.chopper = None        # 지원 헬기 (킬스트릭)
+        self.mounted = None        # 지금 타고 있는 고정 기관총
+        self.mg_heat = 0.0
+        self.turrets = []
         self.tactical = (loadout or {}).get("tactical", "FLASHBANG")
         self.tactical_left = 0
         self.cooking = None        # 수류탄을 쥐고 있는 시간 (G 를 꾹 누르면 쿠킹, 떼면 던져요)
@@ -3090,6 +3128,8 @@ class Game:
         self.explosion_frames = make_explosion_frames()
         self.flare_frames = make_flare_frames()
         self.sentry_images = (make_sentry_image(), make_sentry_image(flash=True))
+        self.chopper_images = (make_chopper_image(), make_chopper_image(flash=True))
+        self.mg_image = make_mg_image()
         self.blood_pool = make_blood_pool_image()
         self.hurt_vignette = make_hurt_vignette()
         self.splat_images = [make_screen_splat(i) for i in range(4)]
@@ -3173,6 +3213,7 @@ class Game:
         self.broken_windows = set()
         self.cover_hp = {}         # 부서지는 엄폐물 남은 체력
         self.buyables = self.find_buyables()
+        self.turrets = self.find_turrets()
         self.trap_timer = 0.0
         self.doors = {cell: 0.0 for cell in ((x, y) for y, row in enumerate(GAME_MAP) for x, ch in enumerate(row)
                                               if ch in DOORS)}   # 문 칸 -> 닫히기까지 남은 시간 (0이면 닫힘)
@@ -3897,6 +3938,7 @@ class Game:
         """라운드(웨이브)마다 새로 시작하는 것들"""
         self.low_warned = False        # 체력 낮음 무전을 이번 라운드에 했는지
         self.tactical_left = TACTICAL_COUNT + (1 if self.perk == "SCAVENGER" else 0)
+        self.mounted, self.mg_heat = None, 0.0
         self.cooking = None
         SMOKES.clear()
         self.spawn_allies()
@@ -4121,7 +4163,7 @@ class Game:
         p = self.player
         order = SQUAD_ORDERS[self.squad_order]
         side = pygame.Vector2(-p.forward.y, p.forward.x)
-        self.world_tracers = [[a, b, t - dt] for a, b, t in self.world_tracers if t - dt > 0]
+        self.world_tracers = [[tr[0], tr[1], tr[2] - dt, *tr[3:]] for tr in self.world_tracers if tr[2] - dt > 0]
         for k, ally in enumerate(self.allies):
             ally.flash = max(0.0, ally.flash - dt)
             if ally.callout:
@@ -4186,6 +4228,100 @@ class Game:
             ally.down = True
             self.popups.append([f"{ally.name} IS DOWN!", (90, 170, 255), 2.0])
             self.sounds.play("radio")
+
+    def find_turrets(self):
+        """캠페인 맵: 시작 자리에서 3~9칸, 적이 오는 쪽으로 멀리 트여 있는 곳에 기관총 하나 (맵마다 늘 같은 자리).
+        바로 옆에 엄폐물(상자·모래주머니·돌담)이 있으면 더 좋은 자리예요."""
+        spawns = find_cells("E")
+        if self.theme.get("zombie") or self.theme.get("mission") or not spawns:
+            return []
+        start = pygame.Vector2(find_cells("P")[0])
+        enemy_side = sum((pygame.Vector2(p) for p in spawns), pygame.Vector2()) / len(spawns)
+        best = None
+        for row in range(MAP_H):
+            for col in range(MAP_W):
+                spot = pygame.Vector2(col + 0.5, row + 0.5)
+                if is_blocked(spot.x, spot.y) or not 3 <= spot.distance_to(start) <= 9:
+                    continue
+                toward = enemy_side - spot
+                if toward.length() < 4:
+                    continue
+                facing = math.atan2(toward.y, toward.x)
+                walls = cast_ray(spot.x, spot.y, facing)[1]
+                depth = min(walls[0][0], 20) if walls else 20             # 앞이 얼마나 트였는지
+                if depth < 8:
+                    continue
+                cover = sum(1 for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                            if in_map(col + dc, row + dr) and GAME_MAP[row + dr][col + dc] in "ZVKJ")
+                score = depth + cover * 4 - spot.distance_to(start) * 0.3
+                if best is None or score > best[0]:
+                    best = (score, spot, facing)
+        return [dict(pos=best[1], facing=best[2])] if best else []
+
+    def toggle_mount(self):
+        """B: 가까운 고정 기관총에 타요 / 내려요"""
+        a = self.arsenal
+        if self.mounted:
+            a.weapons = [w for w in a.weapons if w.spec["name"] != "MOUNTED MG"]
+            a.index, a.switch_left = min(self.mount_return, len(a.weapons) - 1), 0.3
+            self.mounted = None
+            self.popups.append(["DISMOUNTED", WHITE, 1.0])
+            return True
+        turret = next((t for t in self.turrets if t["pos"].distance_to(self.player.pos) < 1.2), None)
+        if not turret or self.game_over:
+            return False
+        self.mounted = turret
+        self.mount_return = a.index
+        a.weapons.append(Weapon(MOUNTED_MG))
+        a.index, a.switch_left, a.reload_left = len(a.weapons) - 1, 0.3, 0.0
+        self.player.pos = pygame.Vector2(turret["pos"])
+        self.player.angle = turret["facing"]
+        self.sounds.play("bolt")
+        self.popups.append(["MOUNTED MG  (B: get off)", (255, 200, 60), 1.5])
+        return True
+
+    def update_mounted(self, dt):
+        """기관총에 탄 동안: 자리 고정, 좌우 60도까지만 돌기, 탄약 무한, 과열"""
+        t = self.mounted
+        self.player.pos = pygame.Vector2(t["pos"])
+        rel = angle_diff(self.player.angle, t["facing"])
+        if abs(rel) > 1.05:
+            self.player.angle = t["facing"] + math.copysign(1.05, rel)
+        w = self.arsenal.current
+        if w.spec["name"] == "MOUNTED MG":
+            w.mag = w.spec["mag"]
+        if self.arsenal.since_shot > 0.25:                 # 쏘지 않을 때만 식어요
+            self.mg_heat = max(0.0, self.mg_heat - MG_COOL * dt)
+
+    def update_chopper(self, dt):
+        """지원 헬기: 내 위를 크게 돌며 아래에 보이는 적을 쏴요"""
+        c = self.chopper
+        c["time"] -= dt
+        if c["time"] <= 0:
+            self.chopper = None
+            self.popups.append(["CHOPPER LEAVING", (80, 240, 255), 1.5])
+            return
+        c["center"] += (self.player.pos - c["center"]) * min(1.0, dt * 0.5)     # 천천히 나를 따라와요
+        c["angle"] += dt * 0.6
+        c["pos"] = c["center"] + pygame.Vector2(CHOPPER_RADIUS, 0).rotate_rad(c["angle"])
+        c["rotor"] -= dt
+        if c["rotor"] <= 0:                                  # 두두두 프로펠러 소리
+            c["rotor"] = 0.16
+            self.play_at("punch", c["pos"], 30, 0.35)
+        c["cooldown"] -= dt
+        c["flash"] -= dt
+        if c["cooldown"] > 0:
+            return
+        targets = [e for e in self.enemies if e.pos.distance_to(c["pos"]) < 13]
+        if not targets:
+            c["cooldown"] = 0.3
+            return
+        target = min(targets, key=lambda e: e.pos.distance_to(c["pos"]))
+        c["cooldown"], c["flash"] = 0.12, 0.06
+        self.play_at("lmg", c["pos"], 30, 0.5)
+        self.world_tracers.append([pygame.Vector2(c["pos"]), pygame.Vector2(target.pos), 0.06, CHOPPER_LIFT])
+        if random.random() < 0.5:
+            self.damage_enemy(target, 26, "CHOPPER")
 
     def find_buyables(self):
         """좀비 맵에서 B 로 살 수 있는 것: 바리케이드(q), 벽 무기(y), 미스터리 상자(m), 전기 함정(z)"""
@@ -4630,6 +4766,8 @@ class Game:
                 self.player.toggle_crouch()
             elif event.key == pygame.K_x:
                 self.use_streak()
+            elif event.key == pygame.K_b and self.mode != "zombies":
+                self.toggle_mount()
             elif event.key == pygame.K_b and self.mode == "zombies":
                 item = self.nearby_buyable()
                 if item:
@@ -4932,6 +5070,12 @@ class Game:
             self.explode(self.pending_blasts.pop(0), *EXPLODER_SHOT_BLAST)
         self.update_projectiles(edt)
         self.update_streaks(dt)
+        if self.chopper:
+            self.update_chopper(dt)
+        if not self.allies and self.world_tracers:
+            self.world_tracers = [[tr[0], tr[1], tr[2] - dt, *tr[3:]] for tr in self.world_tracers if tr[2] - dt > 0]
+        if self.mounted:
+            self.update_mounted(dt)
         self.update_effects(dt)
         self.collect_pickups()
         if self.mode != "zombies":
@@ -4979,6 +5123,17 @@ class Game:
             self.count_round()
             self.record_progress(self.round + 1)
 
+    def heat_up(self, spec):
+        """고정 기관총 과열"""
+        if spec["name"] != "MOUNTED MG":
+            return
+        self.mg_heat += MG_HEAT_PER_SHOT
+        if self.mg_heat >= 1.0:
+            self.mg_heat = 1.0
+            self.arsenal.cooldown = MG_OVERHEAT
+            self.popups.append(["OVERHEATED!", RED, 1.5])
+            self.sounds.play("tail", 0.8)
+
     def gun_sound(self, spec):
         self.sounds.play(GUN_SOUNDS[spec["name"]], 0.45 if spec.get("suppressed") else 1.0)
         self.sounds.play("mech", 0.6)                        # 노리쇠 "착"
@@ -5002,6 +5157,7 @@ class Game:
         self.echoes.append([delay, GUN_SOUNDS[spec["name"]], echo * loud])
         if not spec["projectile"] and (not spec["auto"] or random.random() < 0.4):
             self.echoes.append([random.uniform(0.3, 0.45), "casing", random.uniform(0.2, 0.35)])
+        self.heat_up(spec)
         if spec["name"] in BOLT_ACTION:                # 노리쇠 당기기: 소리와 동작
             self.bolt_anim = 0.75
             self.echoes.append([0.35, "bolt", 0.9])
@@ -5150,6 +5306,8 @@ class Game:
     def hurt_player(self, damage, source=None):
         """나에게 피해. source(때린 위치)가 있으면 화면에 맞은 방향을 표시해요."""
         damage *= DIFFICULTIES[SETTINGS["difficulty"]][2]
+        if self.mounted:
+            damage *= 0.7                                  # 기관총 방패와 담 뒤라서 덜 아파요
         if self.challenge == "HARDCORE" and damage > 0:
             damage = max(damage, self.player.hp + 1)      # 한 방에 끝
         if source is not None:
@@ -5264,7 +5422,7 @@ class Game:
         if how in ("DOWN", "HEADSHOT!"):                 # 총으로 쓰러뜨렸으면 그 총의 경험
             name = self.arsenal.current.spec["name"]
             stats["weapons"][name] = stats["weapons"].get(name, 0) + 1
-            if self.loadout and self.mode != "training":
+            if self.loadout and self.mode != "training" and name in WEAPON_BY_NAME:   # 고정 기관총은 성장 없음
                 kills = self.save.setdefault("wkills", {})
                 kills[name] = kills.get(name, 0) + 1
                 changed = False
@@ -5358,6 +5516,10 @@ class Game:
                 spot = target + forward * (k - 2) * 1.5
                 self.airstrikes.append([spot, 1.5 + k * 0.15])
             self.popups.append(["AIRSTRIKE INBOUND", (255, 120, 60), 1.5])
+        elif name == "CHOPPER":
+            self.chopper = dict(time=CHOPPER_TIME, center=pygame.Vector2(p.pos), angle=random.uniform(0, 6.28),
+                                pos=pygame.Vector2(p.pos), cooldown=1.0, flash=0.0, rotor=0.0)
+            self.popups.append(["CHOPPER INBOUND", (80, 240, 255), 1.5])
         elif name == "SENTRY":
             # 2칸 앞에 놓아요 (막혀 있으면 1칸 앞, 그것도 막혀 있으면 내 자리)
             for dist in (2.0, 1.0, 0.0):
@@ -5871,8 +6033,10 @@ class Game:
 
     def draw_world_tracers(self, screen):
         """동료 ↔ 적 사이 총알 궤적 (둘 다 화면 안에 있을 때)"""
-        for start, end, life in self.world_tracers:
-            a = self.project(start, 0.9, 0.45)
+        for tracer in self.world_tracers:
+            start, end = tracer[0], tracer[1]
+            lift = tracer[3] if len(tracer) > 3 else 0.0      # 헬기에서 쏜 총알은 하늘에서
+            a = self.project(start, 0.9, 0.45, lift=lift)
             b = self.project(end, 0.9, 0.45)
             if a and b:
                 pa = (a[0], a[1] + (a[2] - a[1]) * 0.45)
@@ -6140,6 +6304,15 @@ class Game:
             box = self.project(sentry.pos, 0.55, 0.5)
             if box:
                 items.append((box, self.sentry_images[1 if sentry.flash > 0 else 0], None))
+        if self.chopper:
+            box = self.project(self.chopper["pos"], 1.0, 2.4, lift=CHOPPER_LIFT)
+            if box:
+                items.append((box, self.chopper_images[1 if self.chopper["flash"] > 0 else 0], None))
+        for turret in self.turrets:
+            if turret is not self.mounted:
+                box = self.project(turret["pos"], 0.75, 0.9)
+                if box:
+                    items.append((box, self.mg_image, None))
         for ally in self.allies:
             if ally.down:
                 box = self.project(ally.pos, 0.3, 0.9)
@@ -6538,6 +6711,18 @@ class Game:
             pygame.draw.rect(screen, (60, 30, 30), bar)
             pygame.draw.rect(screen, RED if left < 0.6 else YELLOW, (bar.x, bar.y, bar.w * left / GRENADE_FUSE, bar.h))
             self.center_text(screen, self.small_font, f"COOKING  {left:.1f}s", WHITE, bar.y - 10 * UI)
+        if self.mounted:                                   # 기관총 열 막대
+            bar = pygame.Rect(WIDTH / 2 - 80 * UI, HEIGHT * 0.7, 160 * UI, 9 * UI)
+            pygame.draw.rect(screen, (40, 40, 50), bar)
+            hot = self.arsenal.cooldown > 0.2 and self.mg_heat >= 0.99
+            pygame.draw.rect(screen, RED if self.mg_heat > 0.75 or hot else (255, 170, 60),
+                             (bar.x, bar.y, bar.w * self.mg_heat, bar.h))
+            self.center_text(screen, self.small_font, "OVERHEATED" if hot else "HEAT   (B: get off)", WHITE, bar.y - 10 * UI)
+        elif any(t["pos"].distance_to(self.player.pos) < 1.2 for t in self.turrets) and not self.game_over:
+            self.center_text(screen, font, "B: MOUNT MACHINE GUN", (255, 220, 90), HEIGHT * 0.66)
+        if self.chopper:
+            label = self.small_font.render(f"CHOPPER {self.chopper['time']:.0f}s", True, (80, 240, 255))
+            screen.blit(label, (16, 12 + 90 * UI))
         item = self.nearby_buyable()
         if item and not self.game_over:
             text = f"B: {item['name']}  ({self.price_of(item)} POINTS)"
@@ -6758,6 +6943,8 @@ class Game:
                 pygame.draw.circle(screen, RED, enemy.pos * cell + (ox, oy), max(2, cell // 2 + 1))
         for sentry in self.sentries:
             pygame.draw.circle(screen, (80, 240, 255), sentry.pos * cell + (ox, oy), max(2, cell // 2))
+        for turret in self.turrets:                          # 노란 네모: 고정 기관총
+            pygame.draw.rect(screen, (255, 210, 60), (*(turret["pos"] * cell + (ox - 2, oy - 2)), 5, 5))
         for ally in self.allies:                             # 파란 점: 동료
             pygame.draw.circle(screen, (60, 120, 200) if ally.down else (90, 170, 255),
                                ally.pos * cell + (ox, oy), max(2, cell // 2))
