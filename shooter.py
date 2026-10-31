@@ -8828,6 +8828,35 @@ async def gunsmith_screen(save, name):
         await asyncio.sleep(0)
 
 
+# 로드아웃 화면의 무기 종류 (이 순서대로 늘어놓고, Tab 으로 종류를 건너뛰어요)
+WEAPON_CLASSES = [("RIFLES", ("RIFLE", "BURST", "HEAVY AR")), ("SMGS", ("SMG", "MACHINE PISTOL")),
+                  ("SHOTGUNS", ("SHOTGUN", "AUTO SHOTGUN")), ("MARKSMAN", ("DMR", "SNIPER")), ("LMGS", ("LMG",)),
+                  ("PISTOLS", ("PISTOL", "REVOLVER")), ("LAUNCHERS", ("LAUNCHER", "ROCKET"))]
+
+
+def weapon_class(name):
+    """무기 이름 → 종류 이름 (표에 없으면 OTHER)"""
+    return next((cls for cls, names in WEAPON_CLASSES if name in names), "OTHER")
+
+
+def class_order(names):
+    """무기들을 종류 순서대로 정렬"""
+    order = [n for _, group in WEAPON_CLASSES for n in group]
+    return sorted(names, key=lambda n: order.index(n) if n in order else len(order))
+
+
+def draw_stat_bar(screen, rect, value, old=None):
+    """성능 막대. old 를 주면 바뀐 만큼 초록(좋아짐)/빨강(나빠짐)으로 보여줘요"""
+    pygame.draw.rect(screen, (45, 40, 70), rect, border_radius=3)
+    if old is None or abs(old - value) < 0.005:
+        pygame.draw.rect(screen, UI_CYAN, (rect.x, rect.y, rect.w * value, rect.h), border_radius=3)
+        return
+    low, high = min(old, value), max(old, value)
+    pygame.draw.rect(screen, UI_CYAN, (rect.x, rect.y, rect.w * low, rect.h), border_radius=3)
+    color = (90, 230, 120) if value > old else (240, 80, 90)
+    pygame.draw.rect(screen, color, (rect.x + rect.w * low, rect.y, rect.w * (high - low), rect.h))
+
+
 async def loadout_screen(save, choice):
     """로드아웃: 주무기 / 보조무기 / 퍼크를 골라요. ↑↓ 줄 고르기, ←→ 바꾸기, Enter 시작, ESC 뒤로.
     고른 로드아웃(dict)을 돌려줘요. ESC면 None, 창 닫기면 "closed"."""
@@ -8837,7 +8866,7 @@ async def loadout_screen(save, choice):
     clock = pygame.time.Clock()
     perk_names = [name for name, _, _ in PERKS]
     tactical_names = [name for name, _, _ in TACTICALS]
-    owned = unlocked_weapons(save)
+    owned = class_order(unlocked_weapons(save))
     options = [owned, owned, perk_names, tactical_names]
     labels = ["START WEAPON", "SECOND WEAPON (Q)", "PERK", "TACTICAL (N)"]
     saved = dict(DEFAULT_LOADOUT, **save.get("loadout", {}))
@@ -8864,6 +8893,13 @@ async def loadout_screen(save, choice):
                 picks[row] = (picks[row] - 1) % len(options[row])
             elif event.key in (pygame.K_RIGHT, pygame.K_d):
                 picks[row] = (picks[row] + 1) % len(options[row])
+            elif event.key == pygame.K_TAB and row < 2:          # 다음 종류의 첫 무기로
+                now = weapon_class(owned[picks[row]])
+                for step in range(1, len(owned) + 1):
+                    k = (picks[row] + step) % len(owned)
+                    if weapon_class(owned[k]) != now:
+                        picks[row] = k
+                        break
             elif event.key == pygame.K_k:
                 if await skills_screen(save) == "closed":
                     return "closed"
@@ -8880,9 +8916,6 @@ async def loadout_screen(save, choice):
 
         # 배경과 제목
         draw_backdrop(screen)
-        for i in range(0, HEIGHT, max(2, int(4 * UI))):
-            shade_v = int(10 + 20 * i / HEIGHT)
-            pygame.draw.line(screen, (shade_v, 8, shade_v + 18), (0, i), (WIDTH, i))
         draw_title(screen, fonts, "LOADOUT", (WIDTH * 0.06, HEIGHT * 0.09))
         if choice["mode"] == "zombies":
             mode_text = "ZOMBIES  -  BLOOD MOON"
@@ -8893,86 +8926,106 @@ async def loadout_screen(save, choice):
         else:
             mode_text = f"CAMPAIGN  -  ROUND {choice['round']}"
         mode_text += f"     RANK {player_level(save)}   SKILL POINTS {skill_points(save)}"
-        label = fonts["normal"].render(mode_text, True, (80, 240, 255))
-        screen.blit(label, label.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.16)))
+        label = fonts["small"].render(mode_text, True, UI_CYAN)
+        screen.blit(label, label.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.165)))
 
-        # 왼쪽: 세 줄 (시작 무기 / 두 번째 무기 / 퍼크)
-        card_w, card_h = WIDTH * 0.44, HEIGHT * 0.105
+        # 왼쪽: 네 칸 (시작 무기 / 두 번째 무기 / 퍼크 / 전술 장비)
+        card_w, card_h = WIDTH * 0.44, HEIGHT * 0.112
         for i in range(4):
-            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.2 + i * 0.118), card_w, card_h)
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.2 + i * 0.125), card_w, card_h)
             selected = i == row
-            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
-            panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
-            screen.blit(panel, rect)
-            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1)
-            screen.blit(fonts["small"].render(labels[i], True, (200, 200, 220)), (rect.x + 14, rect.y + 6))
+            draw_panel(screen, rect, selected)
+            screen.blit(fonts["tiny"].render(labels[i], True, UI_DIM), (rect.x + 14 * UI, rect.y + 7 * UI))
             name = options[i][picks[i]]
+            if i < 2:                                           # 무기 칸: 종류 이름표 + 몇 번째인지
+                tag = f"{weapon_class(name)}   {picks[i] + 1}/{len(owned)}"
+                image = fonts["tiny"].render(tag, True, (255, 200, 60))
+                screen.blit(image, image.get_rect(topright=(rect.right - 14 * UI, rect.y + 7 * UI)))
             arrows = f"<  {name}  >" if selected else name
             image = fonts["normal"].render(arrows, True, YELLOW if selected else WHITE)
-            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.3))
+            screen.blit(image, (rect.x + 14 * UI, rect.y + rect.h * 0.3))
             if i < 2:
                 desc = WEAPON_INFO[name][0 if ko else 1]
             elif i == 2:
                 desc = PERKS[picks[2]][1 if ko else 2]
             else:
                 desc = TACTICALS[picks[3]][1 if ko else 2]
-            image = fonts["help"].render(desc, True, (200, 230, 255))
-            screen.blit(image, (rect.x + 14, rect.y + rect.h * 0.68))
-        # 왼쪽 아래: 무기 인벤토리 (가진 무기는 레벨, 없는 무기는 얻는 조건)
-        title = fonts["small"].render(f"INVENTORY  {len(owned)} / {len(WEAPONS)}   (in game: 1-9, 0, hold TAB = wheel)", True, WHITE)
-        screen.blit(title, (WIDTH * 0.06, HEIGHT * 0.685))
-        kills_all = save.get("wkills", {})
-        for k, spec in enumerate(WEAPONS):
-            name = spec["name"]
-            x = WIDTH * (0.06 + (k % 2) * 0.235)
-            y = HEIGHT * (0.72 + (k // 2) * 0.031)
-            if name in owned:
-                text = f"{name}  LV {weapon_level(kills_all.get(name, 0))}"
-                color = (255, 200, 60) if name in (options[0][picks[0]], options[1][picks[1]]) else WHITE
-            else:
-                text = f"[LOCKED] {name}: {unlock_text(name, ko)}"
-                color = (120, 120, 135)
-            font = fonts["help"] if ko else fonts["tiny"]
-            screen.blit(font.render(text, True, color), (x, y))
+            desc = fit_text(fonts["help"], desc, rect.w - 28 * UI)
+            screen.blit(fonts["help"].render(desc, True, (200, 230, 255)), (rect.x + 14 * UI, rect.y + rect.h * 0.68))
 
-        # 오른쪽: 고른 무기 모습과 성능 막대
+        # 왼쪽 아래: 무기 인벤토리를 종류별로 (가진 무기는 레벨, 없는 무기는 자물쇠)
+        top = HEIGHT * 0.71
+        title = fonts["small"].render(f"INVENTORY  {len(owned)} / {len(WEAPONS)}", True, WHITE)
+        screen.blit(title, (WIDTH * 0.06, top))
+        kills_all = save.get("wkills", {})
+        chosen = (options[0][picks[0]], options[1][picks[1]])
+        font = fonts["help"] if ko else fonts["tiny"]
+        col_w = WIDTH * 0.22
+        k = 0
+        for cls, names in WEAPON_CLASSES:
+            for name in names:
+                if name not in WEAPON_BY_NAME:
+                    continue
+                x = WIDTH * 0.06 + (k % 2) * (col_w + WIDTH * 0.005)
+                y = top + 26 * UI + (k // 2) * font.get_linesize()
+                if name in owned:
+                    text = f"{name}  LV {weapon_level(kills_all.get(name, 0))}"
+                    color = (255, 200, 60) if name in chosen else WHITE
+                else:
+                    text = f"[LOCKED] {name}: {unlock_text(name, ko)}"
+                    color = (120, 120, 135)
+                screen.blit(font.render(fit_text(font, text, col_w), True, color), (x, y))
+                k += 1
+
+        # 오른쪽: 고른 무기 모습과 성능 막대 (바꾸면 전과 비교)
         weapon = options[1][picks[1]] if row == 1 else options[0][picks[0]]
+        before = saved["secondary"] if row == 1 else saved["primary"]
         if weapon not in previews:
             image = make_viewmodel(weapon, False)[0]
             scale = min(WIDTH * 0.4 / image.get_width(), HEIGHT * 0.4 / image.get_height())
             previews[weapon] = pygame.transform.smoothscale(
                 image, (int(image.get_width() * scale), int(image.get_height() * scale)))
-        box = pygame.Rect(WIDTH * 0.54, HEIGHT * 0.21, WIDTH * 0.40, HEIGHT * 0.41)
-        pygame.draw.rect(screen, (0, 0, 0), box)
-        pygame.draw.rect(screen, (70, 60, 100), box, 1)
+        box = pygame.Rect(WIDTH * 0.54, HEIGHT * 0.2, WIDTH * 0.40, HEIGHT * 0.45)
+        draw_panel(screen, box, False)
         preview = previews[weapon]
-        screen.blit(preview, preview.get_rect(bottomright=box.bottomright))
-        screen.blit(fonts["normal"].render(weapon, True, WHITE), (box.x + 12, box.y + 10))
-        kills = save.get("wkills", {}).get(weapon, 0)
+        screen.blit(preview, preview.get_rect(bottomright=(box.right - 4, box.bottom - 4)))
+        screen.blit(fonts["normal"].render(weapon, True, WHITE), (box.x + 14 * UI, box.y + 10 * UI))
+        kills = kills_all.get(weapon, 0)
         mods = weapon_mods(kills)
         upcoming = [(need, mod) for need, mod in WEAPON_LEVELS if kills < need]
         level = f"LV {weapon_level(kills)} / {WEAPON_MAX_LEVEL}  (DMG +{5 * (weapon_level(kills) - 1)}%)   {kills} kills"
         if upcoming:
             level += f"   next: {upcoming[0][1]} at {upcoming[0][0]}"
-        screen.blit(fonts["tiny"].render(level, True, (255, 200, 60)), (box.x + 12, box.y + 10 + 30 * UI))
+        width = box.w - 28 * UI
+        screen.blit(fonts["tiny"].render(fit_text(fonts["tiny"], level, width), True, (255, 200, 60)),
+                    (box.x + 14 * UI, box.y + 10 * UI + 30 * UI))
         if mods:
-            screen.blit(fonts["tiny"].render(" + ".join(mods), True, (80, 240, 255)),
-                        (box.x + 12, box.y + 10 + 50 * UI))
+            screen.blit(fonts["tiny"].render(fit_text(fonts["tiny"], " + ".join(mods), width), True, UI_CYAN),
+                        (box.x + 14 * UI, box.y + 10 * UI + 48 * UI))
         leveled = current_weapon_spec(save, weapon)
         if save.get("gunsmith", {}).get(weapon):
             parts = [v for v in save["gunsmith"][weapon].values() if v not in ("NONE", "STANDARD", "IRON SIGHTS")]
-            screen.blit(fonts["tiny"].render("GUNSMITH: " + (" + ".join(parts) or "-"), True, (150, 220, 255)),
-                        (box.x + 12, box.y + 10 + 70 * UI))
+            text = fit_text(fonts["tiny"], "GUNSMITH: " + (" + ".join(parts) or "-"), width)
+            screen.blit(fonts["tiny"].render(text, True, (150, 220, 255)), (box.x + 14 * UI, box.y + 10 * UI + 66 * UI))
+        old_stats = None
+        if row < 2 and before != weapon and before in WEAPON_BY_NAME:
+            old_stats = dict(weapon_stats(current_weapon_spec(save, before)))
+            note = f"vs {before}"
+            image = fonts["tiny"].render(note, True, UI_DIM)
+            screen.blit(image, image.get_rect(topright=(box.right, box.bottom + 8 * UI)))
         for k, (stat, value) in enumerate(weapon_stats(leveled)):
-            y = HEIGHT * (0.69 + k * 0.045)
+            y = box.bottom + HEIGHT * (0.035 + k * 0.042)
             screen.blit(fonts["small"].render(stat, True, (200, 200, 220)), (box.x, y))
-            bar = pygame.Rect(box.x + WIDTH * 0.12, y + 4 * UI, WIDTH * 0.28, 10 * UI)
-            pygame.draw.rect(screen, (45, 40, 70), bar)
-            bar.width = int(bar.width * value)
-            pygame.draw.rect(screen, (80, 240, 255), bar)
+            bar = pygame.Rect(box.x + WIDTH * 0.12, y + 4 * UI, WIDTH * 0.24, 10 * UI)
+            old = old_stats.get(stat) if old_stats else None
+            draw_stat_bar(screen, bar, min(1.0, value), None if old is None else min(1.0, old))
+            if old is not None and abs(old - value) >= 0.005:
+                diff = round(100 * (value - old))
+                image = fonts["tiny"].render(f"{diff:+d}", True, (90, 230, 120) if diff > 0 else (240, 80, 90))
+                screen.blit(image, image.get_rect(midleft=(bar.right + 6 * UI, bar.centery)))
 
-        hint = ("↑↓ 고르기     ←→ 바꾸기     Enter 시작     G 총기 개조     K 스킬     ESC 뒤로" if ko
-                else "UP/DOWN choose     LEFT/RIGHT change     ENTER start     G gunsmith     K skills     ESC back")
+        hint = ("↑↓ 고르기     ←→ 바꾸기     Tab 다음 종류     Enter 시작     G 총기 개조     K 스킬     ESC 뒤로" if ko
+                else "UP/DOWN choose     LEFT/RIGHT change     TAB next type     ENTER start     G gunsmith     K skills     ESC back")
         draw_hint_bar(screen, fonts, hint)
         present("loadout_screen")
         await asyncio.sleep(0)
