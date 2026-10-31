@@ -7356,54 +7356,114 @@ class Game:
                 image.set_alpha(int(255 * fade))
                 screen.blit(image, image.get_rect(center=(WIDTH / 2, box.y + (15 + i * 19) * UI)))
         self.draw_objective(screen)
-        if self.round_clear_timer > 0 or self.game_over:
-            self.draw_summary(screen, HEIGHT * (0.66 if self.game_over else 0.5))
+        if self.round_clear_timer > 0 and not self.game_over:
+            self.draw_summary(screen, HEIGHT * 0.5)
         if self.banner_timer > 0:
             self.draw_banner(screen, big_font, font)
-        if self.game_over and getattr(self, "run_recorded", False):
-            self.draw_run_result(screen, font, HEIGHT / 2 - 95 * UI)
-        if self.game_over and self.mission_complete:
-            t = int(self.mission_time)
-            self.center_text(screen, big_font, "MISSION COMPLETE", (80, 240, 255), HEIGHT / 2 - 40 * UI)
-            self.center_text(screen, font, f"{self.theme['name']}   Time {t // 60}:{t % 60:02d}   Kills {self.kills}",
-                             WHITE, HEIGHT / 2 + 10 * UI)
-            self.center_text(screen, font, "R: play again    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
-        elif self.game_over and self.challenge_done:
-            self.center_text(screen, big_font, "CHALLENGE COMPLETE", (80, 240, 255), HEIGHT / 2 - 95 * UI)
-            self.center_text(screen, font, f"{self.challenge}   TIME {self.challenge_time:.1f}s   BEST {self.challenge_best:.1f}s",
-                             WHITE, HEIGHT / 2 - 45 * UI)
-            self.center_text(screen, font, "R: try again    ESC: menu", YELLOW, HEIGHT / 2 - 12 * UI)
-        elif self.game_over and self.challenge:
-            self.center_text(screen, big_font, self.fail_reason or "CHALLENGE FAILED", RED, HEIGHT / 2 - 40 * UI)
-            self.center_text(screen, font, f"{self.challenge}   Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
-            self.center_text(screen, font, "R: try again    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
-        elif self.game_over and self.mode == "custom":
-            self.center_text(screen, big_font, "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
-            self.center_text(screen, font, f"{self.theme['name']}   Wave {self.round}   Kills {self.kills}", WHITE,
-                             HEIGHT / 2 + 10 * UI)
-            self.center_text(screen, font, "R: try again    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
-        elif self.game_over and self.mode == "mission":
-            self.center_text(screen, big_font, self.fail_reason or "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
-            self.center_text(screen, font, f"Stage {self.stage + 1}  /  Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
-            self.center_text(screen, font, "R: back to last checkpoint    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
-        elif self.game_over and self.mode == "zombies":
-            self.center_text(screen, big_font, "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
-            self.center_text(screen, font, f"Survived to wave {self.round}  /  Kills {self.kills}  /  "
-                                           f"Best wave {self.save.get('zbest', self.round)}", WHITE, HEIGHT / 2 + 10 * UI)
-            self.center_text(screen, font, "R: try again    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
-        elif self.game_over:
-            self.center_text(screen, big_font, self.fail_reason or "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
-            self.center_text(screen, font, f"Round {self.round}  /  Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
-            self.center_text(screen, font, f"R: retry round {self.round}    N: new game    ESC: menu",
-                             YELLOW, HEIGHT / 2 + 45 * UI)
-
-    def draw_run_result(self, screen, font, y):
-        """게임 오버 화면: 이번 판 점수와 랭킹 등수 (L 키 랭킹 화면에서 다시 볼 수 있어요)"""
-        if self.run_place:
-            text, color = f"SCORE {self.run_score}   NEW RECORD!  #{self.run_place}", (255, 200, 60)
+        if self.game_over:
+            self.draw_game_over(screen, big_font, font)
         else:
-            text, color = f"SCORE {self.run_score}   (TOP {RANK_SIZE} NEEDS MORE)", (200, 200, 220)
-        self.center_text(screen, font, text, color, y)
+            self.over_start = None
+
+    def game_over_text(self):
+        """게임 오버 카드의 (제목, 색, 설명 줄, 누를 키들)"""
+        retry = [("R", "TRY AGAIN"), ("ESC", "MENU")]
+        if self.mission_complete:
+            t = int(self.mission_time)
+            return ("MISSION COMPLETE", UI_CYAN, f"{self.theme['name']}   TIME {t // 60}:{t % 60:02d}   KILLS {self.kills}",
+                    [("R", "PLAY AGAIN"), ("ESC", "MENU")])
+        if self.challenge_done:
+            return ("CHALLENGE COMPLETE", UI_CYAN,
+                    f"{self.challenge}   TIME {self.challenge_time:.1f}s   BEST {self.challenge_best:.1f}s", retry)
+        if self.challenge:
+            return (self.fail_reason or "CHALLENGE FAILED", RED, f"{self.challenge}   KILLS {self.kills}", retry)
+        if self.mode == "custom":
+            return ("YOU DIED", RED, f"{self.theme['name']}   WAVE {self.round}   KILLS {self.kills}", retry)
+        if self.mode == "mission":
+            return (self.fail_reason or "YOU DIED", RED, f"STAGE {self.stage + 1}   KILLS {self.kills}",
+                    [("R", "BACK TO CHECKPOINT"), ("ESC", "MENU")])
+        if self.mode == "zombies":
+            return ("YOU DIED", RED, f"WAVE {self.round}   KILLS {self.kills}   BEST WAVE {self.save.get('zbest', self.round)}",
+                    retry)
+        return (self.fail_reason or "YOU DIED", RED, f"ROUND {self.round}   KILLS {self.kills}",
+                [("R", f"RETRY ROUND {self.round}"), ("N", "NEW GAME"), ("ESC", "MENU")])
+
+    def draw_tiles(self, screen, items, rect):
+        """작은 칸 여러 개에 (이름, 값)을 나란히: 명중률, 헤드샷..."""
+        gap = 8 * UI
+        w = (rect.w - gap * (len(items) - 1)) / len(items)
+        for i, (name, value) in enumerate(items):
+            tile = pygame.Rect(rect.x + i * (w + gap), rect.y, w, rect.h)
+            draw_panel(screen, tile, False, radius=6)
+            label = self.fonts["tiny"].render(name, True, UI_DIM)
+            screen.blit(label, label.get_rect(midtop=(tile.centerx, tile.y + 6 * UI)))
+            text = fit_text(self.small_font, str(value), tile.w - 10 * UI)
+            image = self.small_font.render(text, True, WHITE)
+            screen.blit(image, image.get_rect(midbottom=(tile.centerx, tile.bottom - 6 * UI)))
+
+    def summary_items(self):
+        st = self.stats
+        accuracy = round(100 * st["hits"] / st["shots"]) if st["shots"] else 0
+        top = max(st["weapons"], key=st["weapons"].get) if st["weapons"] else "-"
+        return [("ACCURACY", f"{accuracy}%"), ("HEADSHOTS", st["heads"]), ("KILLS", st["kills"]),
+                ("BEST STREAK", st["best"]), ("TOP WEAPON", top)]
+
+    def draw_game_over(self, screen, big_font, font):
+        """게임 오버 / 완료 카드: 제목, 설명, 점수(숫자가 올라가요)와 랭킹, 이번 라운드 기록, 누를 키"""
+        if getattr(self, "over_start", None) is None:
+            self.over_start = time.time()
+        age = time.time() - self.over_start
+        show = min(1.0, age / 0.3)
+        title, color, sub, actions = self.game_over_text()
+        dim = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        dim.fill((5, 4, 12, int(120 * show)))
+        screen.blit(dim, (0, 0))
+        card = pygame.Rect(0, 0, min(WIDTH * 0.62, 760 * UI), HEIGHT * 0.62)
+        card.center = (WIDTH / 2, HEIGHT * 0.47 + (1 - show) * 30 * UI)
+        back = pygame.Surface(card.size, pygame.SRCALPHA)
+        pygame.draw.rect(back, (14, 10, 30, int(230 * show)), back.get_rect(), border_radius=int(14 * UI))
+        screen.blit(back, card)
+        pygame.draw.rect(screen, color, (card.x, card.y, card.w, 4 * UI), border_top_left_radius=int(14 * UI),
+                         border_top_right_radius=int(14 * UI))
+        y = card.y + 46 * UI
+        self.center_text(screen, big_font, title, color, y)
+        y += 46 * UI
+        self.center_text(screen, font, fit_text(font, sub, card.w - 40 * UI), WHITE, y)
+        y += 62 * UI
+        if getattr(self, "run_recorded", False):                       # 점수: 1초 동안 0부터 올라가요
+            shown = int(self.run_score * min(1.0, age / 1.0))
+            self.center_text(screen, big_font, f"{shown}", (255, 200, 60), y)
+            label = self.fonts["tiny"].render("SCORE", True, UI_DIM)
+            screen.blit(label, label.get_rect(center=(WIDTH / 2, y - 30 * UI)))
+            y += 40 * UI
+            if age > 1.0:
+                if self.run_place:
+                    pop = 1 + 0.3 * max(0.0, 1 - (age - 1.0) / 0.2)
+                    badge = self.small_font.render(f"NEW RECORD!  #{self.run_place}", True, BLACK)
+                    pill = pygame.Rect(0, 0, (badge.get_width() + 30 * UI) * pop, (badge.get_height() + 10 * UI) * pop)
+                    pill.center = (WIDTH / 2, y)
+                    pygame.draw.rect(screen, (255, 200, 60), pill, border_radius=int(pill.h / 2))
+                    screen.blit(badge, badge.get_rect(center=pill.center))
+                else:
+                    best = top_score(self.save, self.mode)
+                    self.center_text(screen, self.small_font, f"#1 SCORE {best}" if best else "", UI_DIM, y)
+            y += 34 * UI
+        else:
+            y += 10 * UI
+        label = self.fonts["tiny"].render("THIS ROUND", True, UI_DIM)
+        screen.blit(label, label.get_rect(midleft=(card.x + 24 * UI, y)))
+        tiles = pygame.Rect(card.x + 24 * UI, y + 12 * UI, card.w - 48 * UI, 52 * UI)
+        self.draw_tiles(screen, self.summary_items(), tiles)
+        # 누를 키 (키 모양 상자)
+        tiny = self.small_font
+        widths = [tiny.size(k)[0] + 12 * UI + 8 * UI + tiny.size(t)[0] for k, t in actions]
+        x = WIDTH / 2 - (sum(widths) + 28 * UI * (len(actions) - 1)) / 2
+        cy = card.bottom - 30 * UI
+        for (key, text), w in zip(actions, widths):
+            x = draw_keycap(screen, tiny, key, x, cy) + 8 * UI
+            image = tiny.render(text, True, WHITE)
+            screen.blit(image, image.get_rect(midleft=(x, cy)))
+            x += image.get_width() + 28 * UI
 
     def draw_objective(self, screen):
         """목표 위치 표시 (벽 너머로도 보여요), 거리, 진행 막대, 폭탄 타이머"""
@@ -7442,20 +7502,10 @@ class Game:
             self.center_text(screen, self.small_font, text, info["color"], bar.y - 14 * UI)
 
     def draw_summary(self, screen, y):
-        """라운드 결과: 명중률, 헤드샷, 처치, 최고 연속 처치, 가장 많이 쓴 무기"""
-        st = self.stats
-        accuracy = round(100 * st["hits"] / st["shots"]) if st["shots"] else 0
-        top = max(st["weapons"], key=st["weapons"].get) if st["weapons"] else "-"
-        text = (f"ACCURACY {accuracy}%    HEADSHOTS {st['heads']}    KILLS {st['kills']}    "
-                f"BEST STREAK {st['best']}    TOP WEAPON {top}")
-        image = self.small_font.render(text, True, WHITE)
-        panel = pygame.Rect(0, 0, image.get_width() + 40 * UI, image.get_height() + 20 * UI)
-        panel.center = (WIDTH / 2, y)
-        shade_panel = pygame.Surface(panel.size, pygame.SRCALPHA)
-        shade_panel.fill((0, 0, 0, 150))
-        screen.blit(shade_panel, panel)
-        pygame.draw.rect(screen, (255, 80, 200), panel, 2)
-        screen.blit(image, image.get_rect(center=panel.center))
+        """라운드 결과: 명중률, 헤드샷, 처치, 최고 연속 처치, 가장 많이 쓴 무기 (작은 칸 5개)"""
+        rect = pygame.Rect(0, 0, min(WIDTH * 0.62, 760 * UI), 52 * UI)
+        rect.center = (WIDTH / 2, y)
+        self.draw_tiles(screen, self.summary_items(), rect)
 
     def make_minimap(self):
         """미니맵 그림은 바뀌지 않으니 맵마다 한 번만 그려 둬요."""
