@@ -31,32 +31,64 @@ def prepare_window():
         pygame.key.stop_text_input()
 
 
+BACKUP_SUFFIX = ".bak"               # 바로 전 저장본 (본 저장이 깨지면 이걸 읽어요)
+
+
+def _read_raw(backup=False):
+    if IN_BROWSER:
+        import platform
+        return platform.window.localStorage.getItem(SAVE_KEY + ("_bak" if backup else ""))
+    path = SAVE_PATH + (BACKUP_SUFFIX if backup else "")
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def _parse(raw):
+    data = json.loads(raw) if raw else None
+    return data if isinstance(data, dict) else None
+
+
 def load_save():
-    """저장된 진행 상황을 읽어요. 없거나 읽을 수 없으면 빈 dict.
+    """저장된 진행 상황을 읽어요. 본 저장이 깨졌으면 바로 전 저장본(백업)을, 그것도 없으면 빈 dict.
     컴퓨터: 내 폴더의 .gege2ya_save.json 파일 / 브라우저: 브라우저 저장소(localStorage)"""
-    try:
-        if IN_BROWSER:
-            import platform
-            raw = platform.window.localStorage.getItem(SAVE_KEY)
-        else:
-            with open(SAVE_PATH, encoding="utf-8") as f:
-                raw = f.read()
-        data = json.loads(raw) if raw else {}
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    for backup in (False, True):
+        try:
+            data = _parse(_read_raw(backup))
+            if data is not None:
+                return data
+        except Exception:
+            continue
+    return {}
 
 
 def write_save(data):
-    """진행 상황을 저장해요. 저장에 실패해도 게임은 계속돼요."""
+    """진행 상황을 저장해요. 저장에 실패해도 게임은 계속돼요.
+    안전하게: 지금 저장본을 백업으로 옮겨 두고, 새 저장은 임시 파일에 다 쓴 다음 한 번에 바꿔요
+    (저장하는 도중에 꺼져도 본 저장이나 백업 중 하나는 멀쩡해요)"""
     try:
         raw = json.dumps(data)
         if IN_BROWSER:
             import platform
+            old = platform.window.localStorage.getItem(SAVE_KEY)
+            if old and _parse(old) is not None:
+                platform.window.localStorage.setItem(SAVE_KEY + "_bak", old)
             platform.window.localStorage.setItem(SAVE_KEY, raw)
         else:
-            with open(SAVE_PATH, "w", encoding="utf-8") as f:
+            tmp = SAVE_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
                 f.write(raw)
+                f.flush()
+                os.fsync(f.fileno())
+            if os.path.exists(SAVE_PATH):
+                try:
+                    with open(SAVE_PATH, encoding="utf-8") as f:
+                        if _parse(f.read()) is not None:       # 멀쩡한 것만 백업으로
+                            os.replace(SAVE_PATH, SAVE_PATH + BACKUP_SUFFIX)
+                except Exception:
+                    pass
+            os.replace(tmp, SAVE_PATH)
     except Exception:
         pass
 
