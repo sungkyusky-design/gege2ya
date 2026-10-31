@@ -81,6 +81,7 @@ import copy
 import asyncio
 import math
 import random
+import re
 import sys
 import time
 from collections import deque
@@ -2035,6 +2036,114 @@ def make_fonts():
         fonts["help"] = pygame.font.Font(None, int(24 * UI))
         fonts["help_big"] = pygame.font.Font(None, int(38 * UI))
     return {key: ShadowFont(f) if key != "lang" else f for key, f in fonts.items()}
+
+
+# ----- 메뉴 화면 공통 부품 -----
+# 모든 메뉴가 같은 배경, 제목, 칸, 아래 키 안내를 써서 모양과 간격이 똑같아요.
+UI_ACCENT = (255, 80, 200)        # 분홍 (제목, 고른 칸 테두리)
+UI_CYAN = (80, 240, 255)
+UI_PANEL = (24, 18, 44)           # 칸 바탕
+UI_PANEL_ON = (60, 40, 90)        # 고른 칸 바탕
+UI_EDGE = (70, 60, 100)           # 칸 테두리
+UI_DIM = (150, 150, 170)          # 흐린 글자
+UI_KEY_WORDS = {"Enter", "Backspace", "Tab", "Shift", "Space", "Esc"}
+_backdrop_cache = {}
+
+
+def draw_backdrop(screen):
+    """메뉴 배경: 위는 보라, 아래로 갈수록 어두워지고 바닥에 옅은 격자"""
+    key = (WIDTH, HEIGHT)
+    if key not in _backdrop_cache:
+        _backdrop_cache.clear()
+        image = pygame.Surface(key)
+        for y in range(HEIGHT):
+            t = y / HEIGHT
+            image.fill((int(22 - 12 * t), int(14 - 6 * t), int(44 - 22 * t)), (0, y, WIDTH, 1))
+        grid = pygame.Surface(key, pygame.SRCALPHA)
+        horizon = HEIGHT * 0.62
+        for i in range(1, 12):                              # 멀어질수록 촘촘한 가로줄
+            y = horizon + (HEIGHT - horizon) * (i / 11) ** 1.8
+            pygame.draw.line(grid, (255, 80, 200, 10 + i * 2), (0, y), (WIDTH, y))
+        for i in range(-12, 13):                            # 한 점으로 모이는 세로줄
+            pygame.draw.line(grid, (80, 240, 255, 14), (WIDTH / 2 + i * WIDTH * 0.02, horizon),
+                             (WIDTH / 2 + i * WIDTH * 0.12, HEIGHT))
+        image.blit(grid, (0, 0))
+        _backdrop_cache[key] = image
+    screen.blit(_backdrop_cache[key], (0, 0))
+
+
+def draw_title(screen, fonts, text, pos, anchor="midleft"):
+    """메뉴 제목 + 아래 분홍 밑줄"""
+    image = fonts["big"].render(text, True, UI_ACCENT)
+    rect = image.get_rect(**{anchor: pos})
+    screen.blit(image, rect)
+    line = pygame.Rect(rect.x + 2, rect.bottom - 2 * UI, min(rect.width, 160 * UI), 3 * UI)
+    pygame.draw.rect(screen, UI_ACCENT, line, border_radius=2)
+    pygame.draw.rect(screen, UI_CYAN, (line.right + 4 * UI, line.y, 18 * UI, line.h), border_radius=2)
+    return rect
+
+
+def draw_panel(screen, rect, selected=False, radius=8):
+    """메뉴 칸: 고른 칸은 밝은 바탕 + 분홍 테두리 + 은은한 빛"""
+    rect = pygame.Rect(rect)
+    if selected:
+        glow = pygame.Surface((rect.w + 16, rect.h + 16), pygame.SRCALPHA)
+        pygame.draw.rect(glow, (255, 80, 200, 50), glow.get_rect(), 6, border_radius=radius + 6)
+        screen.blit(glow, (rect.x - 8, rect.y - 8))
+    pygame.draw.rect(screen, UI_PANEL_ON if selected else UI_PANEL, rect, border_radius=radius)
+    pygame.draw.line(screen, (255, 255, 255) if selected else (50, 44, 76),
+                     (rect.x + radius, rect.y + 1), (rect.right - radius, rect.y + 1))     # 위쪽 하이라이트
+    pygame.draw.rect(screen, UI_ACCENT if selected else UI_EDGE, rect, 3 if selected else 1, border_radius=radius)
+
+
+def split_hint(hint):
+    """'↑↓ 고르기   Enter 시작   - 설명' → [(키, 설명), ...]. 키가 없는 부분은 ('', 글자)"""
+    items = []
+    for part in re.split(r"\s{3,}", hint.strip()):
+        words = part.split(" ")
+        if part.startswith(("-", "(")):
+            items.append(("", part))
+            continue
+        keys = []
+        while words and (words[0] in UI_KEY_WORDS or words[0] == "/" or
+                         not re.search(r"[a-z\uac00-\ud7a3]", words[0])):
+            keys.append(words.pop(0))
+        items.append((" ".join(keys), " ".join(words)))
+    return items
+
+
+def draw_keycap(screen, font, key, x, cy, color=YELLOW):
+    """키 모양 상자 [Enter] 를 그리고 오른쪽 끝 x 를 돌려줘요"""
+    image = font.render(key, True, color)
+    rect = pygame.Rect(x, 0, image.get_width() + 12 * UI, image.get_height() + 4 * UI)
+    rect.centery = cy
+    pygame.draw.rect(screen, (34, 28, 58), rect, border_radius=int(5 * UI))
+    pygame.draw.rect(screen, color, rect, 1, border_radius=int(5 * UI))
+    screen.blit(image, image.get_rect(center=rect.center))
+    return rect.right
+
+
+def draw_hint_bar(screen, fonts, hint):
+    """화면 맨 아래 키 안내 띠. 너무 길면 설명(- ...)을 빼고, 그래도 길면 작은 글자로"""
+    bar = pygame.Rect(0, HEIGHT - 40 * UI, WIDTH, 40 * UI)
+    shade_img = pygame.Surface(bar.size, pygame.SRCALPHA)
+    shade_img.fill((8, 6, 20, 210))
+    screen.blit(shade_img, bar)
+    pygame.draw.line(screen, UI_EDGE, bar.topleft, bar.topright)
+    items = split_hint(hint)
+    for font, keep_notes in ((fonts["help"], True), (fonts["help"], False), (fonts["tiny"], False)):
+        shown = [it for it in items if keep_notes or it[0]]
+        gap = 22 * UI
+        width = sum(font.size(k)[0] + 16 * UI + font.size(t)[0] + gap for k, t in shown) - gap
+        if width <= WIDTH * 0.96:
+            break
+    x = max(WIDTH * 0.02, (WIDTH - width) / 2)
+    for key, text in shown:
+        if key:
+            x = draw_keycap(screen, font, key, x, bar.centery) + 6 * UI
+        image = font.render(text, True, WHITE if key else UI_DIM)
+        screen.blit(image, image.get_rect(midleft=(x, bar.centery)))
+        x += image.get_width() + gap
 
 
 def make_bottom_shade():
@@ -7600,9 +7709,8 @@ async def settings_screen(save):
             elif event.key in (pygame.K_RIGHT, pygame.K_d):
                 change_setting(SETTING_ROWS[row][0], 1)
             screen = pygame.display.get_surface()       # 전체 화면을 바꾸면 새 화면
-        screen.fill((14, 10, 30))
-        title = fonts["big"].render("SETTINGS", True, (255, 80, 200))
-        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.08)))
+        draw_backdrop(screen)
+        draw_title(screen, fonts, "SETTINGS", (WIDTH * 0.06, HEIGHT * 0.08))
         for i, (key, name, desc_ko, desc_en) in enumerate(SETTING_ROWS):
             rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.13 + i * 0.057), WIDTH * 0.88, HEIGHT * 0.052)
             selected = i == row
@@ -7619,8 +7727,7 @@ async def settings_screen(save):
             screen.blit(image, image.get_rect(midright=(rect.right - 16, rect.centery)))
         hint = ("↑↓ 고르기     ←→ 바꾸기     Enter / ESC 저장하고 돌아가기" if ko
                 else "UP/DOWN choose     LEFT/RIGHT change     ENTER / ESC save and back")
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -7666,16 +7773,13 @@ async def controls_screen(save):
             elif event.key in (pygame.K_LEFT, pygame.K_RIGHT):
                 row = (row + half) % (half * 2)
                 row = min(row, len(KEY_ACTIONS) - 1)
-        screen.fill((14, 10, 30))
-        title = fonts["big"].render("CONTROLS", True, (255, 80, 200))
-        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.08)))
+        draw_backdrop(screen)
+        draw_title(screen, fonts, "CONTROLS", (WIDTH * 0.06, HEIGHT * 0.08))
         for i, (name, default, desc) in enumerate(KEY_ACTIONS):
             col, line = divmod(i, half)
             rect = pygame.Rect(WIDTH * (0.05 + col * 0.46), HEIGHT * (0.15 + line * 0.066), WIDTH * 0.44, HEIGHT * 0.058)
             selected = i == row
-            pygame.draw.rect(screen, (60, 40, 90) if selected else (24, 18, 44), rect, border_radius=6)
-            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 2 if selected else 1,
-                             border_radius=6)
+            draw_panel(screen, rect, selected, radius=6)
             label = fonts["help"].render(desc if ko else name, True, WHITE)
             screen.blit(label, label.get_rect(midleft=(rect.x + 12, rect.centery)))
             key = "..." if selected and waiting else key_label(bound_key(default))
@@ -7689,8 +7793,7 @@ async def controls_screen(save):
             screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.9)))
         hint = ("↑↓←→ 고르기   Enter 바꾸기   Backspace 모두 처음대로   ESC 저장하고 돌아가기   (화살표 시점, ESC, Enter는 고정)"
                 if ko else "ARROWS choose   ENTER change   BACKSPACE reset all   ESC save and back")
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.96)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -7798,14 +7901,12 @@ async def map_slots_screen(save):
             elif event.key == pygame.K_BACKSPACE and slots[row]:
                 confirm = True
                 message = "정말 지울까요? Y = 예" if ko else "Delete this map? Y = yes"
-        screen.fill((14, 10, 30))
-        title = fonts["big"].render("MY MAPS", True, (255, 80, 200))
-        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
+        draw_backdrop(screen)
+        draw_title(screen, fonts, "MY MAPS", (WIDTH * 0.06, HEIGHT * 0.09))
         for i, slot in enumerate(slots):
             rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.2 + i * 0.13), WIDTH * 0.88, HEIGHT * 0.11)
             selected = i == row
-            pygame.draw.rect(screen, (60, 40, 90) if selected else (24, 18, 44), rect, border_radius=8)
-            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1, border_radius=8)
+            draw_panel(screen, rect, selected)
             if slot:
                 problems = validate_map(slot["rows"])
                 status = ("플레이 가능" if ko else "READY") if not problems else ("고칠 곳 있음" if ko else "NEEDS FIXES")
@@ -7827,8 +7928,7 @@ async def map_slots_screen(save):
             screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.88)))
         hint = ("↑↓ 고르기   Enter 만들기/고치기   P 플레이   Backspace 지우기   ESC 돌아가기" if ko
                 else "UP/DOWN choose   ENTER edit   P play   BACKSPACE delete   ESC back")
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -7905,7 +8005,7 @@ async def map_editor(save, slot):
                     message = problems[0][0 if ko else 1]
                 else:
                     return "play"
-        screen.fill((14, 10, 30))
+        draw_backdrop(screen)
         title = fonts["normal"].render(f"MAP EDITOR  -  {slot['name']}", True, (255, 80, 200))
         screen.blit(title, (ox, HEIGHT * 0.04))
         for r, line in enumerate(rows):
@@ -7933,8 +8033,7 @@ async def map_editor(save, slot):
             screen.blit(image, (ox, oy + EDIT_H * cell + 8))
         hint = ("화살표 이동  스페이스 칠하기(누른 채 움직이면 계속)  X 지우기  C 검사  Enter 저장+플레이  ESC 저장+돌아가기" if ko
                 else "ARROWS move  SPACE paint (hold to draw)  X erase  C check  ENTER save+play  ESC save+back")
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.96)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -7959,16 +8058,13 @@ async def ranking_screen(save, mode_index=0):
             elif event.key in (pygame.K_RIGHT, pygame.K_d, pygame.K_TAB):
                 mode_index = (mode_index + 1) % len(RANK_MODES)
         mode, title, reached_name = RANK_MODES[mode_index]
-        screen.fill((14, 10, 30))
-        image = fonts["big"].render("LEADERBOARD", True, (255, 80, 200))
-        screen.blit(image, image.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
+        draw_backdrop(screen)
+        draw_title(screen, fonts, "LEADERBOARD", (WIDTH * 0.06, HEIGHT * 0.09))
         # 위쪽 모드 칸
         for i, (_, name, _) in enumerate(RANK_MODES):
             rect = pygame.Rect(WIDTH * (0.06 + i * 0.2), HEIGHT * 0.17, WIDTH * 0.18, HEIGHT * 0.06)
             selected = i == mode_index
-            pygame.draw.rect(screen, (60, 40, 90) if selected else (24, 18, 44), rect, border_radius=8)
-            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1,
-                             border_radius=8)
+            draw_panel(screen, rect, selected)
             image = fonts["normal"].render(name, True, WHITE if selected else (150, 150, 170))
             screen.blit(image, image.get_rect(center=rect.center))
         # 표 머리
@@ -7990,8 +8086,7 @@ async def ranking_screen(save, mode_index=0):
             screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.5)))
         hint = ("←→ 모드 바꾸기   ESC 돌아가기   - 점수 = 그 판에 얻은 경험치 (처치, 헤드샷, 라운드 클리어...)"
                 if ko else "LEFT / RIGHT change mode   ESC back   - score = XP earned in that game")
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -8040,9 +8135,8 @@ async def stats_screen(save):
                     message = (f"가져올 저장: 계급 {player_level(data)}, 캠페인 최고 {data.get('best', 0)}라운드. "
                                "지금 저장을 바꿀까요? Y = 예" if ko else
                                f"Import: rank {player_level(data)}, best round {data.get('best', 0)}. Replace? Y = yes")
-        screen.fill((14, 10, 30))
-        title = fonts["big"].render("STATS", True, (255, 80, 200))
-        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.05, HEIGHT * 0.08)))
+        draw_backdrop(screen)
+        draw_title(screen, fonts, "STATS", (WIDTH * 0.05, HEIGHT * 0.08))
         life = save.get("lifetime", {})
         lines = [f"RANK {player_level(save)}   XP {save.get('xp', 0)}   CAMPAIGN BEST ROUND {save.get('best', 0)}   "
                  f"ZOMBIES BEST WAVE {save.get('zbest', 0)}   MISSIONS {len(save.get('missions_done', []))}",
@@ -8078,8 +8172,7 @@ async def stats_screen(save):
             screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.88)))
         hint = ("E 저장 코드 내보내기(복사)   I 코드 가져오기(붙여넣기)   ESC 돌아가기   - 웹과 맥 사이에 진행을 옮길 수 있어요"
                 if ko else "E export save code   I import save code   ESC back")
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -8106,17 +8199,14 @@ async def challenge_screen(save):
                 row = (row + 1) % len(CHALLENGES)
             elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
                 return dict(mode="campaign", round=1, challenge=CHALLENGES[row][0])
-        screen.fill((14, 10, 30))
-        title = fonts["big"].render("CHALLENGES", True, (255, 80, 200))
-        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
+        draw_backdrop(screen)
+        draw_title(screen, fonts, "CHALLENGES", (WIDTH * 0.06, HEIGHT * 0.09))
         records = save.get("challenges", {})
         today = str(datetime.date.today())
         for i, (name, round_no, desc_ko, desc_en) in enumerate(CHALLENGES):
             rect = pygame.Rect(WIDTH * 0.06, HEIGHT * (0.2 + i * 0.13), WIDTH * 0.88, HEIGHT * 0.11)
             selected = i == row
-            pygame.draw.rect(screen, (60, 40, 90) if selected else (24, 18, 44), rect, border_radius=8)
-            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1,
-                             border_radius=8)
+            draw_panel(screen, rect, selected)
             label = fonts["normal"].render(name + (f"  ({today})" if name == "DAILY" else ""), True, WHITE)
             screen.blit(label, (rect.x + 16, rect.y + rect.h * 0.12))
             desc = fonts["help"].render(desc_ko if ko else desc_en, True, (200, 230, 255))
@@ -8130,8 +8220,7 @@ async def challenge_screen(save):
             image = fonts["normal"].render(text, True, YELLOW if best else (140, 140, 160))
             screen.blit(image, image.get_rect(midright=(rect.right - 20, rect.centery)))
         hint = "↑↓ 고르기   Enter 시작   ESC 돌아가기" if ko else "UP/DOWN choose   ENTER start   ESC back"
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -8163,9 +8252,8 @@ async def achievements_screen(save):
                 save["camo"] = current
         done = save.get("achievements", [])
         life = save.get("lifetime", {})
-        screen.fill((14, 10, 30))
-        title = fonts["big"].render(f"ACHIEVEMENTS  {len(done)} / {len(ACHIEVEMENTS)}", True, (255, 80, 200))
-        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.05, HEIGHT * 0.08)))
+        draw_backdrop(screen)
+        draw_title(screen, fonts, f"ACHIEVEMENTS  {len(done)} / {len(ACHIEVEMENTS)}", (WIDTH * 0.05, HEIGHT * 0.08))
         half = (len(ACHIEVEMENTS) + 1) // 2
         for i, (name, desc_ko, desc_en, test) in enumerate(ACHIEVEMENTS):
             col, line = divmod(i, half)
@@ -8195,8 +8283,7 @@ async def achievements_screen(save):
         screen.blit(gun, gun.get_rect(midright=(WIDTH * 0.97, HEIGHT * 0.84)))
         hint = ("←→ 위장 무늬 고르기 (업적을 모으면 늘어나요)   ESC 돌아가기" if ko
                 else "LEFT/RIGHT choose camo (earn more with achievements)   ESC back")
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -8364,9 +8451,8 @@ async def mission_screen(save):
                 return dict(mode="mission", mission=row, stage=0, round=1)
             elif event.key == pygame.K_c and saved and saved["id"] == row:
                 return dict(mode="mission", mission=row, stage=saved["stage"], round=1)
-        screen.fill((14, 10, 30))
-        title = fonts["big"].render("MISSIONS", True, (255, 80, 200))
-        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
+        draw_backdrop(screen)
+        draw_title(screen, fonts, "MISSIONS", (WIDTH * 0.06, HEIGHT * 0.09))
         sub = "큰 맵에서 다섯 단계로 이어지는 긴 작전. 단계마다 체크포인트에 저장돼요." if ko else \
             "Long operations on huge maps: five stages, checkpoint saved after each one."
         screen.blit(fonts["help"].render(sub, True, (80, 240, 255)), (WIDTH * 0.06, HEIGHT * 0.15))
@@ -8390,8 +8476,7 @@ async def mission_screen(save):
         screen.blit(fonts["tiny"].render(stages, True, (180, 180, 200)), (WIDTH * 0.06, HEIGHT * 0.75))
         hint = "↑↓ 고르기     Enter 처음부터     C 이어하기     ESC 뒤로" if ko else \
             "UP/DOWN choose     ENTER start     C continue     ESC back"
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -8423,9 +8508,8 @@ async def skills_screen(save):
                 ranks[name] = ranks.get(name, 0) + 1
             elif event.key in (pygame.K_LEFT, pygame.K_a) and ranks.get(name, 0) > 0:
                 ranks[name] -= 1                           # 언제든 되돌려서 다시 고를 수 있어요
-        screen.fill((14, 10, 30))
-        title = fonts["big"].render("SKILLS", True, (255, 80, 200))
-        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.08)))
+        draw_backdrop(screen)
+        draw_title(screen, fonts, "SKILLS", (WIDTH * 0.06, HEIGHT * 0.08))
         level = player_level(save)
         into = save.get("xp", 0) % XP_PER_RANK
         info = f"RANK {level}   XP {into} / {XP_PER_RANK}   SKILL POINTS {skill_points(save)}"
@@ -8448,8 +8532,7 @@ async def skills_screen(save):
                 pygame.draw.rect(screen, (255, 200, 60) if k < have else (60, 55, 80), box)
         hint = ("↑↓ 고르기     → 배우기     ← 되돌리기     ESC 돌아가기   (계급이 오를 때마다 포인트 1)" if ko
                 else "UP/DOWN choose     RIGHT learn     LEFT undo     ESC back   (1 point per rank)")
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -8504,17 +8587,14 @@ async def gunsmith_screen(save, name):
                         choices[slot] = names[k]
                         break
         spec = current_weapon_spec(save, name, choices)
-        screen.fill((14, 10, 30))
-        title = fonts["big"].render(f"GUNSMITH  -  {name}", True, (255, 80, 200))
-        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.05, HEIGHT * 0.08)))
+        draw_backdrop(screen)
+        draw_title(screen, fonts, f"GUNSMITH  -  {name}", (WIDTH * 0.05, HEIGHT * 0.08))
         screen.blit(fonts["small"].render(f"WEAPON LEVEL {level}  (level up by getting kills with this weapon)", True,
                                           (255, 200, 60)), (WIDTH * 0.05, HEIGHT * 0.14))
         for i, slot in enumerate(slots):
             rect = pygame.Rect(WIDTH * 0.05, HEIGHT * (0.2 + i * 0.13), WIDTH * 0.5, HEIGHT * 0.115)
             selected = i == row
-            pygame.draw.rect(screen, (60, 40, 90) if selected else (24, 18, 44), rect, border_radius=8)
-            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1,
-                             border_radius=8)
+            draw_panel(screen, rect, selected)
             screen.blit(fonts["small"].render(slot, True, (200, 200, 220)), (rect.x + 12, rect.y + 6))
             choice = choices[slot]
             text = f"<  {choice}  >" if selected else choice
@@ -8546,8 +8626,7 @@ async def gunsmith_screen(save, name):
                 pygame.draw.rect(screen, color, (bar.x + x0, bar.y, max(2, x1 - x0), bar.h))
         hint = ("↑↓ 칸 고르기   ←→ 부착물 바꾸기   Enter / ESC 저장하고 돌아가기" if ko
                 else "UP/DOWN slot   LEFT/RIGHT attachment   ENTER / ESC save and back")
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
@@ -8603,12 +8682,11 @@ async def loadout_screen(save, choice):
                 return loadout
 
         # 배경과 제목
-        screen.fill((14, 10, 30))
+        draw_backdrop(screen)
         for i in range(0, HEIGHT, max(2, int(4 * UI))):
             shade_v = int(10 + 20 * i / HEIGHT)
             pygame.draw.line(screen, (shade_v, 8, shade_v + 18), (0, i), (WIDTH, i))
-        title = fonts["big"].render("LOADOUT", True, (255, 80, 200))
-        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
+        draw_title(screen, fonts, "LOADOUT", (WIDTH * 0.06, HEIGHT * 0.09))
         if choice["mode"] == "zombies":
             mode_text = "ZOMBIES  -  BLOOD MOON"
         elif choice["mode"] == "mission":
@@ -8698,8 +8776,7 @@ async def loadout_screen(save, choice):
 
         hint = ("↑↓ 고르기     ←→ 바꾸기     Enter 시작     G 총기 개조     K 스킬     ESC 뒤로" if ko
                 else "UP/DOWN choose     LEFT/RIGHT change     ENTER start     G gunsmith     K skills     ESC back")
-        image = fonts["help"].render(hint, True, YELLOW)
-        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        draw_hint_bar(screen, fonts, hint)
         pygame.display.flip()
         await asyncio.sleep(0)
 
