@@ -2037,6 +2037,15 @@ def make_fonts():
     return {key: ShadowFont(f) if key != "lang" else f for key, f in fonts.items()}
 
 
+def make_bottom_shade():
+    """화면 아래쪽을 살짝 어둡게 하는 그라데이션 (HUD 글자가 잘 보이게)"""
+    height = int(130 * UI)
+    shade_img = pygame.Surface((WIDTH, height), pygame.SRCALPHA)
+    for y in range(height):
+        shade_img.fill((0, 0, 0, int(120 * (y / height) ** 1.6)), (0, y, WIDTH, 1))
+    return shade_img
+
+
 def fit_text(font, text, max_width):
     """글자가 max_width 보다 길면 뒤를 잘라서 '..' 을 붙여요 (칸 밖으로 안 넘치게)"""
     if font.size(text)[0] <= max_width:
@@ -2063,6 +2072,8 @@ class MaskedKeys:
 
 WHEEL_KEYS = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_1, pygame.K_2, pygame.K_3,
               pygame.K_4, pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_8, pygame.K_9, pygame.K_0)
+STRIP_SLOTS = 5            # 아래 무기 칸에 한 번에 보여줄 무기 수
+PROMPT_Y = 168             # "B: 사기" 같은 안내 글자 높이 (화면 아래에서 px)
 WHEEL_HOLD = 0.22          # Tab 을 이만큼(초) 누르고 있으면 무기 휠이 열려요
 WHEEL_SLOW = 0.3           # 휠이 열린 동안 시간이 이만큼 느려져요
 
@@ -3239,6 +3250,7 @@ class Game:
         self.screen_blood = []     # 화면에 묻은 피: [x, y, 크기, 남은 시간]
         self.suppress = 0.0        # 적 총알이 가까이 스치면 올라가요 (화면이 어두워지고 조준이 흔들려요)
         self.dark_vignette = make_hurt_vignette((0, 0, 0))
+        self.bottom_shade = make_bottom_shade()
         self.reload_prev = 0.0     # 재장전 진행 정도 (동작 소리 타이밍)
         self.objective_images = {kind: make_objective_image(kind) for kind in OBJECTIVES}
         self.objective = None      # 이번 라운드 목표 (없으면 전멸)
@@ -6816,6 +6828,46 @@ class Game:
         pygame.draw.line(screen, (30, 30, 30), base, base - d * 70 * UI, int(20 * UI))
         draw_glove(screen, base - d * 40 * UI, 26 * UI)
 
+    def draw_weapon_strip(self, screen):
+        """아래 가운데 무기 칸: 지금 무기와 앞뒤 2개씩만 (나머지는 개수로, Tab 꾹 = 전체 휠)"""
+        weapons, index = self.arsenal.weapons, self.arsenal.index
+        n = len(weapons)
+        show = min(n, STRIP_SLOTS)
+        start = max(0, min(index - show // 2, n - show))
+        slot_w = (150 if n <= 3 else 104) * UI
+        left = WIDTH / 2 - slot_w * show / 2
+        tiny = self.fonts["tiny"]
+        top = HEIGHT - 42 * UI
+        for j, i in enumerate(range(start, start + show)):
+            weapon = weapons[i]
+            rect = pygame.Rect(left + j * slot_w + 3, top, slot_w - 6, 28 * UI)
+            selected = i == index
+            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+            panel.fill((255, 220, 90, 215) if selected else (10, 8, 24, 150))
+            screen.blit(panel, rect)
+            if not selected:
+                pygame.draw.rect(screen, (90, 80, 120), rect, 1)
+            level = weapon.spec.get("level", 1)
+            name = weapon.spec["name"] + (" +" if weapon.upgraded else "") + (f" L{level}" if level > 1 else "")
+            key = weapon_key_label(i)
+            text = fit_text(tiny, (key + " " if key else "") + name, rect.width - 8)
+            color = BLACK if selected else ((255, 200, 60) if weapon.upgraded else WHITE)
+            label = tiny.render(text, True, color)
+            screen.blit(label, label.get_rect(center=rect.center))
+        mid = top + 14 * UI
+        if start > 0:
+            label = tiny.render(f"< {start}", True, (200, 200, 220))
+            screen.blit(label, label.get_rect(midright=(left - 6, mid)))
+        if start + show < n:
+            label = tiny.render(f"{n - start - show} >", True, (200, 200, 220))
+            screen.blit(label, label.get_rect(midleft=(left + slot_w * show + 6, mid)))
+        caption = f"PERK: {self.perk}" if self.perk else ""
+        if n > show:
+            caption += ("     " if caption else "") + "HOLD TAB: ALL WEAPONS"
+        if caption:
+            label = tiny.render(caption, True, (80, 240, 255))
+            screen.blit(label, label.get_rect(center=(WIDTH / 2, top - 9 * UI)))
+
     def draw_wheel(self, screen):
         """무기 휠: 가진 무기를 타원으로 늘어놓고, 고른 칸을 크게 보여줘요"""
         weapons = self.arsenal.weapons
@@ -6949,8 +7001,9 @@ class Game:
             image = self.fonts["tiny"].render(text, True, (120, 120, 130) if left > 0 else (80, 240, 255))
             screen.blit(image, image.get_rect(topright=(WIDTH - 16, y_skill)))
             y_skill += 20 * UI
+        screen.blit(self.bottom_shade, (0, HEIGHT - self.bottom_shade.get_height()))
         # 왼쪽 아래: 킬스트릭 (받은 것 / 다음 것까지)
-        y = HEIGHT - 100 * UI
+        y = HEIGHT - 104 * UI
         if self.streaks_ready:
             for name in reversed(self.streaks_ready):
                 image = self.small_font.render(f"[X] {name}", True, (80, 240, 255))
@@ -6969,16 +7022,23 @@ class Game:
 
         # 왼쪽 아래 체력, 오른쪽 아래 총알과 수류탄
         hp_color = GREEN if self.player.hp > 40 else RED
-        screen.blit(big_font.render(f"+ {int(self.player.hp)}", True, hp_color), (24, HEIGHT - 70 * UI))
+        screen.blit(big_font.render(f"+ {int(self.player.hp)}", True, hp_color), (24, HEIGHT - 74 * UI))
+        bar = pygame.Rect(24, HEIGHT - 22 * UI, 170 * UI, 6 * UI)          # 체력 막대
+        pygame.draw.rect(screen, (40, 40, 50), bar, border_radius=3)
+        pygame.draw.rect(screen, hp_color, (bar.x, bar.y, bar.w * max(0.0, self.player.hp) / self.max_hp, bar.h),
+                         border_radius=3)
         w = self.arsenal.current
         ammo = "RELOADING..." if self.arsenal.reload_left > 0 else f"{w.mag} / {w.reserve}"
         image = big_font.render(ammo, True, WHITE)
         rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, HEIGHT - 20 * UI)))
-        image = font.render(f"GRENADE x{self.arsenal.grenades}", True, YELLOW)
-        rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 4)))
+        name = w.spec["name"] + (" +" if w.upgraded else "")
+        image = self.small_font.render(name, True, (200, 200, 220))
+        rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 26, rect.top + 2)))
+        gear = f"[G] GRENADE x{self.arsenal.grenades}"
         if self.mode != "training":
-            image = font.render(f"{self.tactical} x{self.tactical_left} (N)", True, (150, 220, 255))
-            rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 2)))
+            gear = f"[N] {self.tactical} x{self.tactical_left}    " + gear
+        image = self.small_font.render(gear, True, YELLOW)
+        rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 26, rect.top - 2)))
         if self.cooking is not None:                     # 쿠킹: 남은 시간 막대
             left = max(0.0, GRENADE_FUSE - self.cooking)
             bar = pygame.Rect(WIDTH / 2 - 60 * UI, HEIGHT * 0.62, 120 * UI, 8 * UI)
@@ -6993,7 +7053,7 @@ class Game:
                              (bar.x, bar.y, bar.w * self.mg_heat, bar.h))
             self.center_text(screen, self.small_font, "OVERHEATED" if hot else "HEAT   (B: get off)", WHITE, bar.y - 10 * UI)
         elif any(t["pos"].distance_to(self.player.pos) < 1.2 for t in self.turrets) and not self.game_over:
-            self.center_text(screen, font, "B: MOUNT MACHINE GUN", (255, 220, 90), HEIGHT * 0.66)
+            self.center_text(screen, font, "B: MOUNT MACHINE GUN", (255, 220, 90), HEIGHT - PROMPT_Y * UI)
         if self.chopper:
             label = self.small_font.render(f"CHOPPER {self.chopper['time']:.0f}s", True, (80, 240, 255))
             screen.blit(label, (16, 12 + 90 * UI))
@@ -7005,7 +7065,7 @@ class Game:
             if item["kind"] == "trap" and self.trap_timer > 0:
                 text = f"TRAP ACTIVE  {self.trap_timer:.0f}s"
             color = (255, 220, 90) if self.points >= self.price_of(item) else (200, 120, 120)
-            self.center_text(screen, font, text, color, HEIGHT * 0.66)
+            self.center_text(screen, font, text, color, HEIGHT - PROMPT_Y * UI)
         if self.mode == "zombies":
             image = font.render(f"POINTS {self.points}", True, (255, 200, 60))
             rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 4)))
@@ -7018,26 +7078,7 @@ class Game:
             image = self.fonts["tiny"].render(score, True, color)
             screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 2)))
 
-        # 아래 가운데 무기 칸
-        slot_w = 76 * UI
-        if len(self.arsenal.weapons) <= 3:
-            slot_w = 150 * UI                     # 로드아웃(무기 2개)은 칸을 넓게
-        slot_w = min(slot_w, (WIDTH - 40) / len(self.arsenal.weapons))
-        left = WIDTH / 2 - slot_w * len(self.arsenal.weapons) / 2
-        for i, weapon in enumerate(self.arsenal.weapons):
-            rect = pygame.Rect(left + i * slot_w + 3, HEIGHT - 44 * UI, slot_w - 6, 30 * UI)
-            selected = i == self.arsenal.index
-            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
-            panel.fill((255, 220, 90, 200) if selected else (0, 0, 0, 120))
-            screen.blit(panel, rect)
-            level = weapon.spec.get("level", 1)
-            name = weapon.spec["name"] + (" +" if weapon.upgraded else "") + (f" L{level}" if level > 1 else "")
-            color = BLACK if selected else ((255, 200, 60) if weapon.upgraded else WHITE)
-            label = self.fonts["tiny"].render(f"{i + 1} {name}", True, color)
-            screen.blit(label, label.get_rect(center=rect.center))
-        if self.perk:
-            label = self.fonts["tiny"].render(f"PERK: {self.perk}", True, (80, 240, 255))
-            screen.blit(label, label.get_rect(center=(WIDTH / 2, HEIGHT - 54 * UI)))
+        self.draw_weapon_strip(screen)
 
         self.draw_compass(screen)
         boss = next((e for e in self.enemies if e.kind == "BOSS"), None)
@@ -7096,10 +7137,19 @@ class Game:
             screen.blit(image, image.get_rect(topright=(WIDTH - 12, map_bottom + 8 + i * 30 * UI)))
 
         if self.hint_timer > 0 and not self.game_over:
-            hints = ["WASD move   SHIFT sprint   C crouch/slide   ARROWS look   SPACE jump   F fire   E aim",
-                     "G grenade   V knife   X killstreak   1-9 0 weapon   TAB (hold) all weapons   R reload   H help"]
+            hints = ["WASD move   SHIFT sprint   C crouch   SPACE jump",
+                     "ARROWS look   F fire   E aim   R reload   G grenade",
+                     "V knife   X killstreak   TAB weapons   H help"]
+            fade = min(1.0, self.hint_timer)                  # 마지막 1초 동안 흐려지며 사라져요
+            box = pygame.Rect(0, 0, WIDTH * 0.4, (len(hints) * 19 + 12) * UI)
+            box.midbottom = (WIDTH / 2, HEIGHT - 66 * UI)
+            panel = pygame.Surface(box.size, pygame.SRCALPHA)
+            panel.fill((10, 8, 24, int(150 * fade)))
+            screen.blit(panel, box)
             for i, hint in enumerate(hints):
-                self.center_text(screen, self.small_font, hint, WHITE, HEIGHT - (82 - i * 20) * UI)
+                image = self.fonts["tiny"].render(hint, True, WHITE).copy()    # 글꼴 캐시는 그대로 두고
+                image.set_alpha(int(255 * fade))
+                screen.blit(image, image.get_rect(center=(WIDTH / 2, box.y + (15 + i * 19) * UI)))
         self.draw_objective(screen)
         if self.round_clear_timer > 0 or self.game_over:
             self.draw_summary(screen, HEIGHT * (0.66 if self.game_over else 0.5))
