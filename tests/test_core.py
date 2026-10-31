@@ -665,6 +665,32 @@ class GameTest(unittest.TestCase):
             icon = shooter.make_icon(kind, 20)
             self.assertGreater(icon.get_bounding_rect().width, 4, kind)   # 무언가 그려졌어요
 
+    def test_ending_credits_after_round_100(self):
+        save = {}
+        game = shooter.Game(save, shooter.CAMPAIGN_ROUNDS)
+        game.briefing = None
+        game.enemies, game.objective = [], None
+        game.update(1 / 60, Keys(), 0, 0, (False, False, False))
+        self.assertIsNotNone(game.ending)
+        self.assertTrue(save["campaign_done"])
+        game.draw(pygame.display.get_surface())
+        for _ in range(130):                                              # 2초 뒤 스페이스로 넘기기
+            game.update(1 / 60, Keys(), 0, 0, (False, False, False))
+        game.update(1 / 60, Keys({pygame.K_SPACE: True}), 0, 0, (False, False, False))
+        self.assertIsNone(game.ending)
+
+    def test_splash_hands_key_to_menu(self):
+        import asyncio
+        shooter._splash_shown[0] = False
+        key = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_z, mod=0, unicode="")
+        real = shooter.menu_events
+        shooter.menu_events = lambda: [key]
+        try:
+            self.assertEqual(asyncio.run(shooter.splash_screen()), [key])
+            self.assertEqual(asyncio.run(shooter.splash_screen()), [])       # 두 번째는 안 보여요
+        finally:
+            shooter.menu_events = real
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

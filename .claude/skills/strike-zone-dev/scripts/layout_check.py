@@ -24,6 +24,7 @@ import pygame  # noqa: E402
 import shooter  # noqa: E402
 
 shooter.write_save = lambda save: None          # 진짜 저장 파일은 건드리지 않아요
+shooter._splash_shown[0] = True                 # 오프닝 연출은 건너뛰어요
 LOADOUT = dict(primary="RIFLE", secondary="PISTOL", perk="IRON SKIN")
 TEXT_IDS = {}                                   # 글자 그림들 (id → 그림, 그림을 붙잡아 둬야 id 가 다시 안 쓰여요)
 _render = shooter.ShadowFont.render
