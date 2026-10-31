@@ -251,6 +251,31 @@ CAMO_COLORS["gold"] = ((212, 175, 55), (165, 128, 35))
 
 
 # ----- 저장 코드 (웹 ↔ 맥 진행 옮기기) -----
+# 내 컴퓨터 랭킹: 모드마다 점수가 높은 판을 10개까지 save["rankings"] 에 저장해요
+# (모드 키, 화면 이름, 어디까지 갔는지 이름)
+RANK_MODES = [("zombies", "ZOMBIES", "WAVE"), ("campaign", "CAMPAIGN", "ROUND"), ("mission", "MISSIONS", "STAGE")]
+RANK_SIZE = 10
+
+
+def add_ranking(save, mode, entry):
+    """랭킹에 한 판을 넣고 몇 등인지 돌려줘요 (1등부터). 10등 안에 못 들면 None.
+    점수가 같으면 먼저 세운 기록이 위에 남아요."""
+    table = save.setdefault("rankings", {}).setdefault(mode, [])
+    table.append(entry)
+    table.sort(key=lambda e: -e["score"])      # sort 는 같은 점수끼리 원래 순서를 지켜요
+    del table[RANK_SIZE:]
+    for i, e in enumerate(table):
+        if e is entry:
+            return i + 1
+    return None
+
+
+def top_score(save, mode):
+    """그 모드의 1등 점수 (기록이 없으면 0)"""
+    table = save.get("rankings", {}).get(mode, [])
+    return table[0]["score"] if table else 0
+
+
 def export_code(save):
     """저장 정보를 글자 코드로: SZ1.<압축한 내용>.<검사 숫자>  (해상도는 기기마다 달라서 빼요)"""
     data = {k: v for k, v in save.items() if k != "res"}
@@ -3321,7 +3346,33 @@ class Game:
         self.game_over = False
         self.hint_timer = 8.0      # 처음 8초 동안 화면 아래에 조작법 안내
         self.reset_streak()
+        self.start_run()
         self.start_round()
+
+    def start_run(self):
+        """랭킹용 한 판 시작: 점수(이번 판에 얻은 경험치)를 0부터 세요"""
+        self.run_score = 0
+        self.run_kills_start = self.kills
+        self.run_recorded = False
+        self.run_place = None      # 랭킹 몇 등에 들었는지 (못 들면 None)
+
+    def finish_run(self):
+        """한 판이 끝나면 (죽음, 미션 완료, 메뉴로 나가기) 랭킹에 기록해요. 한 판에 한 번만."""
+        if self.run_recorded or self.practice or self.challenge or self.run_score <= 0:
+            return
+        if self.mode not in [m for m, _, _ in RANK_MODES]:
+            return
+        self.run_recorded = True
+        if self.mode == "mission":
+            reached, where = min(self.stage + 1, len(MISSION_STAGES)), MISSIONS[self.mission]["name"]
+        else:
+            reached, where = self.round, self.theme["name"]
+        entry = dict(score=self.run_score, reached=reached, kills=self.kills - self.run_kills_start,
+                     map=where, date=time.strftime("%Y-%m-%d %H:%M"))
+        self.run_place = add_ranking(self.save, self.mode, entry)
+        if self.run_place:
+            self.popups.append([f"NEW RECORD!  RANK #{self.run_place}", (255, 200, 60), 3.0])
+        write_save(self.save)
 
     def reset_streak(self):
         """킬스트릭(죽지 않고 연속 처치)은 죽으면 처음부터 다시 세요"""
@@ -3348,6 +3399,7 @@ class Game:
         self.game_over = False
         self.challenge_done = False
         self.reset_streak()
+        self.start_run()               # 죽은 판은 랭킹에 들어갔으니 새 판으로 세요
         self.start_round()
 
     def rank_of(self, skill):
@@ -3856,6 +3908,7 @@ class Game:
             if MISSIONS[self.mission]["name"] not in done:
                 done.append(MISSIONS[self.mission]["name"])
             self.add_xp(2000, "MISSION COMPLETE  +2000", (80, 240, 255))
+            self.finish_run()
             write_save(self.save)
             return
         self.save["mission"] = dict(id=self.mission, stage=self.stage)
@@ -4675,6 +4728,7 @@ class Game:
         before = self.rank
         self.xp += amount
         self.save["xp"] = self.xp
+        self.run_score += amount                     # 랭킹 점수
         self.stats["score"] = self.stats.get("score", 0) + amount
         if text:
             self.popups.append([text, color, 1.4])
@@ -5147,6 +5201,8 @@ class Game:
                 write_save(self.save)
             elif not self.challenge and not self.practice:
                 self.record_progress(self.round)      # 다음에 이 라운드부터 이어할 수 있게
+            if self.mode != "mission":                # 미션은 체크포인트에서 이어지니까 아직 안 끝났어요
+                self.finish_run()
         elif self.mode == "zombies" and not self.enemies and self.zombies_left == 0 and self.round_clear_timer <= 0:
             self.slowmo = 0.8
             self.round_clear_timer = 6.0              # 다음 웨이브까지 숨 돌리기
@@ -6844,6 +6900,11 @@ class Game:
             rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 4)))
             shop = f"B ammo {ZOMBIE_SHOP['ammo']}   U upgrade {ZOMBIE_SHOP['upgrade']}"
             image = self.fonts["tiny"].render(shop, True, WHITE)
+            rect = screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 2)))
+            best = top_score(self.save, "zombies")
+            score = f"SCORE {self.run_score}" + (f"   #1 {best}" if best else "")
+            color = (255, 200, 60) if self.run_score > best else WHITE      # 1등을 넘으면 금색
+            image = self.fonts["tiny"].render(score, True, color)
             screen.blit(image, image.get_rect(bottomright=(WIDTH - 24, rect.top - 2)))
 
         # 아래 가운데 무기 칸
@@ -6939,6 +7000,8 @@ class Game:
                 typed = self.theme["brief"][:int(self.brief_age * 40)]
                 y = HEIGHT / 3 + (45 + len(self.sub_banners) * 32) * UI
                 self.center_text(screen, self.small_font, typed, (200, 230, 255), y)
+        if self.game_over and getattr(self, "run_recorded", False):
+            self.draw_run_result(screen, font, HEIGHT / 2 - 95 * UI)
         if self.game_over and self.mission_complete:
             t = int(self.mission_time)
             self.center_text(screen, big_font, "MISSION COMPLETE", (80, 240, 255), HEIGHT / 2 - 40 * UI)
@@ -6973,6 +7036,14 @@ class Game:
             self.center_text(screen, font, f"Round {self.round}  /  Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
             self.center_text(screen, font, f"R: retry round {self.round}    N: new game    ESC: menu",
                              YELLOW, HEIGHT / 2 + 45 * UI)
+
+    def draw_run_result(self, screen, font, y):
+        """게임 오버 화면: 이번 판 점수와 랭킹 등수 (L 키 랭킹 화면에서 다시 볼 수 있어요)"""
+        if self.run_place:
+            text, color = f"SCORE {self.run_score}   NEW RECORD!  #{self.run_place}", (255, 200, 60)
+        else:
+            text, color = f"SCORE {self.run_score}   (TOP {RANK_SIZE} NEEDS MORE)", (200, 200, 220)
+        self.center_text(screen, font, text, color, y)
 
     def draw_objective(self, screen):
         """목표 위치 표시 (벽 너머로도 보여요), 거리, 진행 막대, 폭탄 타이머"""
@@ -7707,6 +7778,63 @@ async def map_editor(save, slot):
         await asyncio.sleep(0)
 
 
+async def ranking_screen(save, mode_index=0):
+    """랭킹 화면 (내 컴퓨터): ←→ 모드 바꾸기, ESC 돌아가기"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key in (pygame.K_ESCAPE, pygame.K_l):
+                return None
+            if event.key in (pygame.K_LEFT, pygame.K_a):
+                mode_index = (mode_index - 1) % len(RANK_MODES)
+            elif event.key in (pygame.K_RIGHT, pygame.K_d, pygame.K_TAB):
+                mode_index = (mode_index + 1) % len(RANK_MODES)
+        mode, title, reached_name = RANK_MODES[mode_index]
+        screen.fill((14, 10, 30))
+        image = fonts["big"].render("LEADERBOARD", True, (255, 80, 200))
+        screen.blit(image, image.get_rect(midleft=(WIDTH * 0.06, HEIGHT * 0.09)))
+        # 위쪽 모드 칸
+        for i, (_, name, _) in enumerate(RANK_MODES):
+            rect = pygame.Rect(WIDTH * (0.06 + i * 0.2), HEIGHT * 0.17, WIDTH * 0.18, HEIGHT * 0.06)
+            selected = i == mode_index
+            pygame.draw.rect(screen, (60, 40, 90) if selected else (24, 18, 44), rect, border_radius=8)
+            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1,
+                             border_radius=8)
+            image = fonts["normal"].render(name, True, WHITE if selected else (150, 150, 170))
+            screen.blit(image, image.get_rect(center=rect.center))
+        # 표 머리
+        cols = [0.06, 0.12, 0.26, 0.38, 0.48, 0.74]
+        heads = ["#", "SCORE", reached_name, "KILLS", "MAP", "DATE"]
+        for x, head in zip(cols, heads):
+            screen.blit(fonts["small"].render(head, True, (80, 240, 255)), (WIDTH * x, HEIGHT * 0.27))
+        table = save.get("rankings", {}).get(mode, [])
+        medal = {0: (255, 200, 60), 1: (210, 210, 225), 2: (220, 140, 80)}     # 금, 은, 동
+        for i, e in enumerate(table):
+            y = HEIGHT * (0.33 + i * 0.05)
+            color = medal.get(i, WHITE)
+            values = [f"{i + 1}", f"{e['score']}", f"{e['reached']}", f"{e['kills']}", e["map"], e["date"]]
+            for x, value in zip(cols, values):
+                screen.blit(fonts["small"].render(value, True, color), (WIDTH * x, y))
+        if not table:
+            text = "아직 기록이 없어요. 한 판 하고 오세요!" if ko else "No records yet. Go play a game!"
+            image = fonts["help"].render(text, True, (150, 150, 170))
+            screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.5)))
+        hint = ("←→ 모드 바꾸기   ESC 돌아가기   - 점수 = 그 판에 얻은 경험치 (처치, 헤드샷, 라운드 클리어...)"
+                if ko else "LEFT / RIGHT change mode   ESC back   - score = XP earned in that game")
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
 async def stats_screen(save):
     """기록 화면: 누적 기록, 무기별 처치·레벨, 최근 판. E 저장 코드 내보내기, I 가져오기, ESC 돌아가기"""
     screen = pygame.display.get_surface()
@@ -7950,6 +8078,10 @@ async def intro_screen(save):
                 if await stats_screen(save) == "closed":
                     return "closed"
                 continue
+            if event.key == pygame.K_l:
+                if await ranking_screen(save) == "closed":
+                    return "closed"
+                continue
             if event.key == pygame.K_e:
                 picked = await map_slots_screen(save)
                 if picked == "closed" or picked:
@@ -8008,6 +8140,7 @@ async def intro_screen(save):
         parts.append("R 사격장" if ko else "R training range")
         parts.append("X 도전" if ko else "X challenges")
         parts.append("V 기록/저장 옮기기" if ko else "V stats / save code")
+        parts.append("L 랭킹" if ko else "L leaderboard")
         parts.append("E 맵 만들기" if ko else "E map editor")
         parts.append("A 업적" if ko else "A achievements")
         parts.append("K 스킬" if ko else "K skills")
@@ -8655,6 +8788,7 @@ async def run():
         await asyncio.sleep(0)
 
     if not training:
+        game.finish_run()          # 메뉴로 나가도 그 판은 랭킹에 들어가요
         game.record_history()
         write_save(game.save)      # 경험치(계급) 저장
     game.sounds.stop_background()
