@@ -2181,6 +2181,10 @@ class MaskedKeys:
 
 WHEEL_KEYS = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN, pygame.K_1, pygame.K_2, pygame.K_3,
               pygame.K_4, pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_8, pygame.K_9, pygame.K_0)
+# 이 말로 시작하는 알림은 왼쪽 카드로 (나머지는 조준점 아래 짧은 글자)
+TOAST_WORDS = ("NEW ", "RANK UP", "CHECKPOINT", "ACHIEVEMENT", "GOT ", "MYSTERY BOX", "TRAINING COMPLETE",
+               "BOSS", "TITAN", "BARRICADE", "ELECTRIC TRAP", "MAX AMMO", "CHOPPER", "RADAR", "AIRSTRIKE", "SENTRY",
+               "SOUND ", "FLASHLIGHT", "MOUNTED", "DISMOUNTED")
 STRIP_SLOTS = 5            # 아래 무기 칸에 한 번에 보여줄 무기 수
 PROMPT_Y = 168             # "B: 사기" 같은 안내 글자 높이 (화면 아래에서 px)
 WHEEL_HOLD = 0.22          # Tab 을 이만큼(초) 누르고 있으면 무기 휠이 열려요
@@ -3885,6 +3889,40 @@ class Game:
         if k % 10 < 6:                                                  # 깜빡이는 다시보기 표시
             pygame.draw.circle(screen, RED, (rect.right - 14 * UI, rect.y + 14 * UI), 6 * UI)
 
+    def draw_popups(self, screen, font):
+        """알림 글자 두 종류:
+        - 중요한 알림(새 무기, 계급, 업적...)은 왼쪽 가운데에 카드로 쌓여요 (옆에서 미끄러져 들어와요)
+        - 전투 글자(헤드샷 +150, 수류탄...)는 조준점 아래에서 살짝 떠오르며 사라져요"""
+        toasts = [p for p in self.popups if p[0].startswith(TOAST_WORDS)]
+        quick = [p for p in self.popups if not p[0].startswith(TOAST_WORDS)]
+        y = HEIGHT * 0.34
+        for p in toasts[-4:]:
+            text, color, left = p[0], p[1], p[2]
+            age = (p[3] if len(p) > 3 else left) - left
+            image = self.small_font.render(text, True, WHITE)
+            box = pygame.Rect(0, y, image.get_width() + 34 * UI, image.get_height() + 14 * UI)
+            slide = 1 - min(1.0, age / 0.18)
+            box.x = 16 - slide * (box.w + 20)
+            alpha = min(1.0, left / 0.4)
+            panel = pygame.Surface(box.size, pygame.SRCALPHA)
+            panel.fill((10, 8, 24, int(200 * alpha)))
+            screen.blit(panel, box)
+            pygame.draw.rect(screen, color, (box.x, box.y, 5 * UI, box.h))                # 색 띠
+            image = image.copy()
+            image.set_alpha(int(255 * alpha))
+            screen.blit(image, image.get_rect(midleft=(box.x + 18 * UI, box.centery)))
+            y += box.h + 6 * UI
+        for i, p in enumerate(quick[-3:]):
+            text, color, left = p[0], p[1], p[2]
+            age = (p[3] if len(p) > 3 else left) - left
+            rise = min(1.0, age / 0.35) * 10 * UI
+            image = font.render(text, True, color).copy()
+            pop = 1 + 0.3 * max(0.0, 1 - age / 0.12)                     # 처음에 톡 커졌다가
+            if pop > 1.001:
+                image = pygame.transform.smoothscale(image, (int(image.get_width() * pop), int(image.get_height() * pop)))
+            image.set_alpha(int(255 * min(1.0, left / 0.35)))
+            screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.6 + i * 30 * UI - rise)))
+
     def draw_banner(self, screen, big_font, font):
         """라운드 시작/클리어 알림: 가로 띠가 펼쳐지고, 제목 → 설명 줄 → 임무 글이 차례로 나와요"""
         length = getattr(self, "banner_len", self.banner_timer) or 1.0
@@ -5199,7 +5237,8 @@ class Game:
         # 폭발 흔들림: 이번 장면에서 화면이 위아래로 움직일 양
         self.shake_offset = random.uniform(-1, 1) * self.shake * 30 * UI * SETTINGS.get("shake", 1)
         self.feed = [[text, t - dt] for text, t in self.feed if t - dt > 0]
-        self.popups = [[text, color, t - dt] for text, color, t in self.popups if t - dt > 0]
+        # [글자, 색, 남은 시간, 처음 시간] (처음 시간은 나타나고 사라지는 움직임에 써요)
+        self.popups = [[p[0], p[1], p[2] - dt, p[3] if len(p) > 3 else p[2]] for p in self.popups if p[2] - dt > 0]
         self.damage_dirs = [[a, t - dt] for a, t in self.damage_dirs if t - dt > 0]
         for puff in self.smoke:                          # 연기는 위로 퍼지며 사라져요
             puff[0] += puff[2] * dt
@@ -6061,7 +6100,7 @@ class Game:
                     amount *= 1.25
                 if found[5]:                      # 관통: 피해가 줄어요
                     amount *= PENETRATION
-                    if not any(text == "WALLBANG" for text, _, _ in self.popups):
+                    if not any(p[0] == "WALLBANG" for p in self.popups):
                         self.popups.append(["WALLBANG", (255, 160, 60), 0.8])
                 if not head and target.shield_blocks(self.player.pos):
                     amount *= 0.15                # 방패에 막힘
@@ -7136,9 +7175,7 @@ class Game:
                 pygame.draw.polygon(screen, (255, int(150 * alpha), 30), [spot + d * 10 * UI, spot - d * 6 * UI + side * 8 * UI,
                                                                          spot - d * 6 * UI - side * 8 * UI])
 
-        # 점수/메달 글자 (조준점 아래)
-        for i, (text, color, t) in enumerate(self.popups[-4:]):
-            self.center_text(screen, font, text, color, HEIGHT * 0.58 + i * 30 * UI)
+        self.draw_popups(screen, font)
 
         # 적 수류탄이 가까이 있으면 경고 (깜빡여요)
         danger = any(p.owner == "enemy" and p.pos.distance_to(self.player.pos) < 4.5 for p in self.projectiles)
@@ -7193,7 +7230,7 @@ class Game:
         screen.blit(big_font.render(f"+ {int(self.player.hp)}", True, hp_color), (24, HEIGHT - 74 * UI))
         bar = pygame.Rect(24, HEIGHT - 22 * UI, 170 * UI, 6 * UI)          # 체력 막대
         pygame.draw.rect(screen, (40, 40, 50), bar, border_radius=3)
-        pygame.draw.rect(screen, hp_color, (bar.x, bar.y, bar.w * max(0.0, self.player.hp) / self.max_hp, bar.h),
+        pygame.draw.rect(screen, hp_color, (bar.x, bar.y, bar.w * min(1.0, max(0.0, self.player.hp) / self.max_hp), bar.h),
                          border_radius=3)
         w = self.arsenal.current
         ammo = "RELOADING..." if self.arsenal.reload_left > 0 else f"{w.mag} / {w.reserve}"
