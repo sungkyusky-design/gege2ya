@@ -1635,6 +1635,55 @@ def make_lamp_image():
     return img
 
 
+def make_barrel_image():
+    """터지는 빨간 드럼통 (노란 줄 + 불꽃 표시)"""
+    img = pygame.Surface((40, 56), pygame.SRCALPHA)
+    pygame.draw.rect(img, (190, 40, 35), (3, 4, 34, 50), border_radius=6)
+    pygame.draw.rect(img, (140, 25, 25), (3, 4, 34, 50), 2, border_radius=6)
+    for y in (16, 38):
+        pygame.draw.rect(img, (230, 200, 60), (3, y, 34, 4))
+    pygame.draw.polygon(img, (255, 230, 120), [(20, 22), (26, 32), (14, 32)])     # 위험 표시
+    pygame.draw.ellipse(img, (120, 25, 25), (5, 1, 30, 8))
+    return img
+
+
+def make_alarm_image(on):
+    """경보기: 기둥 위 노란 상자와 빨간 등 (울리면 밝아요)"""
+    img = pygame.Surface((30, 120), pygame.SRCALPHA)
+    pygame.draw.rect(img, (70, 70, 80), (13, 30, 5, 90))
+    pygame.draw.rect(img, (220, 190, 40), (3, 10, 24, 24), border_radius=3)
+    pygame.draw.rect(img, (40, 40, 40), (3, 10, 24, 24), 2, border_radius=3)
+    pygame.draw.circle(img, (255, 60, 60) if on else (120, 30, 30), (15, 8), 7)
+    if on:
+        pygame.draw.circle(img, (255, 200, 200), (15, 8), 3)
+    return img
+
+
+def make_broken_lamp(image):
+    """깨진 가로등: 불빛 부분을 어둡게"""
+    img = image.copy()
+    pygame.draw.circle(img, (50, 50, 55), (20, 26), 10)
+    return img
+
+
+class Device:
+    """맵의 장치: 드럼통(쏘면 폭발) / 경보기(적이 나를 보고 8초 안에 못 부수면 증원)"""
+
+    def __init__(self, kind, x, y):
+        self.kind = kind
+        self.pos = pygame.Vector2(x, y)
+        self.hp = DEVICE_HP[kind]
+        self.timer = 0.0          # 경보기: 울리기까지 / 울리는 시간
+        self.state = "idle"       # 경보기: idle → arming → ringing → done
+
+
+DEVICE_HP = {"barrel": 20, "alarm": 12}
+DEVICE_SIZE = {"barrel": (0.6, 0.45), "alarm": (1.4, 0.3)}     # (높이, 너비)
+BARREL_BLAST = (2.6, 95)          # 드럼통 폭발: (반경, 피해)
+ALARM_DELAY = 8.0                 # 적이 나를 보고 경보가 울리기까지(초)
+ALARM_BACKUP = 3                  # 경보가 울리면 오는 적 수
+
+
 def make_pickup_image(kind):
     """바닥에 놓인 상자: 탄약(초록 상자) / 체력(흰 상자에 빨간 십자) / 수류탄"""
     img = pygame.Surface((60, 44), pygame.SRCALPHA)
@@ -3623,6 +3672,9 @@ class Game:
         self.hurt_vignette = make_hurt_vignette()
         self.splat_images = [make_screen_splat(i) for i in range(4)]
         self.glow_image = make_glow(128, (255, 200, 120))      # 가로등 불빛
+        self.device_images = {"barrel": make_barrel_image(), "alarm": make_alarm_image(False),
+                              "alarm_on": make_alarm_image(True)}
+        self.devices = []
         self.flash_overlay = pygame.Surface((WIDTH, HEIGHT))
         self.flash_overlay.fill((230, 235, 255))
         self.lightning = 0.0       # 번개 번쩍임 남은 시간
@@ -4006,6 +4058,7 @@ class Game:
         return random.choice(pool)
 
     def start_round(self):
+        self.devices = []                       # 장치는 캠페인 전투(start_battle)에서만 다시 놓여요
         if self.mode == "training":
             self.start_training()
         elif self.mode == "zombies":
@@ -4600,6 +4653,7 @@ class Game:
                 self.briefing = 0.0                     # 새 세트: 작전 브리핑부터
                 self.briefed.add(set_no)
             self.pending_radio = "boss" if special == "BOSS" else "start"
+        self.place_devices(set_no, special == "BOSS")
 
     def radio(self, key, force=False):
         """본부 무전: 화면 왼쪽에 글자 + 무전 소리 (캠페인에서만)"""
@@ -4853,6 +4907,105 @@ class Game:
                     move_with_collision(boss.pos, offset.normalize() * boss.t["speed"] * 1.8 * dt)
             elif boss.charge_timer <= -1.2:
                 boss.charge_timer = 6.0
+
+    def place_devices(self, set_no, boss_round):
+        """전투 시작: 벽 옆 빈 칸에 드럼통 몇 개, 가끔 적들 근처에 경보기"""
+        self.devices = []
+        if self.mode != "campaign" or self.challenge:
+            return
+        start = self.player.pos
+        cells = []
+        for row, line in enumerate(GAME_MAP):
+            for col, ch in enumerate(line):
+                spot = pygame.Vector2(col + 0.5, row + 0.5)
+                if is_blocked(spot.x, spot.y) or spot.distance_to(start) < 6:
+                    continue
+                if any(e.pos.distance_to(spot) < 1.5 for e in self.enemies) or any(p.pos == spot for p in self.pickups):
+                    continue
+                if any(in_map(col + dx, row + dy) and GAME_MAP[row + dy][col + dx] in WALLS
+                       for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+                    cells.append(spot)
+        rng = random.Random(self.round * 31 + set_no)
+        for spot in rng.sample(cells, min(len(cells), 2 + set_no // 2)):
+            self.devices.append(Device("barrel", spot.x, spot.y))
+        if not boss_round and self.round % 3 == 0 and len(self.enemies) >= 4 and cells:
+            middle = sum((e.pos for e in self.enemies), pygame.Vector2()) / len(self.enemies)
+            spot = min(cells, key=lambda c: c.distance_to(middle))
+            self.devices.append(Device("alarm", spot.x, spot.y))
+            self.sub_banners.append(("ALARM ON SITE  -  DESTROY IT BEFORE THEY USE IT", (255, 200, 60)))
+
+    def device_hit(self, ax, ay, max_dist):
+        """화면 (ax, ay) 에 보이는 장치나 켜진 가로등 (적보다 가까운 것만)"""
+        col = int(ax // self.col_w)
+        wall = self.zbuffer[col] if 0 <= col < self.num_rays else math.inf
+        best, best_d = None, min(max_dist, wall)
+        things = [(dev, *DEVICE_SIZE[dev.kind]) for dev in self.devices]
+        things += [(d, d.height, 0.5) for d in self.decor if d.glow]
+        for thing, height, width in things:
+            box = self.project(thing.pos, height, width)
+            if not box:
+                continue
+            sx, top, bottom, w, perp = box
+            if perp < best_d and abs(ax - sx) < max(w / 2, 4) and top <= ay <= bottom:
+                best, best_d = thing, perp
+        return best
+
+    def shoot_device(self, ax, ay, max_dist, damage):
+        thing = self.device_hit(ax, ay, max_dist)
+        if thing is None:
+            return False
+        if isinstance(thing, Device):
+            self.damage_device(thing, damage)
+        else:                                               # 가로등: 깨지고 꺼져요
+            thing.glow = False
+            thing.image = make_broken_lamp(thing.image)
+            self.play_at("glass", thing.pos, 16)
+            self.popups.append(["LIGHT OUT", (150, 150, 170), 1.0])
+        self.add_impact(ax, ay, 0)
+        return True
+
+    def damage_device(self, dev, damage):
+        if dev not in self.devices:
+            return
+        dev.hp -= damage
+        if dev.hp > 0:
+            return
+        self.devices.remove(dev)
+        if dev.kind == "barrel":
+            self.boon_blasts.append((pygame.Vector2(dev.pos), *BARREL_BLAST))      # 다음 장면에 쾅 (연쇄 폭발)
+        else:
+            self.play_at("smash", dev.pos, 18)
+            if dev.state in ("idle", "arming"):
+                self.popups.append(["ALARM DESTROYED", (80, 240, 255), 1.5])
+                self.add_xp(100)
+
+    def update_devices(self, dt):
+        """경보기: 적이 나를 보면 8초 뒤 울려요 → 증원. 울리기 전에 부수면 끝"""
+        for dev in self.devices:
+            if dev.kind != "alarm" or dev.state == "done":
+                continue
+            if dev.state == "idle" and any(e.sees for e in self.enemies):
+                dev.state, dev.timer = "arming", ALARM_DELAY
+                self.popups.append(["ALARM ARMING! SHOOT IT", RED, 2.0])
+            elif dev.state == "arming":
+                dev.timer -= dt
+                if not self.enemies:
+                    dev.state = "done"
+                elif dev.timer <= 0:
+                    dev.state, dev.timer = "ringing", 6.0
+                    self.popups.append(["ALARM! REINFORCEMENTS", RED, 2.5])
+                    far = [pt for pt in self.spawn_points if pygame.Vector2(pt).distance_to(self.player.pos) > 8]
+                    for x, y in random.sample(far, min(ALARM_BACKUP, len(far))):
+                        guard = Enemy(x, y, "GRUNT", self.skill)
+                        guard.search = pygame.Vector2(self.player.pos)
+                        self.enemies.append(guard)
+            elif dev.state == "ringing":
+                before = dev.timer
+                dev.timer -= dt
+                if int(before * 2) != int(dev.timer * 2):
+                    self.play_at("beep", dev.pos, 30, 0.7)
+                if dev.timer <= 0:
+                    dev.state = "done"
 
     def update_boss_pattern(self, boss, dt):
         """세트 마지막 보스의 특별 패턴 (경고 표시가 먼저 나오고 그다음 공격)"""
@@ -5924,6 +6077,8 @@ class Game:
             self.explode(pos, radius, damage)
         if self.boss_marks or self.boss_laser:
             self.update_boss_effects(dt)
+        if self.devices:
+            self.update_devices(dt)
         if self.hitstop > 0:        # 쓰러뜨린 순간: 아주 잠깐 멈춤 (묵직한 손맛)
             self.hitstop -= dt
             return
@@ -6095,6 +6250,8 @@ class Game:
             vis *= 1.15
         if self.night:
             vis *= 1.8 if self.flashlight else 0.6
+            if any(d.glow and d.pos.distance_to(p.pos) < 3.5 for d in self.decor):
+                vis *= 1.5                                  # 켜진 가로등 아래는 들키기 쉬워요 (쏴서 끄기)
         p.visibility = vis
         self.body_timer -= dt
         if self.body_timer <= 0 and self.mode != "zombies":
@@ -6862,7 +7019,9 @@ class Game:
                 target = None                     # 자동차에 막힘
             if not self.scoped:
                 self.tracers.append([*self.muzzle_screen, ax, ay, 0.05])
-            if not target:
+            if not target and self.shoot_device(ax, ay, target_dist, spec["body"]):
+                pass                              # 드럼통·경보기·가로등에 맞음
+            elif not target:
                 self.add_impact(ax, ay, spec["body"])     # 벽이나 바닥에 맞으면 먼지와 불똥 (+ 자국, 부서짐)
             if target and self.challenge == "HEADSHOTS" and not head:
                 continue                          # 헤드샷 도전: 몸에 맞으면 피해 없음
@@ -7100,6 +7259,9 @@ class Game:
                     boost = 1 + 0.2 * self.rank_of("DEMOLITION") if owner == "player" else 1.0
                     self.damage_enemy(enemy, damage * power(d) * boost, how)
                     self.add_splat(enemy.pos, 0.7)
+        for dev in list(self.devices):
+            if dev.pos.distance_to(pos) < radius and dev.pos.distance_to(pos) > 0.05:
+                self.damage_device(dev, damage)
         d = self.player.pos.distance_to(pos)
         if owner != "streak" and d < radius and can_see(pos, self.player.pos):
             self.hurt_player(damage * power(d) * (SELF_DAMAGE if owner == "player" else 1.0), pos)
@@ -7510,6 +7672,12 @@ class Game:
             box = self.project(d.pos, d.height, d.width)
             if box:
                 items.append((box, d.image, None))
+        for dev in self.devices:
+            height, width = DEVICE_SIZE[dev.kind]
+            box = self.project(dev.pos, height, width)
+            if box:
+                ringing = dev.kind == "alarm" and dev.state in ("arming", "ringing") and pygame.time.get_ticks() // 200 % 2
+                items.append((box, self.device_images["alarm_on" if ringing else dev.kind], None))
         t = pygame.time.get_ticks() / 1000
         for item in self.pickups:
             box = self.project(item.pos, 0.3, 0.4, lift=0.08 + math.sin(t * 3 + item.phase) * 0.05)
@@ -8190,6 +8358,11 @@ class Game:
                               alpha=int(255 * fade))
         self.draw_objective(screen)
         self.draw_contracts(screen)
+        alarm = next((d for d in self.devices if d.kind == "alarm" and d.state == "arming"), None)
+        if alarm and not self.game_over:
+            text = f"ALARM IN {alarm.timer:.0f}s  -  SHOOT THE YELLOW BOX"
+            if pygame.time.get_ticks() // 300 % 2:
+                self.center_text(screen, self.small_font, text, RED, HEIGHT * 0.15)
         if self.round_clear_timer > 0 and not self.game_over:
             self.draw_summary(screen, HEIGHT * 0.5)
         if self.banner_timer > 0:
