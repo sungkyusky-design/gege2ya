@@ -108,6 +108,22 @@ MAX_PITCH = 260 * UI              # 위아래로 볼 수 있는 한계(px)
 JUMP_SPEED = 4.2                  # 점프 힘
 GRAVITY = 13                      # 중력 (클수록 빨리 떨어져요)
 
+# 설정 (시작 화면에서 S): 저장돼서 다음에도 그대로예요
+SETTINGS = dict(look=1.0, mouse=1.0, assist=2, fov=66, volume=80, difficulty=1)
+ASSIST_LEVELS = ["OFF", "LOW", "NORMAL", "HIGH"]
+ASSIST_PAD = [0.0, 0.6, 1.0, 1.5]          # 아깝게 빗나간 총알을 몸통에 맞혀 주는 정도
+ASSIST_STICKY = [1.0, 0.75, 0.55, 0.4]     # 조준점이 적 위에 있을 때 시점이 느려지는 정도
+# 난이도: (이름, 적 실력 배율, 내가 받는 피해 배율)
+DIFFICULTIES = [("EASY", 0.8, 0.6), ("NORMAL", 1.0, 1.0), ("HARD", 1.25, 1.4)]
+
+
+def apply_settings(settings):
+    """저장된 설정을 게임에 적용해요"""
+    global NORMAL_FOV
+    SETTINGS.update(settings)
+    NORMAL_FOV = math.radians(SETTINGS["fov"])
+
+
 # 고를 수 있는 해상도. 화면보다 큰 해상도는 전체 화면으로 열어요
 RESOLUTIONS = [(1280, 720), (1600, 900), (1920, 1080), (2560, 1440)]
 
@@ -1463,6 +1479,7 @@ class Sounds:
     def play(self, name, volume=1.0, pan=0.0):
         """pan: -1이면 왼쪽, 1이면 오른쪽에서 들려요 (이어폰을 끼면 방향을 알 수 있어요)"""
         sound = self.bank.get(name)
+        volume *= SETTINGS["volume"] / 100
         if sound and not self.muted and volume > 0.02:
             channel = sound.play()
             if channel:
@@ -2041,6 +2058,9 @@ class Player:
         self.slide_timer = 0.0    # 슬라이딩 남은 시간
         self.slide_dir = pygame.Vector2(1, 0)
         self.noise = 0.0          # 내 소리가 들리는 거리 (적이 듣고 다가와요)
+        self.turn_hold = 0.0      # 화살표 키를 누르고 있는 시간 (살짝 누르면 천천히, 오래 누르면 빠르게)
+        self.look_hold = 0.0
+        self.stick = (0.0, 0.0)   # 게임패드 오른쪽 스틱 (좌우 라디안/초, 위아래 px/초)
 
     @property
     def forward(self):
@@ -2059,16 +2079,25 @@ class Player:
     def update(self, dt, keys, mouse_dx, mouse_dy, sens, speed, allow_sprint):
         """sens: 확대했을 때 감도를 낮추는 비율, speed: 이동 속도 비율 (정조준·무거운 총은 느리게)
         allow_sprint: 달릴 수 있는지 (정조준하거나 쏘는 중엔 못 달려요)"""
-        self.angle += mouse_dx * MOUSE_SENS * sens
-        self.pitch -= mouse_dy * MOUSE_SENS_Y * sens
+        self.angle += mouse_dx * MOUSE_SENS * SETTINGS["mouse"] * sens
+        self.pitch -= mouse_dy * MOUSE_SENS_Y * SETTINGS["mouse"] * sens
+        self.angle += self.stick[0] * sens * dt
+        self.pitch += self.stick[1] * sens * dt
+        # 화살표 키 가속: 처음엔 30% 속도로 천천히(정밀 조준), 누르고 있으면 점점 빨라져요
+        turning = keys[pygame.K_LEFT] or keys[pygame.K_RIGHT]
+        self.turn_hold = self.turn_hold + dt if turning else 0.0
+        looking = keys[pygame.K_UP] or keys[pygame.K_DOWN]
+        self.look_hold = self.look_hold + dt if looking else 0.0
+        turn = TURN_SPEED * SETTINGS["look"] * sens * dt * min(1.15, 0.3 + self.turn_hold * 2.0)
+        look = LOOK_SPEED * SETTINGS["look"] * sens * dt * min(1.1, 0.35 + self.look_hold * 2.0)
         if keys[pygame.K_LEFT]:
-            self.angle -= TURN_SPEED * sens * dt
+            self.angle -= turn
         if keys[pygame.K_RIGHT]:
-            self.angle += TURN_SPEED * sens * dt
+            self.angle += turn
         if keys[pygame.K_UP]:
-            self.pitch += LOOK_SPEED * sens * dt
+            self.pitch += look
         if keys[pygame.K_DOWN]:
-            self.pitch -= LOOK_SPEED * sens * dt
+            self.pitch -= look
         self.pitch = max(-MAX_PITCH, min(MAX_PITCH, self.pitch))
 
         # 점프: 땅에 있을 때만. 앉아 있으면 점프 대신 일어나요
@@ -2401,6 +2430,7 @@ class Game:
         self.hitstop = 0.0         # 쓰러뜨리는 순간 화면이 아주 잠깐 멈춰요 (묵직한 손맛)
         self.slowmo = 0.0          # 라운드 마지막 적을 쓰러뜨리면 잠깐 느리게
         self.gun_noise = 0.0       # 방금 총을 쐈으면 적이 듣고 다가와요
+        self.pad_aim = False       # 게임패드 왼쪽 트리거를 누르고 있으면 정조준
         self.on_target = False     # 조준점이 적 위에 있는지 (조준선이 빨개지고 시점이 살짝 끈적해져요)
         self.muzzle_screen = (WIDTH * 0.6, HEIGHT * 0.75)   # 화면에서 총구 위치 (총알 궤적 시작점)
         self.reset(start_round)
@@ -2497,8 +2527,8 @@ class Game:
 
     @property
     def skill(self):
-        """적 실력: 라운드마다 8%씩 올라가요 (최대 2배)"""
-        return min(2.0, 1 + 0.08 * (self.round - 1))
+        """적 실력: 라운드마다 8%씩 올라가요 (최대 2배). 난이도 설정에 따라 더 쉽거나 어렵게"""
+        return min(2.0, 1 + 0.08 * (self.round - 1)) * DIFFICULTIES[SETTINGS["difficulty"]][1]
 
     def pick_enemy_kind(self):
         """라운드가 올라갈수록 새로운 적이 섞여 나와요"""
@@ -2866,14 +2896,15 @@ class Game:
         self.knife_cooldown = max(0.0, self.knife_cooldown - dt)
         fire_down = bool(buttons[0] or keys[pygame.K_f] or self.click_queued)   # 왼쪽 클릭 = F
         self.click_queued = False
-        self.aiming = (self.aim_on and not arsenal.busy
+        self.aiming = ((self.aim_on or self.pad_aim) and not arsenal.busy
                        and self.knife_timer == 0 and not self.player.sprinting)
         speed = (AIM_MOVE if self.aiming else 1.0) * spec.get("move", 1.0)
         if self.perk == "LIGHTFOOT":
             speed *= 1.12
         # 조준점이 적 위에 있으면 시점이 살짝 느리게 돌아요 (키보드로도 적을 놓치지 않게)
         self.on_target = self.enemy_at(WIDTH / 2, HEIGHT / 2) is not None
-        sens = min(1.0, 1.5 / self.zoom) * (0.55 if self.on_target and not self.scoped else 1.0)
+        sticky = ASSIST_STICKY[SETTINGS["assist"]] if self.on_target and not self.scoped else 1.0
+        sens = min(1.0, 1.5 / self.zoom) * sticky
         angle_before = self.player.angle
         self.player.update(dt, keys, mouse_dx, mouse_dy, sens, speed,
                            allow_sprint=not self.aiming and not fire_down)
@@ -3074,6 +3105,7 @@ class Game:
 
     def hurt_player(self, damage, source=None):
         """나에게 피해. source(때린 위치)가 있으면 화면에 맞은 방향을 표시해요."""
+        damage *= DIFFICULTIES[SETTINGS["difficulty"]][2]
         self.player.hp -= int(damage)
         self.since_hurt = 0.0
         self.damage_flash = min(1.0, 0.4 + damage / 40)
@@ -3298,8 +3330,8 @@ class Game:
             ay = HEIGHT / 2 + random.uniform(-spread, spread) * 0.6
             # 정확히 맞았는지 보고, 아깝게 빗나갔으면 조준 보정으로 몸통에 맞혀요 (조준경 저격은 보정 없음)
             found = self.enemy_at(ax, ay)
-            if not found and not self.scoped:
-                found = self.enemy_at(ax, ay, assist=1.0)
+            if not found and not self.scoped and ASSIST_PAD[SETTINGS["assist"]] > 0:
+                found = self.enemy_at(ax, ay, assist=ASSIST_PAD[SETTINGS["assist"]])
             target, target_dist, head = found[:3] if found else (None, math.inf, False)
             if found:
                 ax, ay = found[3], found[4]       # 피는 적 몸 위에서 튀게
@@ -4014,6 +4046,162 @@ class Game:
 
 
 # ---------------------------------------------------------------
+# 게임패드 (Xbox / PlayStation 컨트롤러를 블루투스로 연결하면 돼요)
+# ---------------------------------------------------------------
+# 버튼 -> 키보드 키 (게임 중). A 점프와 왼쪽 스틱 이동, 트리거는 따로 처리해요
+PAD_GAME_KEYS = {"b": pygame.K_c, "x": pygame.K_r, "y": pygame.K_q, "rb": pygame.K_g, "lb": pygame.K_v,
+                 "r3": pygame.K_v, "up": pygame.K_x, "down": pygame.K_b, "left": pygame.K_u, "start": pygame.K_h,
+                 "back": pygame.K_m}
+# 메뉴 화면에서: A 확인, B 뒤로, 십자키 이동, X 좀비 모드, Y 이어하기, 시작 버튼 설정
+PAD_MENU_KEYS = {"a": pygame.K_RETURN, "b": pygame.K_ESCAPE, "up": pygame.K_UP, "down": pygame.K_DOWN,
+                 "left": pygame.K_LEFT, "right": pygame.K_RIGHT, "x": pygame.K_z, "y": pygame.K_c,
+                 "start": pygame.K_s}
+PAD_LOOK_YAW = 3.2                # 오른쪽 스틱 끝까지 밀었을 때 1초에 도는 각도(라디안)
+PAD_LOOK_PITCH = 520              # 1초에 위아래로 움직이는 px (화면 크기 비율을 곱해요)
+
+
+class Gamepad:
+    """연결된 게임패드를 읽어요. 없으면 아무것도 안 해요."""
+    DEAD = 0.2                    # 스틱을 조금 건드린 건 무시
+
+    def __init__(self):
+        self.pad, self.kind = None, None
+        self.down = set()         # 지금 눌린 버튼들
+        self.sprint = False       # 왼쪽 스틱 누르기(L3)로 켜는 달리기
+        self.connect()
+
+    def connect(self):
+        self.pad, self.kind = None, None
+        try:
+            from pygame._sdl2 import controller   # 버튼 배치가 표준으로 맞춰진 방식
+            controller.init()
+            for i in range(controller.get_count()):
+                if controller.is_controller(i):
+                    self.pad, self.kind = controller.Controller(i), "controller"
+                    return
+        except Exception:
+            pass
+        try:
+            pygame.joystick.init()
+            if pygame.joystick.get_count():
+                self.pad, self.kind = pygame.joystick.Joystick(0), "joystick"
+        except Exception:
+            self.pad = None
+
+    def _axis(self, name):
+        if self.kind == "controller":
+            value = self.pad.get_axis(getattr(pygame, "CONTROLLER_AXIS_" + name.upper())) / 32767
+        else:
+            index = {"leftx": 0, "lefty": 1, "rightx": 2, "righty": 3, "triggerleft": 4, "triggerright": 5}[name]
+            if index >= self.pad.get_numaxes():
+                return 0.0
+            value = self.pad.get_axis(index)
+            if name.startswith("trigger"):
+                value = (value + 1) / 2   # 조이스틱은 -1(안 누름) ~ 1(끝까지)
+        return max(-1.0, min(1.0, value))
+
+    def _buttons(self):
+        names = ["a", "b", "x", "y", "back", "guide", "start", "l3", "r3", "lb", "rb", "up", "down", "left", "right"]
+        pressed = set()
+        if self.kind == "controller":
+            for i, name in enumerate(names):
+                try:
+                    if self.pad.get_button(i):
+                        pressed.add(name)
+                except Exception:
+                    pass
+        else:
+            order = ["a", "b", "x", "y", "lb", "rb", "back", "start", "l3", "r3"]
+            for i, name in enumerate(order[:self.pad.get_numbuttons()]):
+                if self.pad.get_button(i):
+                    pressed.add(name)
+            if self.pad.get_numhats():
+                hx, hy = self.pad.get_hat(0)
+                pressed |= {n for n, on in (("left", hx < 0), ("right", hx > 0), ("up", hy > 0), ("down", hy < 0)) if on}
+        return pressed
+
+    def poll(self):
+        """이번 장면의 패드 상태: (스틱/트리거 값, 새로 눌린 버튼들). 패드가 없으면 None"""
+        if self.pad is None:
+            return None, set()
+        try:
+            state = {k: self._axis(k) for k in ("leftx", "lefty", "rightx", "righty", "triggerleft", "triggerright")}
+            now = self._buttons()
+        except Exception:
+            self.pad = None                    # 연결이 끊겼어요
+            return None, set()
+        pressed = now - self.down
+        self.down = now
+        if "l3" in pressed:
+            self.sprint = not self.sprint
+        return state, pressed
+
+    def held_keys(self, state):
+        """패드 상태를 '눌린 키'로 바꿔요 (왼쪽 스틱 = WASD, A = 점프, 오른쪽 트리거 = 사격)"""
+        keys = set()
+        x, y = state["leftx"], state["lefty"]
+        if y < -0.35:
+            keys.add(pygame.K_w)
+        if y > 0.35:
+            keys.add(pygame.K_s)
+        if x < -0.35:
+            keys.add(pygame.K_a)
+        if x > 0.35:
+            keys.add(pygame.K_d)
+        if abs(x) < self.DEAD and abs(y) < self.DEAD:
+            self.sprint = False                # 멈추면 달리기 꺼짐
+        elif self.sprint:
+            keys.add(pygame.K_LSHIFT)
+        if "a" in self.down:
+            keys.add(pygame.K_SPACE)
+        if state["triggerright"] > 0.4:
+            keys.add(pygame.K_f)
+        return keys
+
+    def look(self, state):
+        """오른쪽 스틱 -> (좌우 라디안/초, 위아래 px/초). 살짝 밀면 아주 천천히 (정밀 조준)"""
+        def curve(v):
+            return 0.0 if abs(v) < self.DEAD else math.copysign(((abs(v) - self.DEAD) / (1 - self.DEAD)) ** 2, v)
+        return (curve(state["rightx"]) * PAD_LOOK_YAW * SETTINGS["look"],
+                -curve(state["righty"]) * PAD_LOOK_PITCH * UI * SETTINGS["look"])
+
+
+class KeyState:
+    """키보드 상태 + 게임패드로 '눌린' 키를 합쳐요"""
+
+    def __init__(self, real, extra):
+        self.real, self.extra = real, extra
+
+    def __getitem__(self, key):
+        return key in self.extra or bool(self.real[key])
+
+
+_gamepad = None
+
+
+def get_gamepad():
+    global _gamepad
+    if _gamepad is None:
+        _gamepad = Gamepad()
+    return _gamepad
+
+
+def pad_menu_events():
+    """메뉴 화면에서 패드 버튼을 키보드 누름으로 바꿔 줘요"""
+    _, pressed = get_gamepad().poll()
+    return [pygame.event.Event(pygame.KEYDOWN, key=PAD_MENU_KEYS[b], mod=0, unicode="")
+            for b in pressed if b in PAD_MENU_KEYS]
+
+
+def menu_events():
+    events = pygame.event.get()
+    for event in events:
+        if event.type in (getattr(pygame, "CONTROLLERDEVICEADDED", -1), pygame.JOYDEVICEADDED):
+            get_gamepad().connect()
+    return events + pad_menu_events()
+
+
+# ---------------------------------------------------------------
 # 창 / 시작 화면 / 실행
 # ---------------------------------------------------------------
 def available_resolutions():
@@ -4048,6 +4236,94 @@ def open_window():
     return screen
 
 
+SETTING_ROWS = [
+    ("look", "LOOK SPEED", "화살표/스틱 시점 속도", "Arrow / stick look speed"),
+    ("mouse", "MOUSE SPEED", "마우스 감도", "Mouse sensitivity"),
+    ("assist", "AIM ASSIST", "조준 보정 세기", "Aim assist strength"),
+    ("fov", "FIELD OF VIEW", "시야각 (넓을수록 많이 보여요)", "Field of view"),
+    ("volume", "VOLUME", "소리 크기", "Sound volume"),
+    ("difficulty", "DIFFICULTY", "난이도: 적 실력과 내가 받는 피해", "Enemy skill and damage taken"),
+]
+
+
+def change_setting(key, step):
+    """설정 한 칸 바꾸기 (←: -1, →: +1)"""
+    if key in ("look", "mouse"):
+        SETTINGS[key] = round(max(0.4, min(2.5, SETTINGS[key] + step * 0.1)), 1)
+    elif key == "assist":
+        SETTINGS[key] = (SETTINGS[key] + step) % len(ASSIST_LEVELS)
+    elif key == "fov":
+        SETTINGS[key] = max(56, min(90, SETTINGS[key] + step * 2))
+    elif key == "volume":
+        SETTINGS[key] = max(0, min(100, SETTINGS[key] + step * 10))
+    elif key == "difficulty":
+        SETTINGS[key] = (SETTINGS[key] + step) % len(DIFFICULTIES)
+    apply_settings({})
+
+
+def setting_text(key):
+    value = SETTINGS[key]
+    if key == "assist":
+        return ASSIST_LEVELS[value]
+    if key == "difficulty":
+        return DIFFICULTIES[value][0]
+    if key in ("look", "mouse"):
+        return f"x{value:.1f}"
+    if key == "fov":
+        return f"{value}"
+    return f"{value}%"
+
+
+async def settings_screen(save):
+    """설정: ↑↓ 고르기, ←→ 바꾸기, Enter/ESC 저장하고 돌아가기"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    row = 0
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_s):
+                save["settings"] = dict(SETTINGS)
+                write_save(save)
+                return None
+            if event.key in (pygame.K_UP, pygame.K_w):
+                row = (row - 1) % len(SETTING_ROWS)
+            elif event.key in (pygame.K_DOWN,):
+                row = (row + 1) % len(SETTING_ROWS)
+            elif event.key in (pygame.K_LEFT, pygame.K_a):
+                change_setting(SETTING_ROWS[row][0], -1)
+            elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                change_setting(SETTING_ROWS[row][0], 1)
+        screen.fill((14, 10, 30))
+        title = fonts["big"].render("SETTINGS", True, (255, 80, 200))
+        screen.blit(title, title.get_rect(midleft=(WIDTH * 0.08, HEIGHT * 0.1)))
+        for i, (key, name, desc_ko, desc_en) in enumerate(SETTING_ROWS):
+            rect = pygame.Rect(WIDTH * 0.08, HEIGHT * (0.2 + i * 0.12), WIDTH * 0.84, HEIGHT * 0.1)
+            selected = i == row
+            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+            panel.fill((255, 255, 255, 38) if selected else (0, 0, 0, 110))
+            screen.blit(panel, rect)
+            pygame.draw.rect(screen, (255, 80, 200) if selected else (70, 60, 100), rect, 3 if selected else 1)
+            screen.blit(fonts["normal"].render(name, True, WHITE), (rect.x + 16, rect.y + rect.h * 0.12))
+            screen.blit(fonts["help"].render(desc_ko if ko else desc_en, True, (200, 230, 255)),
+                        (rect.x + 16, rect.y + rect.h * 0.58))
+            value = setting_text(key)
+            image = fonts["big"].render(f"<  {value}  >" if selected else value, True, YELLOW if selected else WHITE)
+            screen.blit(image, image.get_rect(midright=(rect.right - 20, rect.centery)))
+        hint = ("↑↓ 고르기     ←→ 바꾸기     Enter / ESC 저장하고 돌아가기" if ko
+                else "UP/DOWN choose     LEFT/RIGHT change     ENTER / ESC save and back")
+        image = fonts["help"].render(hint, True, YELLOW)
+        screen.blit(image, image.get_rect(center=(WIDTH / 2, HEIGHT * 0.95)))
+        pygame.display.flip()
+        await asyncio.sleep(0)
+
+
 async def intro_screen(save):
     """시작 화면: 조작법을 보여주고 캠페인 / 좀비 모드 / 이어하기 / 해상도를 골라요.
     고른 것을 dict(mode=..., round=...)로 돌려줘요. ESC면 None, 창 닫기면 "closed"."""
@@ -4060,7 +4336,7 @@ async def intro_screen(save):
     continue_round = save.get("continue", 1)
     while True:
         clock.tick(30)
-        for event in pygame.event.get():
+        for event in menu_events():
             if event.type == pygame.QUIT:
                 return "closed"
             if event.type != pygame.KEYDOWN:
@@ -4073,6 +4349,11 @@ async def intro_screen(save):
                 return dict(mode="zombies", round=1)
             if event.key == pygame.K_c and continue_round > 1:
                 return dict(mode="campaign", round=continue_round)
+            if event.key == pygame.K_s:
+                if await settings_screen(save) == "closed":
+                    return "closed"
+                fonts = make_fonts()
+                continue
             if event.key == pygame.K_t and len(options) > 1:
                 res_index = (res_index + 1) % len(options)
                 save["res"] = res_index
@@ -4089,6 +4370,7 @@ async def intro_screen(save):
             w, h = options[res_index]
             note = "" if fits_desktop(w, h) else (" 전체 화면" if ko else " fullscreen")
             parts.append(f"T 해상도 {w}x{h}{note}" if ko else f"T resolution {w}x{h}{note}")
+        parts.append("S 설정" if ko else "S settings")
         parts.append("ESC 메뉴" if ko else "ESC menu")
         screen.fill((15, 10, 35))
         draw_help(screen, fonts, "     ".join(parts))
@@ -4140,7 +4422,7 @@ async def loadout_screen(save, choice):
     previews = {}
     while True:
         clock.tick(30)
-        for event in pygame.event.get():
+        for event in menu_events():
             if event.type == pygame.QUIT:
                 return "closed"
             if event.type != pygame.KEYDOWN:
@@ -4232,6 +4514,7 @@ async def run():
     창을 닫으면 False, ESC로 끝내면 True를 돌려줘요 (메뉴로 돌아갈지 판단용).
     """
     save = load_save()
+    apply_settings(save.get("settings", {}))
     while True:
         choice = await intro_screen(save)            # 모드 고르기
         if choice is None or choice == "closed":
@@ -4253,9 +4536,19 @@ async def run():
     running = True
     closed = False             # 창을 닫았는지 여부
     work_time, frames, check_timer = 0.0, 0, 0.0   # 자동 해상도 조절용 기록
+    gamepad = get_gamepad()
     while running:
         dt = min(0.05, clock.tick(FPS) / 1000)
-        for event in pygame.event.get():
+        events = pygame.event.get()
+        pad, pad_pressed = gamepad.poll()
+        if pad is not None:
+            # 패드 버튼을 키 누름으로 바꿔서 같은 방식으로 처리해요
+            mapping = dict(PAD_GAME_KEYS, a=pygame.K_r) if game.game_over else PAD_GAME_KEYS
+            events += [pygame.event.Event(pygame.KEYDOWN, key=mapping[b], mod=0, unicode="")
+                       for b in pad_pressed if b in mapping]
+        for event in events:
+            if event.type in (getattr(pygame, "CONTROLLERDEVICEADDED", -1), pygame.JOYDEVICEADDED):
+                gamepad.connect()
             if event.type == pygame.QUIT:
                 running, closed = False, True
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -4278,7 +4571,12 @@ async def run():
         started = time.perf_counter()
         mouse_dx, mouse_dy = pygame.mouse.get_rel()
         game.fps = clock.get_fps()
-        game.update(dt, pygame.key.get_pressed(), mouse_dx, mouse_dy, pygame.mouse.get_pressed())
+        keys = pygame.key.get_pressed()
+        if pad is not None:
+            keys = KeyState(keys, gamepad.held_keys(pad))
+            game.pad_aim = pad["triggerleft"] > 0.4
+            game.player.stick = gamepad.look(pad)
+        game.update(dt, keys, mouse_dx, mouse_dy, pygame.mouse.get_pressed())
         game.draw(screen)
         work_time += time.perf_counter() - started
         frames += 1
