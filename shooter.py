@@ -166,6 +166,44 @@ HORIZONTAL_KICK = {"RIFLE": 0.005, "PISTOL": 0.004, "SNIPER": 0.015, "SHOTGUN": 
                    "ROCKET": 0.01, "LMG": 0.006, "BURST": 0.004, "DMR": 0.008, "HEAVY AR": 0.008,
                    "AUTO SHOTGUN": 0.012, "REVOLVER": 0.012, "MACHINE PISTOL": 0.007, "LAUNCHER": 0.01}
 
+# 라운드 목표 (캠페인): 1라운드와 5의 배수 라운드는 전멸, 나머지는 돌아가며
+#   HOSTAGE 인질 구출: 인질 옆에 3초 서 있기    BOMB 폭탄 해체: 75초 안에 폭탄 옆에 5초
+#   HOLD 거점 지키기: 표시된 곳 안에서 20초 버티기 (적 지원군이 계속 와요)
+OBJECTIVE_ORDER = {2: "HOSTAGE", 3: "BOMB", 4: "HOLD"}
+OBJECTIVES = {
+    "HOSTAGE": dict(need=3.0, radius=1.2, title="RESCUE THE HOSTAGE", doing="RESCUING", color=(255, 160, 60)),
+    "BOMB": dict(need=5.0, radius=1.2, title="DEFUSE THE BOMB", doing="DEFUSING", color=(255, 70, 70)),
+    "HOLD": dict(need=20.0, radius=2.0, title="HOLD THE POINT", doing="CAPTURING", color=(80, 240, 255)),
+}
+BOMB_TIME = 75.0
+KILLCAM_TIME = 3.0                # 죽으면 이 시간 동안 나를 쓰러뜨린 적의 시점으로 보여줘요
+# 무기 성장: 그 총으로 쓰러뜨린 수 -> 풀리는 부착물 (다음 라운드부터 자동으로 달려요)
+WEAPON_LEVELS = [(10, "EXT MAG"), (25, "GRIP"), (45, "SUPPRESSOR"), (70, "GOLD CAMO")]
+PLAYER_LOOK = dict(uniform=(60, 90, 140), vest=(40, 60, 100), pants=(40, 45, 60), head="helmet", gun=30)
+
+
+def weapon_mods(kills):
+    """쓰러뜨린 수로 풀린 부착물 목록"""
+    return [mod for need, mod in WEAPON_LEVELS if kills >= need]
+
+
+def apply_mods(spec, mods):
+    """부착물을 단 무기 설정을 새로 만들어요
+    EXT MAG 탄창 1.5배 / GRIP 반동 30% 줄임 / SUPPRESSOR 소음기(적이 잘 못 들어요) / GOLD CAMO 금색 총"""
+    spec = dict(spec)
+    if "EXT MAG" in mods and not spec["projectile"]:
+        spec["mag"] = int(spec["mag"] * 1.5)
+        spec["reserve"] = int(spec["reserve"] * 1.25)
+    if "GRIP" in mods:
+        spec["kick"] = spec["kick"] * 0.7
+        spec["recoil"] = 0.7
+    if "SUPPRESSOR" in mods and not spec["projectile"]:
+        spec["suppressed"] = True
+    if "GOLD CAMO" in mods:
+        spec["camo"] = "gold"
+    return spec
+
+
 # 맵마다 총소리 메아리: (늦게 들리는 시간 초, 크기). 좁은 골목·실내는 크게, 탁 트인 곳은 작게
 ECHOES = {"NEON BEACH": (0.35, 0.12), "DOWNTOWN": (0.18, 0.35), "HARBOR": (0.22, 0.3), "DESERT TOWN": (0.25, 0.2),
           "SNOW BASE": (0.3, 0.2), "FOREST VILLAGE": (0.3, 0.22), "RAIN DISTRICT": (0.15, 0.4),
@@ -1305,6 +1343,30 @@ def make_blood_pool_image():
     return img
 
 
+def make_objective_image(kind):
+    """목표 그림: 인질(주황 죄수복, 눈가리개, 묶인 손), 폭탄(빨간 불이 깜빡이는 상자), 깃발"""
+    img = pygame.Surface((60, 120), pygame.SRCALPHA)
+    if kind == "HOSTAGE":
+        pygame.draw.rect(img, (235, 120, 40), (16, 62, 28, 34), border_radius=6)     # 무릎 꿇은 몸
+        pygame.draw.rect(img, (215, 105, 35), (10, 92, 40, 20), border_radius=6)     # 꿇은 다리
+        pygame.draw.circle(img, (230, 200, 170), (30, 52), 11)                       # 머리
+        pygame.draw.rect(img, BLACK, (19, 48, 22, 5))                                # 눈가리개
+        pygame.draw.line(img, (200, 180, 120), (14, 76), (46, 76), 3)                # 밧줄
+    elif kind == "BOMB":
+        pygame.draw.rect(img, (60, 75, 50), (6, 74, 48, 44), border_radius=4)        # 상자
+        for x in range(6, 54, 12):                                                   # 노랑/검정 줄무늬
+            pygame.draw.polygon(img, (230, 200, 40), [(x, 118), (x + 6, 118), (x + 12, 108), (x + 6, 108)])
+        pygame.draw.rect(img, (20, 20, 20), (16, 80, 28, 14))                        # 타이머 화면
+        pygame.draw.rect(img, (255, 40, 40), (19, 83, 22, 8))
+        pygame.draw.circle(img, (255, 50, 50), (48, 72), 5)                          # 깜빡이는 불
+        pygame.draw.lines(img, (220, 40, 40), False, [(10, 74), (14, 64), (20, 72)], 2)   # 전선
+    else:
+        pygame.draw.line(img, (200, 200, 205), (22, 8), (22, 118), 4)                # 깃대
+        pygame.draw.polygon(img, (80, 240, 255), [(24, 10), (56, 18), (24, 30)])      # 깃발
+        pygame.draw.ellipse(img, (90, 90, 95), (10, 112, 26, 8))
+    return img
+
+
 def make_screen_splat(seed):
     """화면에 묻는 핏자국 한 덩어리"""
     rng = random.Random(seed)
@@ -1454,6 +1516,7 @@ SOUND_RECIPES = {
     "heal":      (0.30, 8, 0.0, 0.0, 0, 0, 1000, 0.3, 0.30),
     # 총소리 뒤에 남는 울림, 바닥에 떨어지는 탄피, 재장전 동작 소리
     "tail":      (0.70, 5, 0.6, 0.95, 40, 0.3, 0, 0, 0.35),
+    "beep":      (0.08, 30, 0.0, 0.0, 0, 0, 2000, 0.6, 0.40),
     "casing":    (0.08, 40, 0.0, 0.0, 0, 0, 4200, 0.5, 0.25),
     "magout":    (0.08, 60, 0.8, 0.60, 0, 0, 1200, 0.3, 0.40),
     "magin":     (0.07, 70, 0.9, 0.50, 200, 0.4, 2400, 0.3, 0.45),
@@ -1899,10 +1962,13 @@ def draw_ads_gun(surface, look):
     return V(cx, cy + HEIGHT * 0.045)
 
 
-def make_viewmodel(name, ads):
-    """총 그림을 미리 그려 둬요. (그림, 화면 위치, 총구 위치)를 돌려줘요."""
+def make_viewmodel(name, ads, camo=None):
+    """총 그림을 미리 그려 둬요. (그림, 화면 위치, 총구 위치)를 돌려줘요. camo="gold"면 금색 총"""
     canvas = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-    muzzle = (draw_ads_gun if ads else draw_hip_gun)(canvas, GUN_LOOKS[name])
+    look = GUN_LOOKS[name]
+    if camo == "gold":
+        look = dict(look, body=(212, 175, 55), accent=(165, 128, 35))
+    muzzle = (draw_ads_gun if ads else draw_hip_gun)(canvas, look)
     rect = canvas.get_bounding_rect()
     return canvas.subsurface(rect).copy(), (rect.x, rect.y), (muzzle.x, muzzle.y)
 
@@ -2608,6 +2674,16 @@ class Game:
         self.suppress = 0.0        # 적 총알이 가까이 스치면 올라가요 (화면이 어두워지고 조준이 흔들려요)
         self.dark_vignette = make_hurt_vignette((0, 0, 0))
         self.reload_prev = 0.0     # 재장전 진행 정도 (동작 소리 타이밍)
+        self.objective_images = {kind: make_objective_image(kind) for kind in OBJECTIVES}
+        self.objective = None      # 이번 라운드 목표 (없으면 전멸)
+        self.gun_noise_radius = 16.0
+        self.killcam_from = None   # 나를 쓰러뜨린 곳 (킬캠 카메라 위치)
+        self.killcam_time = 0.0
+        self.killcam_killer = ""
+        self.killcam_zoom = None
+        self.last_attacker = None
+        self.last_source = None
+        self.fail_reason = ""
         self.reset(start_round)
 
     def set_col_w(self, col_w):
@@ -2653,7 +2729,8 @@ class Game:
             self.enemy_images[(kind, "flinch_head")] = pygame.transform.rotate(hurt, 16 * random.choice((-1, 1)))
         # 쓰러지는 모습: 서 있는 그림을 25도, 55도, 90도로 기울인 그림 (왼쪽/오른쪽)
         self.corpse_frames = {}
-        for kind, t in ENEMY_TYPES.items():
+        self.enemy_images[("PLAYER", "hurt")] = make_enemy_image(PLAYER_LOOK, "hurt")   # 킬캠에서 쓰러진 나
+        for kind, t in list(ENEMY_TYPES.items()) + [("PLAYER", dict(height=0.9, width=0.45))]:
             img = self.enemy_images[(kind, "hurt")]
             for side in (-1, 1):
                 frames = []
@@ -2681,6 +2758,8 @@ class Game:
     def reset(self, start_round=1):
         """새 게임 (또는 저장된 라운드부터 시작)"""
         self.round = start_round
+        self.fail_reason = ""
+        self.killcam_from = None
         self.kills = 0
         self.points = 0            # 좀비 모드 점수 (B 탄약, U 총 강화에 써요)
         self.game_over = False
@@ -2695,6 +2774,8 @@ class Game:
 
     def retry_round(self):
         """죽은 라운드부터 다시 (처치 수는 그대로). 좀비 모드는 1웨이브부터"""
+        self.fail_reason = ""
+        self.killcam_from = None
         if self.mode == "zombies":
             self.reset(1)
             return
@@ -2706,7 +2787,9 @@ class Game:
         """로드아웃대로 무기를 챙겨요. 퍼크도 적용해요."""
         specs = None
         if self.loadout:
-            specs = [WEAPON_BY_NAME[self.loadout["primary"]], WEAPON_BY_NAME[self.loadout["secondary"]]]
+            kills = self.save.get("wkills", {})
+            specs = [apply_mods(WEAPON_BY_NAME[name], weapon_mods(kills.get(name, 0)))
+                     for name in (self.loadout["primary"], self.loadout["secondary"])]
         arsenal = Arsenal(specs, reload_mult=0.6 if self.perk == "QUICK HANDS" else 1.0,
                           ammo_mult=1.5 if self.perk == "SCAVENGER" else 1.0)
         if self.perk == "SCAVENGER":
@@ -2795,6 +2878,13 @@ class Game:
             self.sub_banners.append((f"NEW ENEMY: {special}", RED))
         if self.round > 1:
             self.sub_banners.append((f"ENEMY SKILL {self.skill * 100:.0f}%", (255, 160, 60)))
+        # 라운드 목표
+        kind = None if special == "BOSS" else OBJECTIVE_ORDER.get(self.round % 5)
+        self.objective = None
+        if kind and self.round > 1:
+            self.objective = dict(kind=kind, pos=self.far_spot(), progress=0.0, done=False,
+                                  timer=BOMB_TIME, spawn=7.0, beep=0.0)
+            self.sub_banners.insert(1, (f"OBJECTIVE: {OBJECTIVES[kind]['title']}", OBJECTIVES[kind]["color"]))
 
     def reset_round_state(self):
         """라운드(웨이브)마다 새로 시작하는 것들"""
@@ -2802,6 +2892,7 @@ class Game:
         self.effects = []
         self.tracers = []          # 내 총알 궤적: [x0, y0, x1, y1, 남은 시간]
         self.camp_pos = pygame.Vector2(self.player.pos)   # 한자리에 오래 있으면 적이 수류탄을 던져요
+        self.stats = dict(shots=0, hits=0, heads=0, kills=0, best=0, weapons={})   # 라운드 결과 화면용
         self.camp_timer = 0.0
         self.camp_nade = 5.0
         self.enemy_tracers = []    # 적 총알 궤적: [적, 남은 시간, 끝점 흔들림]
@@ -2837,6 +2928,102 @@ class Game:
         self.hit_head = False      # 히트마커를 크게 (헤드샷)
         self.last_kill = -99.0
         self.multi = 0
+
+    def start_killcam(self):
+        """죽었어요: 나를 쓰러뜨린 적의 자리에서 쓰러진 나를 보여줘요"""
+        killer = self.last_attacker if self.last_attacker in self.enemies else None
+        source = killer.pos if killer else self.last_source
+        self.killcam_time = 0.0
+        self.killcam_from = pygame.Vector2(source) if source is not None else None
+        self.killcam_killer = killer.kind if killer else ("BOMB" if self.fail_reason else "EXPLOSION")
+        if self.killcam_from is not None and self.killcam_from.distance_to(self.player.pos) < 0.3:
+            self.killcam_from = None                     # 너무 가까우면(내 수류탄 등) 킬캠 없이
+        body = Corpse(type("Body", (), dict(pos=self.player.pos, kind="PLAYER"))(), pygame.Vector2(0, 0))
+        body.age = 1.0                                   # 이미 쓰러진 모습
+        self.corpses.append(body)
+
+    def draw_killcam(self, screen):
+        """킬캠: 나를 쓰러뜨린 적의 눈으로 천천히 확대해 보여줘요"""
+        real = self.player
+        camera = Player(self.killcam_from.x, self.killcam_from.y)
+        offset = real.pos - self.killcam_from
+        camera.angle = math.atan2(offset.y, offset.x) if offset.length() > 0 else real.angle
+        self.player = camera
+        self.killcam_zoom = 1 + 1.6 * min(1.0, self.killcam_time / 2.2)
+        try:
+            self.draw_sky(screen)
+            self.draw_world(screen)
+            self.draw_sprites(screen)
+            self.draw_particles(screen, casings=False)
+        finally:
+            self.player = real
+            self.killcam_zoom = None
+        band = pygame.Surface((WIDTH, int(70 * UI)), pygame.SRCALPHA)
+        band.fill((0, 0, 0, 170))
+        screen.blit(band, (0, 0))
+        screen.blit(band, (0, HEIGHT - band.get_height()))
+        pygame.draw.rect(screen, RED, (0, 0, WIDTH, HEIGHT), max(3, int(5 * UI)))
+        self.center_text(screen, self.big_font, "KILLCAM", RED, 36 * UI)
+        dist = offset.length()
+        self.center_text(screen, self.font, f"Killed by {self.killcam_killer}   {dist:.0f}m away",
+                         WHITE, HEIGHT - 36 * UI)
+
+    def far_spot(self):
+        """시작 위치에서 걸어서 가장 먼 빈칸 (목표를 놓을 곳)"""
+        start = (int(self.player.pos.x), int(self.player.pos.y))
+        dist = {start: 0}
+        queue = deque([start])
+        while queue:
+            col, row = queue.popleft()
+            for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                cell = (col + dc, row + dr)
+                if cell not in dist and in_map(*cell) and not is_blocked(cell[0] + 0.5, cell[1] + 0.5):
+                    dist[cell] = dist[(col, row)] + 1
+                    queue.append(cell)
+        good = [c for c in dist if GAME_MAP[c[1]][c[0]] not in "EP" + "".join(PICKUP_TILES)]
+        best = max(dist[c] for c in good)
+        col, row = random.choice([c for c in good if dist[c] >= best - 2])
+        return pygame.Vector2(col + 0.5, row + 0.5)
+
+    def update_objective(self, dt):
+        """목표: 가까이 있으면 진행이 차요. 폭탄은 시간이 다 되면 터져요. 거점은 적 지원군이 와요."""
+        o = self.objective
+        if not o or o["done"]:
+            return
+        info = OBJECTIVES[o["kind"]]
+        inside = self.player.pos.distance_to(o["pos"]) < info["radius"]
+        if inside:
+            o["progress"] += dt
+        elif o["kind"] != "HOLD":
+            o["progress"] = max(0.0, o["progress"] - dt * 0.5)    # 자리를 뜨면 조금씩 줄어요
+        if o["kind"] == "BOMB":
+            o["timer"] -= dt
+            o["beep"] -= dt
+            if o["beep"] <= 0:                                  # 시간이 줄수록 빨리 삑삑
+                o["beep"] = 0.25 if o["timer"] < 10 else (0.5 if o["timer"] < 25 else 1.0)
+                self.play_at("beep", o["pos"], 20, 1.0)
+            if o["timer"] <= 0 and o["progress"] < info["need"]:
+                o["done"] = True
+                self.effects.append(Effect(o["pos"], self.explosion_frames, 1.0, 6.0))
+                self.sounds.play("explosion", 1.0)
+                self.shake = 1.0
+                self.fail_reason = "BOMB DETONATED"
+                self.player.hp = 0
+                return
+        if o["kind"] == "HOLD":                                # 지원군
+            o["spawn"] -= dt
+            if o["spawn"] <= 0 and len(self.enemies) < 6:
+                o["spawn"] = 7.0
+                far = [pt for pt in self.spawn_points if self.player.pos.distance_to(pt) > SAFE_SPAWN]
+                if far:
+                    x, y = random.choice(far)
+                    self.enemies.append(Enemy(x, y, self.pick_enemy_kind(), self.skill))
+        if o["progress"] >= info["need"]:
+            o["done"] = True
+            done_text = {"HOSTAGE": "HOSTAGE RESCUED", "BOMB": "BOMB DEFUSED", "HOLD": "POINT SECURED"}[o["kind"]]
+            self.popups.append([f"{done_text}  +{XP['round']}", (80, 240, 255), 2.5])
+            self.add_xp(XP["round"])
+            self.sounds.play("streak")
 
     def punish_camping(self, dt):
         """한자리에 7초 넘게 숨어 있으면, 나를 보는 적이 수류탄을 던져요"""
@@ -2970,6 +3157,8 @@ class Game:
 
     @property
     def zoom(self):
+        if self.killcam_zoom:
+            return self.killcam_zoom
         if not self.aiming:
             return 1
         spec = self.arsenal.current.spec
@@ -3089,6 +3278,7 @@ class Game:
         for effect in self.effects:
             effect.age += dt
         self.effects = [e for e in self.effects if not e.done]
+        self.killcam_time += dt
         if self.game_over:
             return
 
@@ -3148,7 +3338,7 @@ class Game:
         pressed = fire_down and not self.fire_was_down
         self.fire_was_down = fire_down
         if ready and (fire_down if spec["auto"] else pressed) and arsenal.try_fire():
-            self.sounds.play(GUN_SOUNDS[spec["name"]])
+            self.gun_sound(spec)
             self.on_fire(spec)
             if spec.get("lobbed"):
                 self.launch_shell()
@@ -3163,7 +3353,7 @@ class Game:
             self.burst_timer -= dt
             if self.burst_timer <= 0 and arsenal.current.mag > 0 and not arsenal.busy:
                 arsenal.current.mag -= 1
-                self.sounds.play(GUN_SOUNDS[spec["name"]])
+                self.gun_sound(spec)
                 self.on_fire(spec)
                 self.shoot(spec)
                 arsenal.add_recoil()
@@ -3176,7 +3366,7 @@ class Game:
         if p.moving and p.z == 0 and not p.crouch and self.perk != "LIGHTFOOT":
             step_noise = 9.0 if p.sprinting else 4.5
         self.gun_noise = max(0.0, self.gun_noise - dt)
-        p.noise = max(step_noise, 16.0 if self.gun_noise > 0 else 0.0)
+        p.noise = max(step_noise, self.gun_noise_radius if self.gun_noise > 0 else 0.0)
         if self.mode == "zombies":
             self.update_zombies(dt)
         else:
@@ -3214,6 +3404,7 @@ class Game:
                             other.heal_flash = 0.6
                             self.play_at("heal", other.pos, 12, 0.6)
             if damage:
+                self.last_attacker = enemy
                 if "melee" in enemy.t:
                     self.sounds.play("swipe")
                     self.splash_screen(3)            # 좀비에게 할퀴이면 화면에 피
@@ -3236,10 +3427,13 @@ class Game:
         self.update_streaks(dt)
         self.update_effects(dt)
         self.collect_pickups()
+        if self.mode != "zombies":
+            self.update_objective(dt)
 
         if self.player.hp <= 0:
             self.player.hp = 0
             self.game_over = True
+            self.start_killcam()
             if self.mode == "zombies":
                 self.save["zbest"] = max(self.save.get("zbest", 0), self.round)
                 write_save(self.save)
@@ -3255,14 +3449,17 @@ class Game:
             self.add_xp(XP["round"], f"WAVE CLEAR  +{ZOMBIE_POINTS['wave']} POINTS")
             self.save["zbest"] = max(self.save.get("zbest", 0), self.round + 1)
             write_save(self.save)
-        elif self.mode != "zombies" and not self.enemies:
-            self.slowmo = 0.8                         # 마지막 한 명: 슬로모션
-            self.round_clear_timer = 2.5
+        elif self.mode != "zombies" and (self.objective["done"] if self.objective else not self.enemies):
+            self.slowmo = 0.8                         # 마지막 한 명(또는 목표 완료): 슬로모션
+            self.round_clear_timer = 4.0
             self.banner = "ROUND CLEAR"
             self.sub_banners = []
-            self.banner_timer = 2.5
+            self.banner_timer = 4.0
             self.add_xp(XP["round"], f"ROUND CLEAR  +{XP['round']}")
             self.record_progress(self.round + 1)
+
+    def gun_sound(self, spec):
+        self.sounds.play(GUN_SOUNDS[spec["name"]], 0.45 if spec.get("suppressed") else 1.0)
 
     def on_fire(self, spec):
         """쏠 때마다: 조준이 옆으로 살짝 튀고, 화면이 번쩍이고, 탄피가 튀어나와요"""
@@ -3282,6 +3479,8 @@ class Game:
         if not spec["projectile"] and (not spec["auto"] or random.random() < 0.4):
             self.echoes.append([random.uniform(0.3, 0.45), "casing", random.uniform(0.2, 0.35)])
         self.gun_noise = 0.5
+        self.gun_noise_radius = 6.0 if spec.get("suppressed") else 16.0   # 소음기: 가까운 적만 들어요
+        self.stats["shots"] += 1
         self.shake = max(self.shake, 0.03 + spec["kick"] / 450)     # 총이 셀수록 화면이 크게 흔들려요
         if not spec["projectile"]:
             shotgun = spec["name"] == "SHOTGUN"
@@ -3353,6 +3552,8 @@ class Game:
     def hurt_player(self, damage, source=None):
         """나에게 피해. source(때린 위치)가 있으면 화면에 맞은 방향을 표시해요."""
         damage *= DIFFICULTIES[SETTINGS["difficulty"]][2]
+        if source is not None:
+            self.last_source = pygame.Vector2(source)
         self.player.hp -= int(damage)
         self.since_hurt = 0.0
         self.damage_flash = min(1.0, 0.4 + damage / 40)
@@ -3439,6 +3640,20 @@ class Game:
     def on_kill(self, enemy, how):
         """처치 보상: 경험치, 연속 처치 메달, 킬스트릭"""
         self.sounds.play("headshot" if how == "HEADSHOT!" else "kill")
+        stats = self.stats
+        stats["kills"] += 1
+        if how == "HEADSHOT!":
+            stats["heads"] += 1
+        if how in ("DOWN", "HEADSHOT!"):                 # 총으로 쓰러뜨렸으면 그 총의 경험
+            name = self.arsenal.current.spec["name"]
+            stats["weapons"][name] = stats["weapons"].get(name, 0) + 1
+            if self.loadout:
+                kills = self.save.setdefault("wkills", {})
+                kills[name] = kills.get(name, 0) + 1
+                for need, mod in WEAPON_LEVELS:
+                    if kills[name] == need:
+                        self.popups.append([f"{name}: {mod} UNLOCKED!", (255, 200, 60), 3.0])
+                        self.sounds.play("streak")
         if self.mode == "zombies":
             key = {"HEADSHOT!": "headshot", "KNIFE!": "knife"}.get(how, "kill")
             self.points += ZOMBIE_POINTS[key]
@@ -3462,6 +3677,7 @@ class Game:
         # 킬스트릭 (킬스트릭으로 쓰러뜨린 건 안 세요)
         if how not in STREAK_KILLS:
             self.streak += 1
+            self.stats["best"] = max(self.stats["best"], self.streak)
             for need, name in STREAKS:
                 if self.streak == need:
                     self.streaks_ready.append(name)
@@ -3626,6 +3842,8 @@ class Game:
                 if amount > spec["body"] * 0.5 or head:     # 방패에 막힌 총알은 피가 안 나요
                     hits.append((ax, ay, target_dist, head))
 
+        if damage:
+            self.stats["hits"] += 1
         for x, y, perp, head in hits:
             self.spray_blood(x, y, perp, head)
         for enemy, amount in damage.items():
@@ -3822,6 +4040,9 @@ class Game:
 
     # ----- 화면 그리기 -----
     def draw(self, screen):
+        if self.game_over and self.killcam_from is not None and self.killcam_time < KILLCAM_TIME:
+            self.draw_killcam(screen)
+            return
         self.draw_sky(screen)
         self.draw_world(screen)
         self.draw_sprites(screen)
@@ -4020,6 +4241,12 @@ class Game:
             box = self.project(sentry.pos, 0.55, 0.5)
             if box:
                 items.append((box, self.sentry_images[1 if sentry.flash > 0 else 0], None))
+        o = self.objective
+        if o and not (o["done"] and o["kind"] == "HOSTAGE"):
+            height, width = {"HOSTAGE": (0.6, 0.45), "BOMB": (0.45, 0.4), "HOLD": (1.4, 0.6)}[o["kind"]]
+            box = self.project(o["pos"], height, width)
+            if box:
+                items.append((box, self.objective_images[o["kind"]], None))
         for effect in self.effects:
             size = effect.size * (0.5 + 0.5 * effect.age / effect.duration)
             box = self.project(effect.pos, size, size, lift=0.6 - size / 2)
@@ -4098,7 +4325,7 @@ class Game:
         a = self.arsenal
         p = self.player
         ads = self.aiming
-        key = (a.current.spec["name"], ads)
+        key = (a.current.spec["name"], ads, a.current.spec.get("camo"))
         if key not in self.viewmodels:
             self.viewmodels[key] = make_viewmodel(*key)
         image, (ox, oy), (mx, my) = self.viewmodels[key]
@@ -4139,7 +4366,7 @@ class Game:
                 draw_glove(screen, pygame.Vector2(mag_x + 11 * UI, mag_y + rise * 140 * UI + 50 * UI), 22 * UI)
         if a.kick > 0.6:
             big = a.current.spec["name"] in ("SHOTGUN", "ROCKET", "SNIPER")
-            size = (22 if ads else 34) * UI * (1.4 if big else 1.0)
+            size = (22 if ads else 34) * UI * (1.4 if big else 1.0) * (0.45 if a.current.spec.get("suppressed") else 1.0)
             draw_muzzle_flash(screen, (mx + dx, my + dy), size)
 
     def draw_knife(self, screen):
@@ -4294,6 +4521,9 @@ class Game:
                      f"G grenade   V knife   X killstreak   1-{len(self.arsenal.weapons)} weapon   R reload   H help (pause)"]
             for i, hint in enumerate(hints):
                 self.center_text(screen, self.small_font, hint, WHITE, HEIGHT - (82 - i * 20) * UI)
+        self.draw_objective(screen)
+        if self.round_clear_timer > 0 or self.game_over:
+            self.draw_summary(screen, HEIGHT * (0.66 if self.game_over else 0.5))
         if self.banner_timer > 0:
             self.center_text(screen, big_font, self.banner, YELLOW, HEIGHT / 3)
             for i, (text, color) in enumerate(self.sub_banners):
@@ -4308,10 +4538,59 @@ class Game:
                                            f"Best wave {self.save.get('zbest', self.round)}", WHITE, HEIGHT / 2 + 10 * UI)
             self.center_text(screen, font, "R: try again    ESC: menu", YELLOW, HEIGHT / 2 + 45 * UI)
         elif self.game_over:
-            self.center_text(screen, big_font, "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
+            self.center_text(screen, big_font, self.fail_reason or "YOU DIED", RED, HEIGHT / 2 - 40 * UI)
             self.center_text(screen, font, f"Round {self.round}  /  Kills {self.kills}", WHITE, HEIGHT / 2 + 10 * UI)
             self.center_text(screen, font, f"R: retry round {self.round}    N: new game    ESC: menu",
                              YELLOW, HEIGHT / 2 + 45 * UI)
+
+    def draw_objective(self, screen):
+        """목표 위치 표시 (벽 너머로도 보여요), 거리, 진행 막대, 폭탄 타이머"""
+        o = self.objective
+        if not o or o["done"] or self.game_over:
+            return
+        info = OBJECTIVES[o["kind"]]
+        offset = o["pos"] - self.player.pos
+        dist = offset.length()
+        rel = angle_diff(math.atan2(offset.y, offset.x), self.player.angle)
+        if abs(rel) < self.fov / 2:
+            x = WIDTH / 2 + math.tan(rel) * self.proj
+        else:
+            x = 40 * UI if rel < 0 else WIDTH - 40 * UI          # 화면 밖이면 가장자리에
+        y = HEIGHT * 0.2
+        size = 11 * UI
+        pygame.draw.polygon(screen, info["color"], [(x, y - size), (x + size, y), (x, y + size), (x - size, y)])
+        pygame.draw.polygon(screen, BLACK, [(x, y - size), (x + size, y), (x, y + size), (x - size, y)], 2)
+        label = self.fonts["tiny"].render(f"{o['kind']}  {dist:.0f}m", True, info["color"])
+        screen.blit(label, label.get_rect(midtop=(x, y + size + 3)))
+        if o["kind"] == "BOMB":
+            t = max(0, o["timer"])
+            color = RED if t < 15 and pygame.time.get_ticks() // 250 % 2 else WHITE
+            self.center_text(screen, self.font, f"BOMB  {int(t) // 60}:{int(t) % 60:02d}", color, HEIGHT * 0.12)
+        if o["progress"] > 0:
+            frac = min(1.0, o["progress"] / info["need"])
+            bar = pygame.Rect(WIDTH / 2 - 150 * UI, HEIGHT * 0.66, 300 * UI, 14 * UI)
+            pygame.draw.rect(screen, (30, 30, 40), bar)
+            pygame.draw.rect(screen, info["color"], (bar.x, bar.y, bar.w * frac, bar.h))
+            pygame.draw.rect(screen, WHITE, bar, 2)
+            inside = self.player.pos.distance_to(o["pos"]) < info["radius"]
+            text = f"{info['doing']}...  {frac * 100:.0f}%" if inside else "GET BACK TO THE OBJECTIVE"
+            self.center_text(screen, self.small_font, text, info["color"], bar.y - 14 * UI)
+
+    def draw_summary(self, screen, y):
+        """라운드 결과: 명중률, 헤드샷, 처치, 최고 연속 처치, 가장 많이 쓴 무기"""
+        st = self.stats
+        accuracy = round(100 * st["hits"] / st["shots"]) if st["shots"] else 0
+        top = max(st["weapons"], key=st["weapons"].get) if st["weapons"] else "-"
+        text = (f"ACCURACY {accuracy}%    HEADSHOTS {st['heads']}    KILLS {st['kills']}    "
+                f"BEST STREAK {st['best']}    TOP WEAPON {top}")
+        image = self.small_font.render(text, True, WHITE)
+        panel = pygame.Rect(0, 0, image.get_width() + 40 * UI, image.get_height() + 20 * UI)
+        panel.center = (WIDTH / 2, y)
+        shade_panel = pygame.Surface(panel.size, pygame.SRCALPHA)
+        shade_panel.fill((0, 0, 0, 150))
+        screen.blit(shade_panel, panel)
+        pygame.draw.rect(screen, (255, 80, 200), panel, 2)
+        screen.blit(image, image.get_rect(center=panel.center))
 
     def make_minimap(self):
         """미니맵 그림은 바뀌지 않으니 맵마다 한 번만 그려 둬요."""
@@ -4339,6 +4618,9 @@ class Game:
                 pygame.draw.circle(screen, RED, enemy.pos * cell + (ox, oy), max(2, cell // 2 + 1))
         for sentry in self.sentries:
             pygame.draw.circle(screen, (80, 240, 255), sentry.pos * cell + (ox, oy), max(2, cell // 2))
+        if self.objective and not self.objective["done"]:     # 목표 위치
+            color = OBJECTIVES[self.objective["kind"]]["color"]
+            pygame.draw.circle(screen, color, self.objective["pos"] * cell + (ox, oy), max(3, cell))
         if self.radar_timer > 0:
             label = self.fonts["tiny"].render(f"RADAR {self.radar_timer:.0f}", True, (80, 240, 255))
             screen.blit(label, (ox, oy + MAP_H * cell + 2))
@@ -4801,6 +5083,16 @@ async def loadout_screen(save, choice):
         preview = previews[weapon]
         screen.blit(preview, preview.get_rect(bottomright=box.bottomright))
         screen.blit(fonts["normal"].render(weapon, True, WHITE), (box.x + 12, box.y + 10))
+        kills = save.get("wkills", {}).get(weapon, 0)
+        mods = weapon_mods(kills)
+        upcoming = [(need, mod) for need, mod in WEAPON_LEVELS if kills < need]
+        level = f"LV {len(mods) + 1}   {kills} kills"
+        if upcoming:
+            level += f"   next: {upcoming[0][1]} at {upcoming[0][0]}"
+        screen.blit(fonts["tiny"].render(level, True, (255, 200, 60)), (box.x + 12, box.y + 10 + 30 * UI))
+        if mods:
+            screen.blit(fonts["tiny"].render(" + ".join(mods), True, (80, 240, 255)),
+                        (box.x + 12, box.y + 10 + 50 * UI))
         for k, (stat, value) in enumerate(weapon_stats(WEAPON_BY_NAME[weapon])):
             y = HEIGHT * (0.69 + k * 0.045)
             screen.blit(fonts["small"].render(stat, True, (200, 200, 220)), (box.x, y))
