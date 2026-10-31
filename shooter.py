@@ -8580,7 +8580,7 @@ class Game:
         screen.blit(dim, (0, 0))
         cx, cy = WIDTH / 2, HEIGHT * 0.48
         rx, ry = min(WIDTH * 0.36, HEIGHT * 0.62), HEIGHT * 0.34
-        box_w, box_h = min(150 * UI, 2 * math.pi * rx / max(n, 1) * 0.86), 46 * UI
+        box_w, box_h = min(150 * UI, 2 * math.pi * rx / max(n, 1) * 0.8), 46 * UI
         tiny, small = self.fonts["tiny"], self.fonts["small"]
         for i, w in enumerate(weapons):
             ang = -math.pi / 2 + 2 * math.pi * i / n
@@ -8588,7 +8588,7 @@ class Game:
             rect.center = (cx + rx * math.cos(ang), cy + ry * math.sin(ang))
             chosen = i == self.wheel["pick"]
             if chosen:
-                rect.inflate_ip(14 * UI, 8 * UI)
+                rect.inflate_ip(8 * UI, 4 * UI)
             fill = (70, 40, 100) if chosen else ((40, 34, 60) if i == self.arsenal.index else (22, 18, 38))
             pygame.draw.rect(screen, fill, rect, border_radius=int(10 * UI))
             pygame.draw.rect(screen, (255, 80, 200) if chosen else (90, 80, 120), rect, 3 if chosen else 1,
