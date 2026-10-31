@@ -587,6 +587,34 @@ class GameTest(unittest.TestCase):
         game.update(1 / 60, Keys({pygame.K_f: True}), 0, 0, (False, False, False))
         self.assertTrue(any("OUT OF AMMO" in p[0] for p in game.popups))   # 빈 총 딸깍
 
+    def test_setpieces(self):
+        self.assertEqual(shooter.setpiece_for(7), "extraction")
+        self.assertEqual(shooter.setpiece_for(14), "lights")
+        self.assertEqual(shooter.setpiece_for(27), "convoy")
+        self.assertIsNone(shooter.setpiece_for(8))
+        game = shooter.Game({}, 7)                                         # 탈출: 시간이 다 되면 실패
+        self.assertEqual(game.setpiece["kind"], "extraction")
+        self.assertEqual(game.objective["kind"], "REACH")
+        game.banner_timer = 0
+        game.setpiece["timer"] = 0.01
+        game.update_setpiece(0.1)
+        self.assertEqual(game.player.hp, 0)
+        self.assertIn("TOO LATE", game.fail_reason)
+        game = shooter.Game({}, 14)                                        # 소등: 안 들키면 보너스
+        self.assertTrue(game.night)
+        xp = game.xp
+        game.setpiece_on_clear()
+        self.assertEqual(game.xp, xp + shooter.GHOST_BONUS)
+        game = shooter.Game({}, 27)                                        # 호송: 길 끝까지 가면 클리어
+        self.assertEqual(game.setpiece["kind"], "convoy")
+        game.enemies = []
+        for _ in range(4000):
+            game.update_convoy(game.setpiece, 0.05)
+            game.enemies = []
+            if game.objective:
+                break
+        self.assertTrue(game.objective["done"])
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 

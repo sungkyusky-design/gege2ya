@@ -3324,6 +3324,49 @@ BOSS_SNIPE = (32, 1.3)            # 저격 보스: (피해, 레이저 조준 시
 BOSS_STRIKE = (2.2, 40, 2.0)      # 공습 표시: (반경, 피해, 터지기까지 초)
 
 
+# ----- 캠페인 특별 장면 -----
+# 세트마다 7번째·14번째 라운드: 탈출(시간 안에 착륙장으로) / 소등(어둠 속 들키지 않기) / 호송(트럭 지키기)
+SETPIECE_PLAN = {1: ("extraction", "lights"), 2: ("convoy", "extraction"), 3: ("lights", "convoy"),
+                 4: ("extraction", "convoy"), 5: ("lights", "extraction")}
+SETPIECE_INFO = {"extraction": ("EXTRACTION", "REACH THE LZ BEFORE THE HELI LEAVES", (255, 220, 90)),
+                 "lights": ("LIGHTS OUT", "STAY UNSEEN FOR A GHOST BONUS  -  L = FLASHLIGHT", (150, 170, 255)),
+                 "convoy": ("CONVOY", "ESCORT THE TRUCK  -  CLEAR THE ROAD AHEAD", (255, 160, 60))}
+EXTRACT_TIME = 45.0               # 탈출: 착륙장까지 시간(초)
+CONVOY_HP, CONVOY_SPEED = 300, 0.9   # 호송 트럭 체력, 빠르기(칸/초)
+GHOST_BONUS = 500
+
+
+def setpiece_for(round_no):
+    """그 라운드의 특별 장면 이름 (없으면 None)"""
+    in_set = (round_no - 1) % SET_SIZE
+    plan = SETPIECE_PLAN.get(set_of(round_no))
+    if not plan or in_set not in (6, 13):
+        return None
+    return plan[0 if in_set == 6 else 1]
+
+
+def grid_path(start, goal):
+    """칸 단위 최단 길 (너비 우선 탐색). 못 가면 []"""
+    prev = {start: None}
+    queue = deque([start])
+    while queue:
+        cell = queue.popleft()
+        if cell == goal:
+            break
+        for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nxt = (cell[0] + dc, cell[1] + dr)
+            if nxt not in prev and in_map(*nxt) and not is_blocked(nxt[0] + 0.5, nxt[1] + 0.5):
+                prev[nxt] = cell
+                queue.append(nxt)
+    if goal not in prev:
+        return []
+    path, cell = [], goal
+    while cell is not None:
+        path.append(cell)
+        cell = prev[cell]
+    return path[::-1]
+
+
 # ----- 라운드 미니 계약 -----
 # 라운드마다 선택 목표 2개. 깨면 보너스 경험치 (+ 누적 기록, 10개면 업적 CONTRACTOR)
 CONTRACTS = {  # 키: (이름, 한국어, 영어, 목표 수, 좀비 모드에서도?)
@@ -4062,6 +4105,10 @@ class Game:
 
     def start_round(self):
         self.devices = []                       # 장치는 캠페인 전투(start_battle)에서만 다시 놓여요
+        piece = getattr(self, "setpiece", None)
+        if piece and piece["kind"] == "lights":  # 소등 장면이 끝났으면 원래 밝기로
+            self.night, self.dark_key = piece["night_before"], None
+        self.setpiece = None
         if self.mode == "training":
             self.start_training()
         elif self.mode == "zombies":
@@ -4657,6 +4704,9 @@ class Game:
                 self.briefed.add(set_no)
             self.pending_radio = "boss" if special == "BOSS" else "start"
         self.place_devices(set_no, special == "BOSS")
+        kind = setpiece_for(self.round) if not self.challenge and special != "BOSS" else None
+        if kind:
+            self.start_setpiece(kind)
 
     def radio(self, key, force=False):
         """본부 무전: 화면 왼쪽에 글자 + 무전 소리 (캠페인에서만)"""
@@ -4915,6 +4965,105 @@ class Game:
                     move_with_collision(boss.pos, offset.normalize() * boss.t["speed"] * 1.8 * dt)
             elif boss.charge_timer <= -1.2:
                 boss.charge_timer = 6.0
+
+    def start_setpiece(self, kind):
+        """특별 장면 준비 (목표, 어둠, 트럭)"""
+        title, tip, color = SETPIECE_INFO[kind]
+        self.objective = None
+        if kind == "extraction":
+            self.objective = dict(kind="REACH", pos=self.far_spot(), progress=0.0, done=False,
+                                  timer=BOMB_TIME, spawn=7.0, beep=0.0)
+            self.setpiece = dict(kind=kind, timer=EXTRACT_TIME)
+        elif kind == "lights":
+            self.setpiece = dict(kind=kind, spotted=False, night_before=self.night)
+            self.night, self.dark_key = True, None
+        else:
+            start = (int(self.player.pos.x), int(self.player.pos.y))
+            goal = self.far_spot()
+            path = grid_path(start, (int(goal.x), int(goal.y)))
+            if len(path) < 4:
+                self.setpiece = None
+                return
+            truck = dict(pos=pygame.Vector2(path[1][0] + 0.5, path[1][1] + 0.5), path=path, step=1, hp=CONVOY_HP)
+            self.setpiece = dict(kind=kind, truck=truck, spawn=10.0)
+        self.sub_banners.insert(1, (f"SET PIECE: {title}  -  {tip}", color))
+
+    def fail_setpiece(self, reason):
+        if not self.game_over:
+            self.fail_reason = reason
+            self.player.hp = 0                      # 다음 장면에 게임 오버 (다시 하기 R)
+
+    def update_setpiece(self, dt):
+        piece = self.setpiece
+        if not piece or self.game_over or self.round_clear_timer > 0:
+            return
+        if piece["kind"] == "extraction":
+            if self.banner_timer <= 0:
+                piece["timer"] -= dt
+            if piece["timer"] <= 0 and not (self.objective and self.objective["done"]):
+                self.fail_setpiece("TOO LATE - THE HELI LEFT")
+        elif piece["kind"] == "lights":
+            if not piece["spotted"] and any(e.sees for e in self.enemies):
+                piece["spotted"] = True
+                self.popups.append(["SPOTTED! NO GHOST BONUS", RED, 1.8])
+        else:
+            self.update_convoy(piece, dt)
+
+    def update_convoy(self, piece, dt):
+        """호송: 앞길에 적이 없으면 트럭이 길을 따라 가요. 가까이서 트럭을 보는 적은 트럭을 쏴요"""
+        truck = piece["truck"]
+        blocked = any(e.pos.distance_to(truck["pos"]) < 4.5 for e in self.enemies if "melee" not in e.t)
+        if not blocked and truck["step"] < len(truck["path"]) - 1:
+            nxt = pygame.Vector2(truck["path"][truck["step"] + 1]) + pygame.Vector2(0.5, 0.5)
+            offset = nxt - truck["pos"]
+            move = CONVOY_SPEED * dt
+            if offset.length() <= move:
+                truck["pos"].update(nxt)
+                truck["step"] += 1
+            else:
+                truck["pos"] += offset.normalize() * move
+        for e in self.enemies:
+            if e.pos.distance_to(truck["pos"]) < 7 and can_see(e.pos, truck["pos"]):
+                truck["hp"] -= 3.5 * dt
+        piece["spawn"] -= dt
+        if piece["spawn"] <= 0 and len(self.enemies) < 8:
+            piece["spawn"] = 11.0
+            ahead = truck["path"][min(len(truck["path"]) - 1, truck["step"] + 6)]
+            spots = [pt for pt in self.spawn_points if pygame.Vector2(pt).distance_to(pygame.Vector2(ahead)) < 9
+                     and pygame.Vector2(pt).distance_to(self.player.pos) > 6]
+            for x, y in random.sample(spots, min(2, len(spots))):
+                self.enemies.append(Enemy(x, y, "GRUNT", self.skill))
+        if truck["hp"] <= 0:
+            self.fail_setpiece("CONVOY DESTROYED")
+        elif truck["step"] >= len(truck["path"]) - 1:              # 도착: 라운드 클리어
+            self.objective = dict(kind="REACH", pos=pygame.Vector2(truck["pos"]), progress=1.0, done=True,
+                                  timer=0, spawn=0, beep=0)
+            self.popups.append(["CONVOY ARRIVED", (80, 240, 255), 2.0])
+
+    def setpiece_on_clear(self):
+        piece = self.setpiece
+        if piece and piece["kind"] == "lights" and not piece["spotted"]:
+            self.add_xp(GHOST_BONUS)
+            self.popups.append([f"GHOST BONUS  +{GHOST_BONUS}", (150, 170, 255), 2.5])
+
+    def draw_setpiece(self, screen):
+        piece = self.setpiece
+        if not piece or self.game_over:
+            return
+        y = HEIGHT * 0.125
+        if piece["kind"] == "extraction":
+            t = max(0, piece["timer"])
+            color = RED if t < 10 and pygame.time.get_ticks() // 250 % 2 else (255, 220, 90)
+            self.center_text(screen, self.font, f"EXTRACTION  {int(t) // 60}:{int(t) % 60:02d}", color, y)
+        elif piece["kind"] == "lights":
+            text = "LIGHTS OUT  -  SPOTTED" if piece["spotted"] else "LIGHTS OUT  -  UNSEEN"
+            self.center_text(screen, self.small_font, text, RED if piece["spotted"] else (150, 170, 255), y)
+        else:
+            truck = piece["truck"]
+            done = truck["step"] / max(1, len(truck["path"]) - 1)
+            hp = max(0, truck["hp"]) / CONVOY_HP
+            self.center_text(screen, self.small_font, f"CONVOY  HP {hp * 100:.0f}%   ROUTE {done * 100:.0f}%",
+                             RED if hp < 0.3 else (255, 160, 60), y)
 
     def place_devices(self, set_no, boss_round):
         """전투 시작: 벽 옆 빈 칸에 드럼통 몇 개, 가끔 적들 근처에 경보기"""
@@ -6094,6 +6243,8 @@ class Game:
             self.update_boss_effects(dt)
         if self.devices:
             self.update_devices(dt)
+        if getattr(self, "setpiece", None):
+            self.update_setpiece(dt)
         if self.hitstop > 0:        # 쓰러뜨린 순간: 아주 잠깐 멈춤 (묵직한 손맛)
             self.hitstop -= dt
             return
@@ -6888,6 +7039,7 @@ class Game:
     def count_round(self):
         """라운드/웨이브/미션 단계를 깰 때마다 누적 기록"""
         self.director.on_clear()
+        self.setpiece_on_clear()
         self.contracts_on_clear()
         self.sounds.play_sting()
         life = self.save.setdefault("lifetime", {})
@@ -7386,6 +7538,11 @@ class Game:
             screen.blit(self.flash_overlay, (0, 0))
         if self.night or self.flashlight:
             self.draw_darkness(screen)
+        piece = getattr(self, "setpiece", None)
+        if piece and piece["kind"] == "lights":            # 소등: 세상 전체가 더 어두워요
+            dim = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            dim.fill((0, 0, 12, 90 if self.flashlight else 160))
+            screen.blit(dim, (0, 0))
         if self.theme["snow"]:
             self.draw_snow(screen)
         if self.theme.get("rain"):
@@ -7692,6 +7849,11 @@ class Game:
             box = self.project(d.pos, d.height, d.width)
             if box:
                 items.append((box, d.image, None))
+        piece = getattr(self, "setpiece", None)
+        if piece and piece["kind"] == "convoy":
+            box = self.project(piece["truck"]["pos"], 0.9, 1.4)
+            if box:
+                items.append((box, self.car_images[0], None))
         for dev in self.devices:
             height, width = DEVICE_SIZE[dev.kind]
             box = self.project(dev.pos, height, width)
@@ -8391,6 +8553,7 @@ class Game:
                               alpha=int(255 * fade))
         self.draw_objective(screen)
         self.draw_contracts(screen)
+        self.draw_setpiece(screen)
         alarm = next((d for d in self.devices if d.kind == "alarm" and d.state == "arming"), None)
         if alarm and not self.game_over:
             text = f"ALARM IN {alarm.timer:.0f}s  -  SHOOT THE YELLOW BOX"
