@@ -460,6 +460,39 @@ class GameTest(unittest.TestCase):
             game.update(1 / 60, Keys({pygame.K_PERIOD: True}), 0, 0, (False, False, False))
         self.assertGreater(game.lean, 0.9)
 
+    def finale_boss(self, rnd):
+        game = shooter.Game({}, rnd)
+        game.briefing = None
+        boss = next(e for e in game.enemies if e.kind == "BOSS")
+        return game, boss
+
+    def test_finale_bosses_have_patterns(self):
+        styles = [self.finale_boss(r)[1].style for r in (20, 40, 60, 80, 100)]
+        self.assertEqual(styles, ["barrage", "armored", "sniper", "storm", "warlord"])
+        game, boss = self.finale_boss(20)                                  # 수류탄 부채꼴
+        boss.pattern_timer = 0
+        before = len(game.projectiles)
+        game.update_boss_pattern(boss, 0.01)
+        self.assertEqual(len(game.projectiles), before + 3)
+
+    def test_armored_boss_front_and_back(self):
+        game, boss = self.finale_boss(40)
+        boss.facing = (game.player.pos - boss.pos).normalize()           # 나를 보고 있음
+        self.assertAlmostEqual(game.boss_armor(boss, 100), 100 * shooter.BOSS_ARMOR)
+        boss.facing = -boss.facing                                        # 등을 보임
+        self.assertGreater(game.boss_armor(boss, 100), 100)
+
+    def test_storm_marks_explode(self):
+        game, boss = self.finale_boss(80)
+        boss.pattern_timer = 0
+        game.update_boss_pattern(boss, 0.01)
+        self.assertEqual(len(game.boss_marks), 3)
+        game.player.hp = 1000
+        for _ in range(200):
+            game.update_boss_effects(1 / 60)
+        self.assertEqual(game.boss_marks, [])
+        self.assertLess(game.player.hp, 1000)                             # 내 자리에 떨어진 공습
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
