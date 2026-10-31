@@ -3238,7 +3238,7 @@ class Decor:
 
 
 # 맞은 곳 재질: 벽 글자 / 바닥 글자 → 재질 이름
-WALL_MATERIAL = {"W": "metal", "r": "metal", "u": "metal", "o": "metal", "Y": "metal", "U": "metal", "Z": "metal",
+WALL_MATERIAL = {"W": "metal", "r": "metal", "u": "metal", "o": "metal", "Y": "metal", "U": "metal", "Z": "sand",
                  "R": "brick", "M": "brick", "K": "wood", "J": "wood", "d": "wood", "q": "wood", "y": "wood", "m": "wood",
                  "Q": "foliage", "V": "stone", "O": "stone", "F": "snow"}
 FLOOR_MATERIAL = {"~": "water", ".": "sand", ";": "sand", "_": "dirt", "#": "dirt", "p": "dirt", "g": "grass",
@@ -8417,7 +8417,8 @@ async def controls_screen(save):
         draw_title(screen, fonts, "CONTROLS", (WIDTH * 0.06, HEIGHT * 0.08))
         for i, (name, default, desc) in enumerate(KEY_ACTIONS):
             col, line = divmod(i, half)
-            rect = pygame.Rect(WIDTH * (0.05 + col * 0.46), HEIGHT * (0.15 + line * 0.066), WIDTH * 0.44, HEIGHT * 0.058)
+            step = min(0.066, 0.7 / half)                     # 키가 늘어도 아래 안내 줄 위까지
+            rect = pygame.Rect(WIDTH * (0.05 + col * 0.46), HEIGHT * (0.15 + line * step), WIDTH * 0.44, HEIGHT * step * 0.88)
             selected = i == row
             draw_panel(screen, rect, selected, radius=6)
             label = fonts["help"].render(desc if ko else name, True, WHITE)
