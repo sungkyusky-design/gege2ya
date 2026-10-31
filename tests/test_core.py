@@ -548,6 +548,25 @@ class GameTest(unittest.TestCase):
         self.assertEqual(shooter.Game({}, 1, mode="training").contracts, [])
         del enemy
 
+    def test_devices_barrel_and_alarm(self):
+        game = None
+        for rnd in (3, 6, 9, 12, 15, 18):
+            game = shooter.Game({}, rnd)
+            if any(d.kind == "alarm" for d in game.devices):
+                break
+        barrels = [d for d in game.devices if d.kind == "barrel"]
+        self.assertGreaterEqual(len(barrels), 2)
+        alarm = next(d for d in game.devices if d.kind == "alarm")
+        game.damage_device(barrels[0], 100)                                # 드럼통 → 다음 장면에 폭발
+        self.assertEqual(len(game.boon_blasts), 1)
+        before = len(game.enemies)
+        game.enemies[0].sees = True
+        game.player.hp = 10 ** 6
+        for _ in range(int(shooter.ALARM_DELAY * 10) + 5):
+            game.update_devices(0.1)
+        self.assertEqual(alarm.state, "ringing")
+        self.assertGreater(len(game.enemies), before)                      # 증원
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
