@@ -339,6 +339,12 @@ class GameTest(unittest.TestCase):
                          [("↑↓", "고르기"), ("Enter / ESC", "저장하고 돌아가기"), ("", "- 설명")])
         self.assertEqual(shooter.split_hint("UP/DOWN choose   G gunsmith"), [("UP/DOWN", "choose"), ("G", "gunsmith")])
 
+    def test_every_weapon_has_a_class(self):
+        for spec in shooter.WEAPONS:
+            self.assertNotEqual(shooter.weapon_class(spec["name"]), "OTHER", spec["name"])
+        ordered = shooter.class_order(["PISTOL", "SMG", "RIFLE"])
+        self.assertEqual(ordered, ["RIFLE", "SMG", "PISTOL"])
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
