@@ -152,6 +152,8 @@ def check(width, height, hud, shots):
         "missions": lambda: shooter.mission_screen(save),
         "my maps": lambda: shooter.map_slots_screen(save),
         "leaderboard": lambda: shooter.ranking_screen(save),
+        "leaderboard arena": lambda: shooter.ranking_screen(save, len(shooter.RANK_MODES) - 1),
+        "wave arenas": lambda: shooter.arena_screen(save),
         "gunsmith": lambda: shooter.gunsmith_screen(save, "RIFLE"),
         "loadout": lambda: shooter.loadout_screen(save, dict(mode="campaign", round=1)),
         "help": lambda: shooter.help_screen(fonts),
@@ -171,6 +173,7 @@ def check(width, height, hud, shots):
 
     scene("hud campaign", lambda: shooter.Game({}, 45), lambda g: setattr(g, "hint_timer", 5))
     scene("hud zombies", lambda: shooter.Game({}, 1, mode="zombies", loadout=LOADOUT))
+    scene("hud arena", lambda: shooter.Game({}, 4, mode="arena", arena="laststand", loadout=LOADOUT))
     scene("round banner", lambda: shooter.Game({}, 2), frames=60)
 
     def alerts(g):                               # 위쪽 알림이 한꺼번에: 특별 장면 + 경보기 + HQ 무전 + 알림 카드

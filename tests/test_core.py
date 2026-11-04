@@ -729,6 +729,46 @@ class GameTest(unittest.TestCase):
         game.update(1 / 60, Keys(), 0, 0, (False, False, False))
         self.assertEqual(game.round_clear_timer, 0)                       # 증원이 남아 있으면 아직 클리어 아님
 
+    def test_every_arena_runs_waves(self):
+        for key in shooter.ARENA_ORDER:
+            save = {}
+            game = shooter.Game(save, 1, mode="arena", arena=key, loadout=LOADOUT)
+            game.briefing, game.banner_timer = None, 0
+            game.hurt_player = lambda *a, **k: None                       # 테스트: 안 죽게
+            self.assertEqual(game.theme["name"], shooter.ARENAS[key]["map"])
+            total = game.wave_left
+            for _ in range(400):                                          # 적이 나와요
+                game.update(1 / 60, Keys(), 0, 0, (False, False, False))
+                game.player.hp = 10 ** 6
+            self.assertGreater(len(game.enemies), 0, key)
+            game.enemies, game.wave_left = [], 0                          # 다 쓰러뜨리면 웨이브 클리어
+            game.update(1 / 60, Keys(), 0, 0, (False, False, False))
+            self.assertGreater(game.round_clear_timer, 0, key)
+            for _ in range(int(shooter.ARENAS[key]["rest"] * 60) + 30):
+                game.update(1 / 60, Keys(), 0, 0, (False, False, False))
+                game.player.hp = 10 ** 6
+            self.assertEqual(game.round, 2, key)
+            self.assertGreater(game.wave_left + len(game.enemies), total - 1, key)    # 다음 웨이브가 더 커요
+            self.assertEqual(save["arena_best"][key], 2)
+
+    def test_arena_rules(self):
+        game = shooter.Game({}, 1, mode="arena", arena="oneshot", loadout=LOADOUT)
+        game.hurt_player(1)
+        self.assertLessEqual(game.player.hp, 0)                           # 한 방
+        game = shooter.Game({}, 1, mode="arena", arena="laststand", loadout=LOADOUT)
+        game.banner_timer = 0
+        game.player.pos.update(game.zone + pygame.Vector2(shooter.ZONE_RADIUS + 3, 0))
+        hp = game.player.hp
+        game.update_arena(1.0)
+        self.assertLess(game.player.hp, hp)                               # 원 밖이면 아파요
+        game = shooter.Game({}, 1, mode="arena", arena="horde", loadout=LOADOUT)
+        for _ in range(4):
+            game.arena_on_kill(game.player)
+        self.assertEqual(game.combo, 4)
+        self.assertEqual(game.arena_mult(), 4.0)                          # 연속 처치 배율
+        modes = [m for m, _, _ in shooter.RANK_MODES]
+        self.assertIn("arena_chaos", modes)
+
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
 
