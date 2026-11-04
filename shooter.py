@@ -274,7 +274,7 @@ CAMO_COLORS["gold"] = ((212, 175, 55), (165, 128, 35))
 # 내 컴퓨터 랭킹: 모드마다 점수가 높은 판을 10개까지 save["rankings"] 에 저장해요
 # (모드 키, 화면 이름, 어디까지 갔는지 이름)
 RANK_MODES = [("zombies", "ZOMBIES", "WAVE"), ("campaign", "CAMPAIGN", "ROUND"), ("mission", "MISSIONS", "STAGE"),
-              ("deeprun", "DEEP RUN", "DEPTH")]
+              ("deeprun", "DEEP RUN", "DEPTH")]       # (+ 웨이브 아레나 6개는 ARENAS 아래에서 더해요)
 RANK_SIZE = 10
 
 
@@ -2206,7 +2206,7 @@ KO_TEXT = {
     "LOOK SPEED": "시점 속도", "MOUSE SPEED": "마우스 속도", "AIM ASSIST": "조준 보정", "FIELD OF VIEW": "시야각",
     "VOLUME": "소리", "MUSIC": "음악", "FULLSCREEN": "전체 화면", "SQUADMATES": "동료", "UI SIZE": "글자 크기",
     "SCREEN SHAKE": "화면 흔들림", "SOUND MARKS": "소리 표시", "COLORBLIND": "색약 모드", "LANGUAGE": "언어",
-    "WEAPONS": "무기", "RECENT GAMES": "최근 판", "DEEP RUN": "딥 런", "DEPTH": "깊이", "DISPLAY": "화면", "SOUND": "소리", "INPUT": "조작", "GAME": "게임", "GRAPHICS": "그래픽",
+    "WEAPONS": "무기", "RECENT GAMES": "최근 판", "DEEP RUN": "딥 런", "DEPTH": "깊이", "WAVE ARENAS": "웨이브 아레나", "DISPLAY": "화면", "SOUND": "소리", "INPUT": "조작", "GAME": "게임", "GRAPHICS": "그래픽",
 }
 
 
@@ -3414,6 +3414,56 @@ CONVOY_HP, CONVOY_SPEED = 300, 0.9   # 호송 트럭 체력, 빠르기(칸/초)
 GHOST_BONUS = 500
 
 
+# ----- 웨이브 아레나: 웨이브마다 강해지는 적을 버티며 점수 경쟁 (아레나마다 규칙이 달라요) -----
+# 키: name, map(맵 이름), zombies(좀비 길찾기 쓰는지), mult(점수 배율), size(웨이브 크기 = a + b*웨이브),
+#     cap(한 번에 나와 있는 수), rest(쉬는 시간), ko/en(설명)
+ARENAS = {
+    "siege": dict(name="SIEGE", map="DOWNTOWN", zombies=False, mult=1.0, size=(4, 2), cap=12, rest=7.0,
+                  ko="군인 웨이브: 웨이브마다 새 병과, 5웨이브마다 보스. 쉬는 동안 보급", en="Soldier waves, new troop types, boss every 5"),
+    "horde": dict(name="HORDE RUSH", map="BLOOD MOON", zombies=True, mult=1.0, size=(10, 4), cap=26, rest=3.0,
+                  ko="빠르고 많은 좀비. 상점 없음, 연속 처치하면 점수 배율 최대 x5", en="Fast zombie swarms, kill combos up to x5"),
+    "laststand": dict(name="LAST STAND", map="HARBOR", zombies=True, mult=1.2, size=(6, 3), cap=16, rest=5.0,
+                      ko="빛나는 원 안에서만 버텨요 (밖이면 체력이 깎여요). 원은 2웨이브마다 옮겨가요", en="Stay inside the zone; it moves every 2 waves"),
+    "oneshot": dict(name="ONE SHOT", map="NIGHT MARKET", zombies=False, mult=2.0, size=(3, 2), cap=10, rest=5.0,
+                    ko="나도 적도 한 방이면 끝. 점수 2배", en="Everyone dies in one hit, score x2"),
+    "machines": dict(name="MACHINE WAR", map="SNOW BASE", zombies=False, mult=1.3, size=(3, 2), cap=10, rest=6.0,
+                     ko="드론, 레이저병, 중화기병 군단", en="Drones, laser troops and heavies"),
+    "chaos": dict(name="CHAOS", map="SCRAPYARD", zombies=True, mult=1.3, size=(5, 2), cap=14, rest=6.0,
+                  ko="웨이브마다 무작위 규칙 (빠른 적, 거대 웨이브, 폭발하는 적...)", en="A random rule every wave"),
+}
+ARENA_ORDER = ["siege", "horde", "laststand", "oneshot", "machines", "chaos"]
+RANK_MODES += [("arena_" + key, ARENAS[key]["name"], "WAVE") for key in ARENA_ORDER]
+# 혼돈 규칙: (이름, 설명)
+CHAOS_MODS = [("FAST FEET", "enemies move 50% faster"), ("GLASS BONES", "everyone takes double damage"),
+              ("TANK WAVE", "enemies have double health"), ("BLOODLUST", "+10 health per kill"),
+              ("BOOM DEATH", "enemies explode when they die"), ("BIG WAVE", "60% more enemies"),
+              ("SCAVENGER", "triple supply drops"), ("ZOMBIE MIX", "zombies join the soldiers")]
+ZONE_RADIUS = 3.2                # 라스트 스탠드: 원 반지름
+ZONE_DAMAGE = 7.0                # 원 밖에 있으면 초당 피해
+HORDE_COMBO = 1.6                # 이 시간(초) 안에 또 쓰러뜨리면 연속 처치
+
+
+def arena_kind(arena, wave, rng):
+    """그 아레나 그 웨이브에 나올 적 종류 하나"""
+    if arena == "machines":
+        pool = ["DRONE"] * 4 + ["LASER"] * 2 + (["HEAVY"] if wave >= 3 else []) + (["GUNNER"] if wave >= 5 else [])
+        return rng.choice(pool)
+    if arena in ("horde", "laststand"):
+        roll = rng.random()
+        if wave >= 6 and roll < 0.06:
+            return "BRUTE"
+        if wave >= 3 and roll < 0.14:
+            return "EXPLODER"
+        if wave >= 4 and roll < 0.24:
+            return "SPITTER"
+        if roll < min(0.6, 0.12 * wave):
+            return "RUNNER"
+        return "ZOMBIE"
+    troops = ["GRUNT", "SNIPER", "HEAVY", "FLANKER", "SHIELD", "BOMBER", "GUNNER", "MEDIC", "LASER"]
+    pool = ["GRUNT"] * 3 + troops[1:min(len(troops), wave)]
+    return rng.choice(pool)
+
+
 CAMPAIGN_ALIVE = 8                # 한 번에 나와 있는 적 (+ 세트 번호)
 CAMPAIGN_REINFORCE = 2.5          # 증원 간격(초)
 
@@ -3730,7 +3780,7 @@ class Effect:
 # ---------------------------------------------------------------
 class Game:
     def __init__(self, save, start_round=1, mode="campaign", loadout=None, mission=0, stage=0, challenge=None,
-                 custom=None, deeprun=False):
+                 custom=None, deeprun=False, arena=None):
         """save: 저장 정보(dict). 라운드를 깨거나 죽을 때마다 고쳐서 파일에 써요.
         mode: "campaign"(라운드마다 맵이 바뀌는 전투) 또는 "zombies"(좀비 웨이브 버티기)
         loadout: 고른 주무기/보조무기/퍼크 (없으면 모든 무기를 들고 시작)"""
@@ -3841,6 +3891,11 @@ class Game:
         self.wheel = None          # 무기 휠: dict(t=누른 시간, pick=고른 칸, open=열렸는지)
         self.director = Director() # 긴장감 조절 (몰아치기 / 숨 돌리기)
         self.deeprun = deeprun      # DEEP RUN (로그라이트) 인지
+        self.arena = arena          # 웨이브 아레나 이름 (ARENAS 의 키)
+        self.wave_left = 0
+        self.chaos = None           # 혼돈 아레나: 이번 웨이브 규칙
+        self.zone = None            # 라스트 스탠드: 원의 가운데
+        self.combo, self.combo_timer = 1, 0.0
         self.boons = {}             # 고른 강화: {키: 개수}
         self.boon_choice = None     # 고르는 중인 강화 3개 (키 목록)
         self.boon_sel = 0
@@ -4020,7 +4075,7 @@ class Game:
         """한 판이 끝나면 (죽음, 미션 완료, 메뉴로 나가기) 랭킹에 기록해요. 한 판에 한 번만."""
         if self.run_recorded or self.practice or self.challenge or self.run_score <= 0:
             return
-        mode = "deeprun" if self.deeprun else self.mode
+        mode = "deeprun" if self.deeprun else ("arena_" + self.arena if self.mode == "arena" else self.mode)
         if mode not in [m for m, _, _ in RANK_MODES]:
             return
         self.run_recorded = True
@@ -4053,7 +4108,7 @@ class Game:
             return
         self.map_key = None                      # 부서진 상자, 깨진 창문을 원래대로 (맵을 다시 불러요)
         self.map_index = None
-        if self.mode == "zombies":
+        if self.mode in ("zombies", "arena"):
             self.reset(1)
             return
         if self.mode == "mission":
@@ -4202,6 +4257,8 @@ class Game:
             self.start_training()
         elif self.mode == "zombies":
             self.start_wave()
+        elif self.mode == "arena":
+            self.start_arena_wave()
         elif self.mode == "mission":
             self.start_mission()
         elif self.challenge:
@@ -4456,7 +4513,7 @@ class Game:
         fade = min(1.0, self.banner_timer / 0.5, age / 0.2)                 # 처음과 끝에 부드럽게
         lines = list(self.sub_banners)
         brief = ""
-        if self.round_clear_timer <= 0 and self.theme.get("brief"):
+        if self.round_clear_timer <= 0 and self.theme.get("brief") and self.mode in ("campaign", "zombies"):
             brief = self.theme["brief"][:int(self.brief_age * 40)]
         brief_lines = wrap_text(self.small_font, brief, WIDTH * 0.7) if brief else []
         title_h, line_h, brief_h = 56 * UI, 30 * UI, 22 * UI
@@ -4709,6 +4766,172 @@ class Game:
         self.reset_streak()
         self.reset_round_state()
         self.banner_timer = 0.0
+
+    def start_arena_wave(self):
+        """웨이브 아레나: 1웨이브에서 맵·체력·무기를 새로, 다음 웨이브는 이어가요 (조금 회복 + 수류탄 1)"""
+        info = ARENAS[self.arena]
+        index = next(i for i, m in enumerate(MAPS) if m["name"] == info["map"])
+        if self.map_index != index:
+            self.setup_map(index)
+        if self.round == 1 or not hasattr(self, "arsenal"):
+            self.player = Player(*find_cells("P")[0])
+            self.player.hp = self.max_hp
+            self.arsenal = self.make_arsenal()
+            self.pickups = [Pickup(x, y, kind) for letter, kind in PICKUP_TILES.items() for x, y in find_cells(letter)]
+            self.zone = None
+        else:
+            self.arsenal.grenades = min(GRENADES_MAX, self.arsenal.grenades + 1)
+            self.player.hp = min(self.max_hp, self.player.hp + 25)
+        self.enemies = []
+        if info["zombies"]:
+            self.update_flow()                       # 좀비 길찾기 지도를 이 맵으로 (다른 맵의 지도가 남아 있지 않게)
+        a, b = info["size"]
+        self.wave_left = a + b * self.round
+        self.spawn_timer, self.flow_timer = 2.0, 0.0
+        self.chaos = random.choice(CHAOS_MODS) if self.arena == "chaos" else None
+        if self.chaos and self.chaos[0] == "BIG WAVE":
+            self.wave_left = int(self.wave_left * 1.6)
+        self.banner = f"WAVE {self.round}"
+        self.sub_banners = [(f"{info['name']}  -  {self.wave_left} ENEMIES", RED)]
+        if self.arena == "siege" and self.round % 5 == 0:
+            self.sub_banners.append(("BOSS WAVE!", RED))
+        if self.chaos:
+            self.sub_banners.append((f"CHAOS: {self.chaos[0]}  -  {self.chaos[1]}", (255, 160, 60)))
+        if self.arena == "laststand" and (self.zone is None or self.round % 2 == 1):
+            self.move_zone()
+        if self.arena == "laststand":
+            self.objective = dict(kind="HOLD", pos=pygame.Vector2(self.zone), progress=0.0, done=False,
+                                  timer=0, spawn=0, beep=0)
+        else:
+            self.objective = None
+
+    def move_zone(self):
+        """라스트 스탠드: 원을 다른 빈 곳으로 (지금 자리에서 너무 멀지 않게)"""
+        p = self.player.pos
+        spots = [pygame.Vector2(c + 0.5, r + 0.5) for r, line in enumerate(GAME_MAP) for c, _ in enumerate(line)
+                 if not is_blocked(c + 0.5, r + 0.5) and 4 < p.distance_to((c + 0.5, r + 0.5)) < 12
+                 and sum(is_blocked(c + dx + 0.5, r + dy + 0.5) for dx in (-2, 0, 2) for dy in (-2, 0, 2)) <= 2]
+        if spots:
+            self.zone = random.choice(spots)
+            if self.round > 1 and hasattr(self, "popups"):
+                self.popups.append(["ZONE MOVED! GET INSIDE", (80, 240, 255), 2.5])
+        elif self.zone is None:
+            self.zone = pygame.Vector2(p)
+
+    def spawn_arena_enemy(self):
+        """안 보이는 먼 곳에서 한 명 (좀비는 길이 이어진 곳에서만). 군인은 나를 찾아와요"""
+        p = self.player.pos
+        flow = Enemy.flow
+        spots = [pt for pt in self.spawn_points if p.distance_to(pt) > 6 and not can_see(p, pygame.Vector2(pt))
+                 and (flow is None or not ARENAS[self.arena]["zombies"] or flow[int(pt[1])][int(pt[0])] is not None)]
+        if not spots:
+            spots = sorted(self.spawn_points, key=lambda pt: -p.distance_to(pt))[:3]
+        x, y = random.choice(spots)
+        if self.arena == "siege" and self.round % 5 == 0 and not any(e.kind == "BOSS" for e in self.enemies) \
+                and self.wave_left == ARENAS["siege"]["size"][0] + ARENAS["siege"]["size"][1] * self.round:
+            kind = "BOSS"
+        elif self.chaos and self.chaos[0] == "ZOMBIE MIX" and random.random() < 0.5:
+            kind = arena_kind("horde", self.round, random)
+        else:
+            kind = arena_kind(self.arena, self.round, random)
+        enemy = Enemy(x, y, kind, self.skill)
+        if self.arena == "horde":
+            enemy.t = dict(enemy.t, speed=enemy.t["speed"] * 1.3)
+        if self.arena == "oneshot":
+            enemy.t = dict(enemy.t, hp=1, reaction=enemy.t["reaction"] * 1.4)
+            enemy.hp = 1
+        if self.chaos:
+            name = self.chaos[0]
+            if name == "FAST FEET":
+                enemy.t = dict(enemy.t, speed=enemy.t["speed"] * 1.5)
+            elif name == "TANK WAVE":
+                enemy.t = dict(enemy.t, hp=enemy.t["hp"] * 2)
+                enemy.hp = enemy.t["hp"]
+            elif name == "GLASS BONES":
+                enemy.hp = enemy.t["hp"] / 2
+        if "melee" not in enemy.t:
+            enemy.search = pygame.Vector2(p)              # 군인은 나를 찾아와요
+        self.enemies.append(enemy)
+        self.wave_left -= 1
+
+    def update_arena(self, dt):
+        """아레나: 적 나오기, 좀비 길찾기, 겹치지 않게 밀기, 원 밖 피해, 연속 처치, 웨이브 클리어"""
+        info = ARENAS[self.arena]
+        if any("melee" in e.t for e in self.enemies):
+            self.flow_timer -= dt
+            if self.flow_timer <= 0:
+                self.flow_timer = 0.3
+                self.update_flow()
+        if self.round_clear_timer <= 0 and self.wave_left > 0 and len(self.enemies) < info["cap"]:
+            self.spawn_timer -= dt * self.director.spawn_mult
+            if self.spawn_timer <= 0:
+                self.spawn_timer = max(0.3, (0.9 if self.arena == "horde" else 1.8) - self.round * 0.06)
+                self.spawn_arena_enemy()
+        for i, a in enumerate(self.enemies):                # 서로 겹치지 않게
+            for b in self.enemies[i + 1:]:
+                offset = a.pos - b.pos
+                d = offset.length()
+                if 0 < d < 0.45:
+                    push = offset.normalize() * (0.45 - d) * 0.5
+                    move_with_collision(a.pos, push)
+                    move_with_collision(b.pos, -push)
+        if self.combo_timer > 0:
+            self.combo_timer -= dt
+            if self.combo_timer <= 0:
+                self.combo = 1
+        if self.zone is not None and self.round_clear_timer <= 0 and not self.game_over:
+            if self.player.pos.distance_to(self.zone) > ZONE_RADIUS:
+                self.zone_hurt = getattr(self, "zone_hurt", 0.0) + dt
+                if self.zone_hurt >= 0.5:
+                    self.hurt_player(ZONE_DAMAGE * self.zone_hurt)
+                    self.zone_hurt = 0.0
+            else:
+                self.zone_hurt = 0.0
+        if self.wave_left == 0 and not self.enemies and self.round_clear_timer <= 0 and not self.game_over:
+            self.round_clear_timer = info["rest"]
+            self.banner = f"WAVE {self.round} CLEARED"
+            self.sub_banners = [(f"NEXT WAVE IN {info['rest']:.0f}s", WHITE)]
+            self.banner_timer = info["rest"]
+            self.add_xp(int(XP["round"] * (1 + 0.15 * self.round)), f"WAVE CLEAR  +{int(XP['round'] * (1 + 0.15 * self.round))}")
+            self.count_round()
+            best = self.save.setdefault("arena_best", {})
+            best[self.arena] = max(best.get(self.arena, 0), self.round + 1)
+            write_save(self.save)
+            if self.arena in ("siege", "machines", "oneshot") or (self.chaos and self.chaos[0] == "SCAVENGER"):
+                self.supply_drop(3 if self.chaos and self.chaos[0] == "SCAVENGER" else 1)
+
+    def arena_on_kill(self, enemy):
+        if self.arena == "horde":
+            self.combo = min(5, self.combo + 1) if self.combo_timer > 0 else 1
+            self.combo_timer = HORDE_COMBO
+            if self.combo >= 3:
+                self.popups.append([f"COMBO x{self.combo}", (255, 200, 60), 0.6])
+        if self.chaos:
+            if self.chaos[0] == "BLOODLUST":
+                self.player.hp = min(self.max_hp, self.player.hp + 10)
+            elif self.chaos[0] == "BOOM DEATH":
+                self.boon_blasts.append((pygame.Vector2(enemy.pos), 1.8, 45))
+
+    def supply_drop(self, sets):
+        """쉬는 동안 근처에 탄약·구급 상자"""
+        p = self.player.pos
+        for _ in range(sets):
+            for kind in ("ammo", "health"):
+                for _ in range(30):
+                    spot = p + pygame.Vector2(random.uniform(1.5, 4), 0).rotate(random.uniform(0, 360))
+                    if in_map(int(spot.x), int(spot.y)) and not is_blocked(spot.x, spot.y):
+                        self.pickups.append(Pickup(spot.x, spot.y, kind))
+                        break
+        self.popups.append(["SUPPLY DROP NEARBY", (80, 240, 255), 2.0])
+
+    def arena_mult(self):
+        """랭킹 점수 배율: 아레나 기본 x 연속 처치(호드) x 원 안(라스트 스탠드)"""
+        if self.mode != "arena":
+            return 1.0
+        mult = ARENAS[self.arena]["mult"] * (self.combo if self.arena == "horde" else 1)
+        if self.zone is not None and self.player.pos.distance_to(self.zone) <= ZONE_RADIUS:
+            mult *= 1.25
+        return mult
 
     def start_wave(self):
         """좀비 웨이브: 1웨이브에서만 새로 시작하고, 다음 웨이브는 체력과 무기를 그대로 이어가요."""
@@ -5385,6 +5608,21 @@ class Game:
             self.popups.append(["ARMOR! FLANK HIM", (255, 200, 60), 2.0])
         return amount * BOSS_ARMOR
 
+    def draw_ground_ring(self, screen, pos, radius, color, width):
+        """바닥에 원근감 있는 원 (화면 뒤로 넘어가는 점은 빼고 이어 그려요)"""
+        points = []
+        for k in range(32):
+            box = self.project(pos + pygame.Vector2(radius, 0).rotate(k * 360 / 32), 0.0, 0.01)
+            if box and box[4] > 0.3:
+                points.append((box[0], box[2]))
+            elif len(points) > 1:
+                pygame.draw.lines(screen, color, False, points, width)
+                points = []
+            else:
+                points = []
+        if len(points) > 1:
+            pygame.draw.lines(screen, color, False, points, width)
+
     def draw_boss_telegraphs(self, screen):
         """공습 표시(바닥의 빨간 원)와 저격 레이저(빨간 선)"""
         strike_r, _, total = BOSS_STRIKE
@@ -6049,7 +6287,7 @@ class Game:
         before = self.rank
         self.xp += amount
         self.save["xp"] = self.xp
-        self.run_score += amount                     # 랭킹 점수
+        self.run_score += int(amount * self.arena_mult())        # 랭킹 점수 (아레나는 배율)
         self.stats["score"] = self.stats.get("score", 0) + amount
         if text:
             self.popups.append([text, color, 1.4])
@@ -6458,8 +6696,8 @@ class Game:
                 else:
                     self.round += 1
                 self.start_round()
-            if self.mode != "zombies":
-                return                     # 좀비 모드는 쉬는 동안에도 움직이고 상점을 쓸 수 있어요
+            if self.mode not in ("zombies", "arena"):
+                return                     # 좀비·아레나는 쉬는 동안에도 움직일 수 있어요
 
         arsenal = self.arsenal
         spec = arsenal.current.spec
@@ -6582,6 +6820,10 @@ class Game:
             self.update_director(dt)
         if self.mode == "zombies":
             self.update_zombies(edt)
+        elif self.mode == "arena":
+            self.update_arena(edt)
+            self.punish_camping(dt)
+            self.update_squad(dt)
         else:
             if self.mode == "training":
                 self.update_training(dt)
@@ -6677,7 +6919,7 @@ class Game:
             self.update_mounted(dt)
         self.update_effects(dt)
         self.collect_pickups()
-        if self.mode != "zombies":
+        if self.mode not in ("zombies", "arena"):
             self.update_objective(dt)
 
         if self.player.hp <= 0 and not self.game_over:
@@ -6687,6 +6929,10 @@ class Game:
             self.start_killcam()
             if self.mode == "zombies":
                 self.save["zbest"] = max(self.save.get("zbest", 0), self.round)
+                write_save(self.save)
+            elif self.mode == "arena":
+                best = self.save.setdefault("arena_best", {})
+                best[self.arena] = max(best.get(self.arena, 0), self.round)
                 write_save(self.save)
             elif self.deeprun:
                 self.end_deeprun()
@@ -6945,6 +7191,11 @@ class Game:
         damage *= DIFFICULTIES[SETTINGS["difficulty"]][2]
         if self.mounted:
             damage *= 0.7                                  # 기관총 방패와 담 뒤라서 덜 아파요
+        if self.mode == "arena" and damage > 0:
+            if self.arena == "oneshot":
+                damage = max(damage, self.player.hp + 1)           # 한 방
+            elif self.chaos and self.chaos[0] == "GLASS BONES":
+                damage *= 2
         if self.challenge == "HARDCORE" and damage > 0:
             damage = max(damage, self.player.hp + 1)      # 한 방에 끝
         damage *= 1 - self.director.assist              # 같은 곳에서 여러 번 죽으면 조금 덜 아파요
@@ -7052,6 +7303,8 @@ class Game:
 
     def on_kill(self, enemy, how):
         """처치 보상: 경험치, 연속 처치 메달, 킬스트릭"""
+        if self.mode == "arena":
+            self.arena_on_kill(enemy)
         if getattr(self, "contracts", None):
             dist = enemy.pos.distance_to(self.player.pos)
             if how in ("KNIFE!", "TAKEDOWN!"):
@@ -7716,6 +7969,9 @@ class Game:
         self.draw_world(screen)
         self.draw_sprites(screen)
         self.draw_boss_telegraphs(screen)
+        if self.zone is not None and not self.game_over:          # 라스트 스탠드 원 (바닥에)
+            inside = self.player.pos.distance_to(self.zone) <= ZONE_RADIUS
+            self.draw_ground_ring(screen, self.zone, ZONE_RADIUS, UI_CYAN if inside else RED, 3)
         self.draw_particles(screen, casings=False)       # 튀는 피
         if self.lightning > 0:
             self.flash_overlay.set_alpha(int(190 * self.lightning / 0.3 * (0.75 + 0.25 * math.sin(self.lightning * 60))))
@@ -8849,6 +9105,11 @@ class Game:
             t = self.challenge_time if self.challenge != "BLITZ" else max(0.0, BLITZ_TIME - self.challenge_time)
             info = (f"CHALLENGE {self.challenge}   {self.theme['name']}   ENEMIES {len(self.enemies)}   "
                     f"{'LEFT ' if self.challenge == 'BLITZ' else 'TIME '}{int(t) // 60}:{int(t) % 60:02d}")
+        elif self.mode == "arena":
+            extra = f"   COMBO x{self.combo}" if self.arena == "horde" and self.combo > 1 else ""
+            extra += f"   {self.chaos[0]}" if self.chaos else ""
+            info = (f"{ARENAS[self.arena]['name']}   WAVE {self.round}   ENEMIES {len(self.enemies) + self.wave_left}   "
+                    f"KILLS {self.kills}{extra}")
         elif self.mode == "zombies":
             info = (f"WAVE {self.round}   {self.theme['name']}   "
                     f"ZOMBIES {len(self.enemies) + self.zombies_left}   KILLS {self.kills}")
@@ -8897,6 +9158,10 @@ class Game:
         self.draw_objective(screen)
         self.draw_contracts(screen)
         self.draw_setpiece(screen)
+        if self.zone is not None and not self.game_over and self.player.pos.distance_to(self.zone) > ZONE_RADIUS:
+            color = RED if pygame.time.get_ticks() // 250 % 2 else (255, 200, 60)
+            self.center_text(screen, self.small_font, "OUTSIDE THE ZONE! GET BACK IN", color,
+                             max(12 + 108 * UI, HEIGHT * 0.2 + 48 * UI))           # 원 표시 글자 아래
         alarm = next((d for d in self.devices if d.kind == "alarm" and d.state == "arming"), None)
         if alarm and not self.game_over:
             text = f"ALARM IN {alarm.timer:.0f}s  -  SHOOT THE YELLOW BOX"
@@ -8928,6 +9193,10 @@ class Game:
                     [(r, "BACK TO CHECKPOINT"), ("ESC", "MENU")])
         if self.mode == "zombies":
             return ("YOU DIED", RED, f"WAVE {self.round}   KILLS {self.kills}   BEST WAVE {self.save.get('zbest', self.round)}",
+                    retry)
+        if self.mode == "arena":
+            best = self.save.get("arena_best", {}).get(self.arena, self.round)
+            return ("YOU DIED", RED, f"{ARENAS[self.arena]['name']}   WAVE {self.round}   KILLS {self.kills}   BEST WAVE {best}",
                     retry)
         return (self.fail_reason or "YOU DIED", RED, f"ROUND {self.round}   KILLS {self.kills}",
                 [(r, f"RETRY ROUND {self.round}"), (kl(pygame.K_n), "NEW GAME"), ("ESC", "MENU")])
@@ -9818,12 +10087,25 @@ async def ranking_screen(save, mode_index=0):
         draw_backdrop(screen)
         draw_title(screen, fonts, "LEADERBOARD", (WIDTH * 0.06, HEIGHT * 0.09))
         # 위쪽 모드 칸
-        for i, (_, name, _) in enumerate(RANK_MODES):
-            rect = pygame.Rect(WIDTH * (0.06 + i * 0.2), HEIGHT * 0.17, WIDTH * 0.18, HEIGHT * 0.06)
+        shown = 4                                            # 탭이 많아서 4개씩 보여요
+        first = max(0, min(mode_index - 1, len(RANK_MODES) - shown))
+        for j, i in enumerate(range(first, first + shown)):
+            name = RANK_MODES[i][1]
+            rect = pygame.Rect(WIDTH * (0.08 + j * 0.215), HEIGHT * 0.17, WIDTH * 0.2, HEIGHT * 0.06)
             selected = i == mode_index
             draw_panel(screen, rect, selected)
-            image = fonts["normal"].render(tr(fonts, name), True, WHITE if selected else (150, 150, 170))
+            label = fit_text(fonts["normal"], tr(fonts, name), rect.w - 12)
+            image = fonts["normal"].render(label, True, WHITE if selected else (150, 150, 170))
             screen.blit(image, image.get_rect(center=rect.center))
+        arrows = fonts["small"]
+        if first > 0:
+            image = arrows.render("<", True, UI_CYAN)
+            screen.blit(image, image.get_rect(center=(WIDTH * 0.05, HEIGHT * 0.2)))
+        if first + shown < len(RANK_MODES):
+            image = arrows.render(">", True, UI_CYAN)
+            screen.blit(image, image.get_rect(center=(WIDTH * 0.95, HEIGHT * 0.2)))
+        page = fonts["tiny"].render(f"{mode_index + 1} / {len(RANK_MODES)}", True, UI_DIM)
+        screen.blit(page, page.get_rect(topright=(WIDTH * 0.94, HEIGHT * 0.235)))
         # 표 머리
         cols = [0.06, 0.12, 0.26, 0.38, 0.48, 0.74]
         heads = ["#", "SCORE", reached_name, "KILLS", "MAP", "DATE"]
@@ -10060,6 +10342,7 @@ INTRO_ITEMS = [
     (pygame.K_o, "O", "MISSIONS", "큰 맵에서 5단계 작전", "Five-stage operations on huge maps", 0),
     (pygame.K_x, "X", "CHALLENGES", "오늘의 도전, 헤드샷만, 권총만...", "Daily, headshots only, pistol only...", 0),
     (pygame.K_r, "R", "TRAINING", "사격장에서 연습 (기록 안 바뀜)", "Practice range (no progress)", 0),
+    (pygame.K_w, "W", "WAVE ARENAS", "웨이브 버티기 6종: 아레나마다 규칙이 달라요", "6 wave-survival arenas with their own rules", 0),
     (pygame.K_g, "G", "DEEP RUN", "로그라이트: 깰 때마다 강화를 골라 더 깊이", "Roguelite: pick a boon after every clear", 0),
     (pygame.K_e, "E", "MY MAPS", "맵을 직접 그리고 플레이해요", "Draw your own maps and play them", 0),
     (pygame.K_l, "L", "LEADERBOARD", "모드별 점수 TOP 10", "Top 10 scores per mode", 1),
@@ -10071,6 +10354,57 @@ INTRO_ITEMS = [
     (pygame.K_t, "T", "RESOLUTION", "←→ 로 화면 크기를 바꿔요", "LEFT/RIGHT changes the window size", 1),
     (pygame.K_h, "H", "HOW TO PLAY", "조작법과 팁", "Controls and tips", 1),
 ]
+
+
+async def arena_screen(save):
+    """웨이브 아레나 고르기: ↑↓ 고르기, Enter 시작, ESC 뒤로. 아레나마다 최고 웨이브와 1등 점수"""
+    screen = pygame.display.get_surface()
+    fonts = make_fonts()
+    ko = fonts["lang"] == "ko"
+    clock = pygame.time.Clock()
+    row = 0
+    while True:
+        clock.tick(30)
+        for event in menu_events():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type != pygame.KEYDOWN:
+                continue
+            if event.key == pygame.K_ESCAPE:
+                return None
+            if event.key in (pygame.K_UP, pygame.K_w):
+                row = (row - 1) % len(ARENA_ORDER)
+            elif event.key in (pygame.K_DOWN, pygame.K_s):
+                row = (row + 1) % len(ARENA_ORDER)
+            elif event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_KP_ENTER):
+                return dict(mode="arena", round=1, arena=ARENA_ORDER[row])
+        draw_backdrop(screen)
+        draw_title(screen, fonts, "WAVE ARENAS", (WIDTH * 0.06, HEIGHT * 0.09))
+        room = HEIGHT - 44 * UI - HEIGHT * 0.18                    # 제목 아래 ~ 키 안내 띠 위
+        step = min(HEIGHT * 0.115, room / len(ARENA_ORDER))
+        name_h = fonts["normal"].get_linesize()
+        desc_font = fonts["help"] if name_h + fonts["help"].get_linesize() + 10 * UI <= step * 0.9 else fonts["tiny"]
+        best = save.get("arena_best", {})
+        for i, key in enumerate(ARENA_ORDER):
+            info = ARENAS[key]
+            rect = pygame.Rect(WIDTH * 0.06, HEIGHT * 0.18 + i * step, WIDTH * 0.88, step * 0.9)
+            selected = i == row
+            draw_panel(screen, rect, selected)
+            name = fonts["normal"].render(info["name"], True, YELLOW if selected else WHITE)
+            screen.blit(name, (rect.x + 16 * UI, rect.y + 6 * UI))
+            desc = fit_text(desc_font, info["ko"] if ko else info["en"], rect.w * 0.62)
+            screen.blit(desc_font.render(desc, True, (200, 230, 255)), (rect.x + 16 * UI, rect.bottom - desc_font.get_linesize() - 3 * UI))
+            top = top_score(save, "arena_" + key)
+            record = f"BEST WAVE {best.get(key, 0)}   #1 {top if top else '-'}   x{info['mult']:g}"
+            image = fonts["small"].render(record, True, UI_CYAN)
+            screen.blit(image, image.get_rect(topright=(rect.right - 16 * UI, rect.y + 8 * UI)))
+            mapname = fonts["tiny"].render(info["map"], True, UI_DIM)
+            screen.blit(mapname, mapname.get_rect(bottomright=(rect.right - 16 * UI, rect.bottom - 6 * UI)))
+        hint = ("↑↓ 고르기     Enter 시작     ESC 뒤로   - 죽으면 끝, 점수는 랭킹(L)에" if ko
+                else "UP/DOWN choose     ENTER start     ESC back   - one life, score goes to the leaderboard (L)")
+        draw_hint_bar(screen, fonts, hint)
+        present("arena_screen")
+        await asyncio.sleep(0)
 
 
 async def help_screen(fonts):
@@ -10224,6 +10558,11 @@ async def intro_screen(save):
                 return dict(mode="zombies", round=1)
             if key == pygame.K_g:
                 return dict(mode="campaign", round=1, deeprun=True)
+            if key == pygame.K_w:
+                picked = await arena_screen(save)
+                if picked == "closed" or picked:
+                    return picked
+                continue
             if key == pygame.K_r:
                 return dict(mode="training", round=1)
             if key == pygame.K_h:
@@ -10661,6 +11000,9 @@ async def loadout_screen(save, choice):
             mode_text = f"MISSION  -  {MISSIONS[choice['mission']]['name']}"
         elif choice["mode"] == "custom":
             mode_text = f"CUSTOM MAP  -  {choice['custom_map']['name']}  (PRACTICE)"
+        elif choice["mode"] == "arena":
+            best = save.get("arena_best", {}).get(choice["arena"], 0)
+            mode_text = f"{ARENAS[choice['arena']]['name']}  -  BEST WAVE {best}"
         elif choice.get("deeprun"):
             best = save.get("deeprun", {}).get("best", 0)
             mode_text = f"DEEP RUN  -  BEST DEPTH {best}"
@@ -10991,7 +11333,7 @@ async def run():
     # 사격장은 저장 정보의 복사본으로 (무엇을 해도 진짜 저장에는 남지 않아요)
     game = Game(copy.deepcopy(save) if training else save, choice["round"], mode=choice["mode"], loadout=loadout,
                 mission=choice.get("mission", 0), stage=choice.get("stage", 0), challenge=choice.get("challenge"),
-                custom=choice.get("custom_map"), deeprun=choice.get("deeprun", False))
+                custom=choice.get("custom_map"), deeprun=choice.get("deeprun", False), arena=choice.get("arena"))
     running = True
     closed = False             # 창을 닫았는지 여부
     work_time, frames, check_timer = 0.0, 0, 0.0   # 자동 해상도 조절용 기록
