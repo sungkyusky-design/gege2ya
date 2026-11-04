@@ -112,6 +112,8 @@ def main():
     loadout = dict(primary="RIFLE", secondary="PISTOL", perk="HEAVY ROUNDS")
     cases = [(f"campaign round {r}", dict(start_round=r, mode="campaign")) for r in (1, 23, 47, 66, 100)]
     cases.append(("zombies", dict(start_round=1, mode="zombies")))
+    cases += [(f"arena {k}", dict(start_round=1, mode="arena", arena=k)) for k in shooter.ARENA_ORDER]
+    cases.append(("deep run", dict(start_round=1, mode="campaign", deeprun=True)))
     cases.append(("training range", dict(start_round=1, mode="training")))
     cases.append(("custom map", dict(start_round=1, mode="custom", custom=dict(name="TEST", rows=shooter.blank_map()))))
     cases += [(f"mission {m['name']}", dict(start_round=1, mode="mission", mission=i))
