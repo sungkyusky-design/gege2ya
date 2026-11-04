@@ -3414,6 +3414,16 @@ CONVOY_HP, CONVOY_SPEED = 300, 0.9   # 호송 트럭 체력, 빠르기(칸/초)
 GHOST_BONUS = 500
 
 
+CAMPAIGN_ALIVE = 8                # 한 번에 나와 있는 적 (+ 세트 번호)
+CAMPAIGN_REINFORCE = 2.5          # 증원 간격(초)
+
+
+def campaign_enemy_total(round_no):
+    """캠페인 라운드의 전체 적 수 (처음 + 증원): 1라운드 6명 → 세트가 오를수록 많아져요"""
+    in_set = (round_no - 1) % SET_SIZE
+    return 6 + in_set // 2 + 3 * (set_of(round_no) - 1)
+
+
 def setpiece_for(round_no):
     """그 라운드의 특별 장면 이름 (없으면 None)"""
     in_set = (round_no - 1) % SET_SIZE
@@ -3454,7 +3464,7 @@ CONTRACTS = {  # 키: (이름, 한국어, 영어, 목표 수, 좀비 모드에�
     "boom": ("DEMOLITION", "폭발로 2명", "2 explosive kills", 2, True),
     "close": ("CLOSE QUARTERS", "4m 안에서 3명", "3 kills within 4m", 3, True),
     "long": ("LONG SHOT", "20m 넘게 떨어진 적 1명", "1 kill from 20m+", 1, False),
-    "fast": ("BLITZ", "60초 안에 클리어", "Clear within 60s", 1, False),
+    "fast": ("BLITZ", "90초 안에 클리어", "Clear within 90s", 1, False),
     "ghost": ("GHOST", "몰래 처치 2명", "2 takedowns", 2, False),
 }
 CONTRACT_XP = 300
@@ -4736,8 +4746,13 @@ class Game:
         self.arsenal = self.make_arsenal()
         far = [p for p in self.spawn_points if self.player.pos.distance_to(p) > SAFE_SPAWN]
         in_set = (self.round - 1) % SET_SIZE
-        count = min(len(far), 3 + in_set // 4 + set_no - 1)
+        total = campaign_enemy_total(self.round)
+        if self.challenge:
+            total = min(total, 3 + in_set // 4 + set_no - 1)    # 도전 모드는 예전 그대로 (기록 비교)
+        count = min(len(far), total, CAMPAIGN_ALIVE + set_no)
         self.enemies = [Enemy(*p, self.pick_enemy_kind(), self.skill) for p in self.fair_spawns(far, count)]
+        self.reinforce_left = total - count          # 나머지는 싸우는 동안 안 보이는 곳에서 증원
+        self.reinforce_timer = CAMPAIGN_REINFORCE
         self.face_the_fight()
         # 새로운 적이 처음 나오는 라운드에는 그 적이 꼭 한 명은 있게. 5라운드마다 보스
         news = {2: "SNIPER", 3: "HEAVY", 4: "BOMBER", 6: "SHIELD", 7: "FLANKER", 8: "MEDIC", 9: "GUNNER",
@@ -5166,6 +5181,28 @@ class Game:
         middle = sum((e.pos for e in self.enemies), pygame.Vector2()) / len(self.enemies) - self.player.pos
         if middle.length() > 0.5:
             self.player.angle = math.atan2(middle.y, middle.x)
+
+    def update_reinforcements(self, dt):
+        """캠페인: 적이 줄면 안 보이는 먼 곳에서 증원이 와요 (싸우는 중이면 내 쪽으로)"""
+        if self.reinforce_left <= 0 or self.game_over or self.round_clear_timer > 0 or self.banner_timer > 1.5:
+            return
+        cap = CAMPAIGN_ALIVE + set_of(self.round)
+        self.reinforce_timer -= dt
+        if self.reinforce_timer > 0 or len(self.enemies) >= cap:
+            return
+        self.reinforce_timer = CAMPAIGN_REINFORCE
+        p = self.player.pos
+        spots = [pt for pt in self.spawn_points if p.distance_to(pt) > SAFE_SPAWN
+                 and not can_see(p, pygame.Vector2(pt))
+                 and all(e.pos.distance_to(pt) > 1.0 for e in self.enemies)]
+        if not spots:
+            return
+        x, y = random.choice(spots)
+        enemy = Enemy(x, y, self.pick_enemy_kind(), self.skill)
+        if any(e.sees for e in self.enemies):             # 싸우는 중이면 소리 난 쪽(내 쪽)으로
+            enemy.search = pygame.Vector2(p)
+        self.enemies.append(enemy)
+        self.reinforce_left -= 1
 
     def place_devices(self, set_no, boss_round):
         """전투 시작: 벽 옆 빈 칸에 드럼통 몇 개, 가끔 적들 근처에 경보기"""
@@ -5711,7 +5748,7 @@ class Game:
         for c in getattr(self, "contracts", []):
             if c["done"] or c["failed"]:
                 continue
-            if c["key"] == "clean" or (c["key"] == "fast" and self.round_time <= 60):
+            if c["key"] == "clean" or (c["key"] == "fast" and self.round_time <= 90):
                 self.complete_contract(c)
             elif c["key"] in ("clean", "fast"):
                 c["failed"] = True
@@ -5733,7 +5770,7 @@ class Game:
             else:
                 state = f"{c['count']}/{goal}" if goal > 1 else ""
                 if c["key"] == "fast":
-                    state = f"{max(0, 60 - int(self.round_time))}s"
+                    state = f"{max(0, 90 - int(self.round_time))}s"
                 text, color = f"{name}  {state}  - {en}", WHITE
             screen.blit(tiny.render(fit_text(tiny, text, WIDTH * 0.24), True, color), (16, y))
 
@@ -6353,6 +6390,8 @@ class Game:
             self.update_boss_effects(dt)
         if self.devices:
             self.update_devices(dt)
+        if self.mode == "campaign" and getattr(self, "reinforce_left", 0):
+            self.update_reinforcements(dt)
         if getattr(self, "setpiece", None):
             self.update_setpiece(dt)
         if self.hitstop > 0:        # 쓰러뜨린 순간: 아주 잠깐 멈춤 (묵직한 손맛)
@@ -6677,7 +6716,8 @@ class Game:
             self.add_xp(XP["round"], f"CHALLENGE CLEAR  +{XP['round']}")
             self.count_round()
             self.finish_challenge()
-        elif self.mode == "campaign" and (self.objective["done"] if self.objective else not self.enemies):
+        elif self.mode == "campaign" and (self.objective["done"] if self.objective
+                                          else not self.enemies and not getattr(self, "reinforce_left", 0)):
             self.slowmo = 0.8                         # 마지막 한 명(또는 목표 완료): 슬로모션
             self.round_clear_timer = 4.0
             self.banner = "CAMPAIGN COMPLETE!" if self.round == CAMPAIGN_ROUNDS else "ROUND CLEAR"
@@ -7715,13 +7755,7 @@ class Game:
             self.draw_hud(screen)
         if self.boon_choice and not self.game_over:
             self.draw_boon_choice(screen)
-        if self.round_clear_timer <= 0 and not self.game_over and self.briefing is None:
-            self.capture_clip(screen, self.frame_dt)
-        elif self.round_clear_timer > 0:
-            if self.recording:                               # 마지막 처치로 끝났으면 찍던 장면을 그대로
-                self.highlight, self.recording = self.recording, None
-            if self.highlight:
-                self.draw_highlight(screen)
+        # (라운드가 끝나면 보여주던 하이라이트 다시보기는 껐어요: 바로 다음으로 넘어가요)
         if self.radio_msg and not self.game_over and not (self.wheel and self.wheel["open"]):
             self.draw_radio(screen)
         if self.briefing is not None:
@@ -8819,10 +8853,11 @@ class Game:
             info = (f"WAVE {self.round}   {self.theme['name']}   "
                     f"ZOMBIES {len(self.enemies) + self.zombies_left}   KILLS {self.kills}")
         elif self.deeprun:
-            info = f"DEEP RUN   DEPTH {self.depth}   {self.theme['name']}   ENEMIES {len(self.enemies)}   KILLS {self.kills}"
+            info = (f"DEEP RUN   DEPTH {self.depth}   {self.theme['name']}   "
+                    f"ENEMIES {len(self.enemies) + getattr(self, 'reinforce_left', 0)}   KILLS {self.kills}")
         else:
             info = (f"ROUND {self.round}/{CAMPAIGN_ROUNDS}   SET {set_of(self.round)}   {self.theme['name']}   "
-                    f"ENEMIES {len(self.enemies)}   KILLS {self.kills}")
+                    f"ENEMIES {len(self.enemies) + getattr(self, 'reinforce_left', 0)}   KILLS {self.kills}")
         screen.blit(font.render(info, True, WHITE), (16, 12))
         # 계급과 경험치 막대
         rank_label = self.small_font.render(f"RANK {self.rank}", True, WHITE)

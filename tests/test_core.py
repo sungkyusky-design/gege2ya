@@ -502,8 +502,7 @@ class GameTest(unittest.TestCase):
         game = shooter.Game(save, 1, deeprun=True)
         game.briefing = None
         self.assertEqual(game.banner, "DEPTH 1")
-        game.enemies = []
-        game.objective = None
+        game.enemies, game.objective, game.reinforce_left = [], None, 0
         game.update(1 / 60, Keys(), 0, 0, (False, False, False))         # 라운드 클리어 → 강화 고르기
         self.assertIsNotNone(game.boon_choice)
         self.assertEqual(len(game.boon_choice), 3)
@@ -669,7 +668,7 @@ class GameTest(unittest.TestCase):
         save = {}
         game = shooter.Game(save, shooter.CAMPAIGN_ROUNDS)
         game.briefing = None
-        game.enemies, game.objective = [], None
+        game.enemies, game.objective, game.reinforce_left = [], None, 0
         game.update(1 / 60, Keys(), 0, 0, (False, False, False))
         self.assertIsNotNone(game.ending)
         self.assertTrue(save["campaign_done"])
@@ -714,6 +713,21 @@ class GameTest(unittest.TestCase):
             self.assertEqual(browser.load_save()["xp"], 100)                # 백업에서 살려요
         finally:
             browser.SAVE_PATH = real
+
+    def test_campaign_reinforcements(self):
+        game = shooter.Game({}, 85)
+        game.briefing, game.banner_timer = None, 0
+        total = shooter.campaign_enemy_total(85)
+        self.assertEqual(len(game.enemies) + game.reinforce_left, total)
+        self.assertGreater(total, 15)
+        game.enemies = game.enemies[:2]                                   # 적이 줄면
+        before = game.reinforce_left
+        game.reinforce_timer = 0
+        game.update_reinforcements(0.1)
+        self.assertEqual(game.reinforce_left, before - 1)                 # 증원이 와요
+        game.enemies, game.objective = [], None
+        game.update(1 / 60, Keys(), 0, 0, (False, False, False))
+        self.assertEqual(game.round_clear_timer, 0)                       # 증원이 남아 있으면 아직 클리어 아님
 
     def test_set_of(self):
         self.assertEqual([shooter.set_of(r) for r in (1, 20, 21, 100, 150)], [1, 1, 2, 5, 5])
